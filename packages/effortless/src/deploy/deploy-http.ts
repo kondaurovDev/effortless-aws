@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { extractConfigs, type ExtractedFunction } from "../build/bundle.js";
+import { extractConfigs, type ExtractedFunction } from "../build/bundle";
 import {
   ensureProjectApi,
   addRouteToApi,
@@ -15,7 +15,7 @@ import {
   readSource,
   deployCoreLambda,
   ensureLayerAndExternal
-} from "./shared.js";
+} from "./shared";
 
 // ============ HTTP handler deployment ============
 

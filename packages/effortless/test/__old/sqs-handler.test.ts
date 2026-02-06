@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest"
 import { Effect, Layer, Match, pipe } from "effect";
 import * as S from "effect/Schema";
 
-import { createLambdaHandler } from "../../src/__handlers/sqs-handler.js";
-import { FailedBatchItem, PartialBatchResponse } from "../../src/__handlers/internal/types.js";
-import { ReceiptHandle } from "../../src/__handlers/internal/sqs-types.js";
+import { createLambdaHandler } from "../../src/__handlers/sqs-handler";
+import { FailedBatchItem, PartialBatchResponse } from "../../src/__handlers/internal/types";
+import { ReceiptHandle } from "../../src/__handlers/internal/sqs-types";
 
 process.env["LOG_LEVEL"] = "debug";
 

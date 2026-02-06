@@ -1,4 +1,4 @@
-import type { HttpHandler } from "../handlers/define-http.js";
+import type { HttpHandler } from "../handlers/define-http";
 
 const parseBody = (body: string | undefined, isBase64: boolean): unknown => {
   if (!body) return undefined;

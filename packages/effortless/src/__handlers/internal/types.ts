@@ -1,6 +1,6 @@
 import { Brand, Data, ParseResult } from "effect";
 
-import { ReceiptHandle, ValidQueueMessage } from "./sqs-types.js";
+import { ReceiptHandle, ValidQueueMessage } from "./sqs-types";
 
 export class InputBatchMessages<A, E>
   extends Data.Class<{

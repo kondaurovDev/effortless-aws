@@ -1,10 +1,10 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import * as S from "effect/Schema";
-import { LogLevelConfigFromEnv } from "./internal/log-level.js";
+import { LogLevelConfigFromEnv } from "./internal/log-level";
 
-import { DDbStreamRecord, DDbBatchStreamEvent } from "./models/dynamodb-stream.js";
-import { FailedBatchItem, PartialBatchResponse } from "./internal/types.js";
-import { ReceiptHandle } from "./internal/sqs-types.js";
+import { DDbStreamRecord, DDbBatchStreamEvent } from "./models/dynamodb-stream";
+import { FailedBatchItem, PartialBatchResponse } from "./internal/types";
+import { ReceiptHandle } from "./internal/sqs-types";
 
 type StreamHandlerProperties<R> = {
   live: Layer.Layer<R, unknown, never>

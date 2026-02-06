@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Layer } from "effect";
 
-import { createAuthorizerHandler } from "../../src/__handlers/authorizer-handler.js";
+import { createAuthorizerHandler } from "../../src/__handlers/authorizer-handler";
 
 describe("authorizer ", () => {
 

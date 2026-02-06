@@ -1,7 +1,7 @@
 import * as S from "effect/Schema";
 import { Effect, Layer, ManagedRuntime, pipe } from "effect";
 
-import { LogLevelConfigFromEnv } from "./internal/log-level.js";
+import { LogLevelConfigFromEnv } from "./internal/log-level";
 
 export type AuthorizerOutput =
   typeof AuthorizerOutputSchema.Type

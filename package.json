@@ -6,10 +6,14 @@
     "build:watch": "pnpm -r --parallel build:watch",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "clean": "pnpm -r exec rm -rf dist"
+    "clean": "pnpm -r exec rm -rf dist",
+    "pack": "pnpm build && rm -rf dist && mkdir -p dist && pnpm -r --filter '!demo' exec pnpm pack --pack-destination $PWD/dist"
   },
   "devDependencies": {
-    "typescript": "^5.9.3"
+    "@types/node": "^22.19.9",
+    "effect": "^3.19.16",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "dependencies": {
     "@effect-ak/aws-sdk": "file:/Users/alexanderkondaurov/Projects/aws-sdk/dist/effect-ak-aws-services-0.0.1.tgz"

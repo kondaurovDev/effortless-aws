@@ -6,7 +6,7 @@ import * as fsSync from "fs";
 import * as path from "path";
 import archiver from "archiver";
 import { nodeFileTrace } from "@vercel/nft";
-import * as lambda from "../clients/lambda.js";
+import * as lambda from "./clients/lambda";
 
 // Fixed date for deterministic zip (same content = same hash)
 const FIXED_DATE = new Date(0);

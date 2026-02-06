@@ -3,7 +3,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { pathToFileURL } from "url";
 import * as esbuild from "esbuild";
-import type { EffortlessConfig } from "../config.js";
+import type { EffortlessConfig } from "../config";
 
 export const loadConfig = async (): Promise<EffortlessConfig | null> => {
   const configPath = path.resolve(process.cwd(), "effortless.config.ts");

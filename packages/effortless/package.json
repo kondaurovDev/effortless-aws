@@ -51,7 +51,8 @@
     "effect": "^3.19.14",
     "tsup": "^8.5.1",
     "type-fest": "^4.22.1",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
   },
   "peerDependencies": {
     "effect": "^3.19.14"

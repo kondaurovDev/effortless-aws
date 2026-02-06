@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from "vitest"
 import { Effect, Layer, pipe } from "effect"
 import * as S from "effect/Schema"
 
-import { HttpRequest } from "../../src/__handlers/models/http-request.js";
-import { ApiGatewayProxyEventV2, createLambdaHandler } from "../../src/__handlers/http-handler.js";
+import { HttpRequest } from "../../src/__handlers/models/http-request";
+import { ApiGatewayProxyEventV2, createLambdaHandler } from "../../src/__handlers/http-handler";
 
 const handleFn = vi.fn<(_: HttpRequest) => Effect.Effect<unknown, unknown, never>>()
 

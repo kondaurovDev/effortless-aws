@@ -4,9 +4,9 @@ import * as fsSync from "fs";
 import * as path from "path";
 import archiver from "archiver";
 import { globSync } from "glob";
-import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry.js";
-import type { HttpConfig } from "../handlers/define-http.js";
-import type { TableConfig } from "../handlers/define-table.js";
+import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
+import type { HttpConfig } from "../handlers/define-http";
+import type { TableConfig } from "../handlers/define-table";
 
 export type BundleInput = {
   projectDir: string;

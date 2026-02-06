@@ -11,7 +11,7 @@ import {
   readProductionDependencies,
   collectLayerPackages
 } from "@effect-ak/effortless-aws";
-import { bundle, zip, type BundleInput } from "../build/bundle.js";
+import { bundle, zip, type BundleInput } from "../build/bundle";
 
 // ============ Common types ============
 

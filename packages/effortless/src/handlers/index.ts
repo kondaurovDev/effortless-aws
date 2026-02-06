@@ -1,5 +1,5 @@
 // HTTP handlers
-export { defineHttp } from "./define-http.js";
+export { defineHttp } from "./define-http";
 export type {
   HttpConfig,
   HttpRequest,
@@ -8,10 +8,10 @@ export type {
   HttpHandler,
   HttpHandlerFn,
   DefineHttpOptions
-} from "./define-http.js";
+} from "./define-http";
 
 // Table handlers
-export { defineTable } from "./define-table.js";
+export { defineTable } from "./define-table";
 export type {
   TableConfig,
   TableRecord,
@@ -23,7 +23,7 @@ export type {
   TableRecordFn,
   TableBatchCompleteFn,
   FailedRecord
-} from "./define-table.js";
+} from "./define-table";
 
 // Permissions
-export type { Permission } from "./permissions.js";
+export type { Permission } from "./permissions";

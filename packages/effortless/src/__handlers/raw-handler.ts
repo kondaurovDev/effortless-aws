@@ -1,5 +1,5 @@
 import { Effect, Layer, ManagedRuntime, pipe } from "effect";
-import { LogLevelConfigFromEnv } from "./internal/log-level.js";
+import { LogLevelConfigFromEnv } from "./internal/log-level";
 
 type RawHandlerResult<R = unknown> = {
   result?: R

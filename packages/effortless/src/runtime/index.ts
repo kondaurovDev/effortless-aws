@@ -1,2 +1,2 @@
-export { wrapHttp } from "./wrap-http.js";
-export { wrapTableStream } from "./wrap-table-stream.js";
+export { wrapHttp } from "./wrap-http";
+export { wrapTableStream } from "./wrap-table-stream";

@@ -1,4 +1,4 @@
-import { defineHttp } from "../../src/handlers/define-http.js";
+import { defineHttp } from "../../src/handlers/define-http";
 import { Effect, pipe } from "effect";
 import * as S from "effect/Schema";
 

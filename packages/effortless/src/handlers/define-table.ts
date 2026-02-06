@@ -1,4 +1,4 @@
-import type { Permission } from "./permissions.js";
+import type { Permission } from "./permissions";
 
 /** DynamoDB attribute types for keys */
 export type KeyType = "string" | "number" | "binary";

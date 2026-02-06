@@ -4,11 +4,11 @@ import { Command } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 
-import { deployCommand } from "./commands/deploy.js";
-import { buildCommand } from "./commands/build.js";
-import { statusCommand } from "./commands/status.js";
-import { cleanupCommand, cleanupRolesCommand } from "./commands/cleanup.js";
-import { layersCommand } from "./commands/layers.js";
+import { deployCommand } from "./commands/deploy";
+import { buildCommand } from "./commands/build";
+import { statusCommand } from "./commands/status";
+import { cleanupCommand, cleanupRolesCommand } from "./commands/cleanup";
+import { layersCommand } from "./commands/layers";
 
 const mainCommand = Command.make("eff").pipe(
   Command.withSubcommands([deployCommand, buildCommand, statusCommand, cleanupCommand, cleanupRolesCommand, layersCommand]),

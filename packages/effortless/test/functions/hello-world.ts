@@ -1,4 +1,4 @@
-import { defineHttp } from "../../src/handlers/define-http.js";
+import { defineHttp } from "../../src/handlers/define-http";
 
 export default defineHttp({
   name: "hello-world-test",

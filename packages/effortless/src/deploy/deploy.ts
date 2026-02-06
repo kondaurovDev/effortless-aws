@@ -11,7 +11,7 @@ import {
   readProductionDependencies,
   collectLayerPackages
 } from "@effect-ak/effortless-aws";
-import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "../build/bundle.js";
+import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "../build/bundle";
 
 // Re-export from shared
 export {
@@ -19,18 +19,18 @@ export {
   type DeployTableResult,
   type DeployAllResult,
   type DeployInput
-} from "./shared.js";
+} from "./shared";
 
 // Re-export from deploy-http
-export { deploy, deployAll } from "./deploy-http.js";
+export { deploy, deployAll } from "./deploy-http";
 
 // Re-export from deploy-table
-export { deployTable, deployAllTables } from "./deploy-table.js";
+export { deployTable, deployAllTables } from "./deploy-table";
 
 // Import for internal use
-import { type DeployInput, type DeployResult, type DeployTableResult } from "./shared.js";
-import { deployLambda } from "./deploy-http.js";
-import { deployTableFunction } from "./deploy-table.js";
+import { type DeployInput, type DeployResult, type DeployTableResult } from "./shared";
+import { deployLambda } from "./deploy-http";
+import { deployTableFunction } from "./deploy-table";
 
 // ============ Layer preparation ============
 

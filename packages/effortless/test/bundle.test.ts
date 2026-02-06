@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import * as path from "path"
 
 import { zip, extractTableConfigs } from "~/build/bundle"
-import { bundleCode } from "./helpers/bundle-code.js"
+import { bundleCode } from "./helpers/bundle-code"
 
 const projectDir = path.resolve(__dirname, "..")
 
@@ -11,7 +11,7 @@ describe("bundle", () => {
 
   it("should bundle defineHttp handler", async () => {
     const handlerCode = `
-      import { defineHttp } from "./src/handlers/define-http.js";
+      import { defineHttp } from "./src/handlers/define-http";
 
       export default defineHttp({
         name: "test-api",
@@ -53,7 +53,7 @@ describe("bundle", () => {
 
   it("should create valid zip archive", async () => {
     const handlerCode = `
-      import { defineHttp } from "./src/handlers/define-http.js";
+      import { defineHttp } from "./src/handlers/define-http";
 
       export default defineHttp({
         method: "GET",
@@ -146,7 +146,7 @@ describe("defineTable bundle", () => {
 
   it("should bundle defineTable handler with DynamoDB unmarshall", async () => {
     const handlerCode = `
-      import { defineTable } from "./src/handlers/define-table.js";
+      import { defineTable } from "./src/handlers/define-table";
 
       export default defineTable({
         name: "orders",
@@ -200,7 +200,7 @@ describe("context support", () => {
 
   it("should bundle defineHttp with context and lazy initialization", async () => {
     const handlerCode = `
-      import { defineHttp } from "./src/handlers/define-http.js";
+      import { defineHttp } from "./src/handlers/define-http";
 
       export default defineHttp({
         method: "GET",
@@ -239,7 +239,7 @@ describe("context support", () => {
 
   it("should bundle defineTable with context and lazy initialization", async () => {
     const handlerCode = `
-      import { defineTable } from "./src/handlers/define-table.js";
+      import { defineTable } from "./src/handlers/define-table";
 
       export default defineTable({
         name: "orders",
@@ -262,7 +262,7 @@ describe("context support", () => {
 
   it("should work without context provided", async () => {
     const handlerCode = `
-      import { defineHttp } from "./src/handlers/define-http.js";
+      import { defineHttp } from "./src/handlers/define-http";
 
       export default defineHttp({
         method: "GET",

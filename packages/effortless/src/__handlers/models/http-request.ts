@@ -1,7 +1,7 @@
 import * as S from "effect/Schema"
 import { Effect, Match, pipe } from "effect"
 
-import { HttpHandlerError } from "../internal/errors.js"
+import { HttpHandlerError } from "../internal/errors"
 
 export class HttpRequest
   extends S.Class<HttpRequest>("HttpRequest")({

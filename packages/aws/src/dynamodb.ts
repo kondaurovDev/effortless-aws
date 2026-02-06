@@ -1,8 +1,8 @@
 import { Effect } from "effect";
-import * as dynamodb from "../clients/dynamodb.js";
-import * as lambda from "../clients/lambda.js";
+import * as dynamodb from "./clients/dynamodb";
+import * as lambda from "./clients/lambda";
 
-import { toAwsTagList } from "./tags.js";
+import { toAwsTagList } from "./tags";
 
 // Types from define-table (duplicated to avoid circular dependency)
 export type KeyType = "string" | "number" | "binary";

@@ -7,7 +7,7 @@ import {
   makeClients,
   clients
 } from "@effect-ak/effortless-aws";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption } from "../config.js";
+import { loadConfig, projectOption, stageOption, regionOption, verboseOption } from "../config";
 
 const { lambda, apigatewayv2: apigateway } = clients;
 

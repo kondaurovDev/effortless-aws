@@ -1,4 +1,4 @@
-import type { Permission } from "./permissions.js";
+import type { Permission } from "./permissions";
 
 /** HTTP methods supported by API Gateway */
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";

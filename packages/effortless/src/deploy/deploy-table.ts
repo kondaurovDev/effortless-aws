@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { extractTableConfigs, type ExtractedTableFunction } from "../build/bundle.js";
+import { extractTableConfigs, type ExtractedTableFunction } from "../build/bundle";
 import {
   makeClients,
   ensureTable,
@@ -14,7 +14,7 @@ import {
   readSource,
   deployCoreLambda,
   ensureLayerAndExternal
-} from "./shared.js";
+} from "./shared";
 
 // ============ Table handler deployment ============
 

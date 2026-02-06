@@ -1,4 +1,4 @@
-import { defineTable } from "../../src/handlers/define-table.js";
+import { defineTable } from "../../src/handlers/define-table";
 
 type Order = {
   id: string;

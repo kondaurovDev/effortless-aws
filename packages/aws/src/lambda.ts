@@ -1,7 +1,7 @@
 import { Effect, Schedule } from "effect";
 import { Runtime } from "@aws-sdk/client-lambda";
 import * as crypto from "crypto";
-import * as lambda from "../clients/lambda.js";
+import * as lambda from "./clients/lambda";
 const computeCodeHash = (code: Uint8Array): string =>
   crypto.createHash("sha256").update(code).digest("base64");
 

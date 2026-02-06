@@ -2,10 +2,10 @@ import { Args, Command } from "@effect/cli";
 import { Effect, Console, Logger, LogLevel, Option } from "effect";
 import * as path from "path";
 
-import { deploy, deployAll, deployTable, deployAllTables, deployProject, type DeployTableResult } from "../../deploy/deploy.js";
-import { findHandlerFiles, discoverHandlers } from "../../build/bundle.js";
+import { deploy, deployAll, deployTable, deployAllTables, deployProject, type DeployTableResult } from "../../deploy/deploy";
+import { findHandlerFiles, discoverHandlers } from "../../build/bundle";
 import { makeClients } from "@effect-ak/effortless-aws";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "../config.js";
+import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "../config";
 
 const deployTargetArg = Args.text({ name: "target" }).pipe(
   Args.withDescription("Handler name or file path to deploy (optional - uses config patterns if not specified)"),

@@ -1,4 +1,4 @@
-import { ValidQueueMessage } from "../internal/sqs-types.js";
+import { ValidQueueMessage } from "../internal/sqs-types";
 import { Effect } from "effect";
 
 export const parseMessageJsonBody = (

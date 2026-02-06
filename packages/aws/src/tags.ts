@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import type { ResourceTagMapping } from "@aws-sdk/client-resource-groups-tagging-api";
-import * as tagging from "../clients/resource-groups-tagging-api.js";
+import * as tagging from "./clients/resource-groups-tagging-api";
 
 export type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway" | "lambda-layer";
 

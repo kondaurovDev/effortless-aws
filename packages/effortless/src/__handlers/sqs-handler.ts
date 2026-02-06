@@ -1,9 +1,9 @@
 import { Effect, Layer, ManagedRuntime, pipe, Match, Logger } from "effect";
 import * as S from "effect/Schema";
-import { LogLevelConfigFromEnv } from "./internal/log-level.js";
+import { LogLevelConfigFromEnv } from "./internal/log-level";
 
-import { PartialBatchResponse, FailedBatchItem, ValidMessage, InputBatchMessages, ResultOfProcessedBatch } from "./internal/types.js";
-import { SQSBatchEvent, ValidQueueMessage } from "./internal/sqs-types.js";
+import { PartialBatchResponse, FailedBatchItem, ValidMessage, InputBatchMessages, ResultOfProcessedBatch } from "./internal/types";
+import { SQSBatchEvent, ValidQueueMessage } from "./internal/sqs-types";
 
 export const createQueueBatchHandler = <M, E, R>(
   input: Pick<QueueBatchHandler<M, E, R>, "handle" | "live" | "parse">

@@ -3,8 +3,8 @@ import * as S from "effect/Schema";
 import type * as Lambda from "aws-lambda";
 import type { PartialDeep } from "type-fest"
 
-import { HttpRequest } from "./models/http-request.js";
-import { mapToHttpResponse } from "./internal/mappers.js";
+import { HttpRequest } from "./models/http-request";
+import { mapToHttpResponse } from "./internal/mappers";
 
 export type ApiGatewayProxyEventV2<AuthorizerContext = Record<string, unknown>> =
   PartialDeep<Lambda.APIGatewayProxyEventV2WithLambdaAuthorizer<AuthorizerContext>> & Brand.Brand<"ApiGatewayProxyEventV2">;

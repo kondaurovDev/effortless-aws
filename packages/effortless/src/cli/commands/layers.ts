@@ -11,7 +11,7 @@ import {
   computeLockfileHash,
   makeClients
 } from "@effect-ak/effortless-aws";
-import { loadConfig, projectOption, regionOption, verboseOption, outputOption, dryRunOption } from "../config.js";
+import { loadConfig, projectOption, regionOption, verboseOption, outputOption, dryRunOption } from "../config";
 
 const layersCleanupAllOption = Options.boolean("all").pipe(
   Options.withDescription("Delete all layer versions")
