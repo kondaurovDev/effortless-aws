@@ -22,8 +22,8 @@
   },
   "scripts": {
     "gen": "gen-aws-sdk",
+    "prebuild": "pnpm run gen",
     "build": "tsup",
-    "build:watch": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "clean": "rm -rf dist",
