@@ -1,0 +1,4 @@
+{
+  "$schema": "./node_modules/@effect-ak/aws-sdk/schema.json",
+  "generate_to": "./src/aws/clients"
+}

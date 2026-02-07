@@ -11,6 +11,12 @@
     "declarationMap": true,
     "sourceMap": true,
     "noUncheckedIndexedAccess": true,
-    "noEmit": true
-  }
+    "noEmit": true,
+    "baseUrl": ".",
+    "types": ["vitest/globals", "node"],
+    "paths": {
+      "~/*": ["./src/*"]
+    }
+  },
+  "include": ["src", "test"]
 }
