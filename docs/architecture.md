@@ -197,6 +197,7 @@ destroy:
 ## Prior Art
 
 - [Firebase Functions](https://firebase.google.com/docs/functions) - inspiration for DX
+- [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) - inspiration for runtime best practices (batch processing, idempotency, structured logging, metrics, tracing)
 - [SST](https://sst.dev/) - infrastructure from code for AWS
 - [Nitric](https://nitric.io/) - cloud-agnostic declarative framework
 - [Pulumi](https://www.pulumi.com/) - infrastructure as code

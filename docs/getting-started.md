@@ -24,6 +24,25 @@ Inspired by Firebase Functions where you export handlers and infrastructure is d
 4. **Effect inside** - use Effect internally for reliability, but don't require it from users
 5. **AWS SDK direct** - no CDK/CloudFormation abstraction layers
 
+## Built-in Best Practices
+
+Effortless is not just a deployment tool — it bakes serverless best practices directly into the framework so you don't have to think about them.
+
+Inspired by [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/), effortless takes the patterns that every production Lambda needs and makes them automatic or trivially easy to add.
+
+### What's already built in
+
+- **Partial batch failures** — when processing SQS messages or DynamoDB streams, failed records are reported individually. The batch doesn't fail entirely because of one bad record. No code needed — it just works.
+- **Typed event parsing** — request bodies, stream records, and queue messages are parsed and validated via Effect Schema before your handler sees them. No manual `JSON.parse` + type casting.
+- **Cold start optimization** — the `context` factory runs once on cold start and is cached across invocations. Put your DB connections, SDK clients, and config loading there.
+- **Infrastructure as code, not config** — permissions, triggers, and resources are derived from your handler definition. Add `onRecord` to a table — effortless creates the stream, Lambda, and event source mapping automatically.
+
+### What's on the roadmap
+
+Some of these ideas are inspired by [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) — a great runtime toolkit for Lambda. Effortless takes a different angle: since it controls both the runtime and the infrastructure, it can wire things end-to-end (e.g. auto-create a DynamoDB table for idempotency, or auto-add IAM permissions when you reference an SSM parameter).
+
+See [Roadmap](./roadmap.md) for the full list of planned features.
+
 ## Installation
 
 ```bash
@@ -112,3 +131,4 @@ npx eff deploy
 - [CLI](./cli.md) - Available CLI commands
 - [Architecture](./architecture.md) - How it works under the hood
 - [FAQ](./faq.md) - Why AWS, why not CloudFormation, etc.
+- [Roadmap](./roadmap.md) - Planned features (idempotency, parameters, logger, metrics, tracing, middleware)
