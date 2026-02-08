@@ -56,16 +56,19 @@ export type HttpConfig = {
 /**
  * Handler function type for HTTP endpoints
  *
+ * @typeParam T - Type of the validated request body (from schema function)
  * @typeParam C - Type of the context/dependencies (from context function)
  */
-export type HttpHandlerFn<C = undefined> =
-  C extends undefined
-    ? (args: { req: HttpRequest }) => Promise<HttpResponse>
-    : (args: { req: HttpRequest; ctx: C }) => Promise<HttpResponse>;
+export type HttpHandlerFn<T = undefined, C = undefined> =
+  (args: { req: HttpRequest }
+    & ([T] extends [undefined] ? {} : { data: T })
+    & ([C] extends [undefined] ? {} : { ctx: C })
+  ) => Promise<HttpResponse>;
 
 /**
  * Options for defining an HTTP endpoint
  *
+ * @typeParam T - Type of the validated request body (inferred from schema function)
  * @typeParam C - Type of the context/dependencies returned by context function
  *
  * @example Without context
@@ -77,6 +80,21 @@ export type HttpHandlerFn<C = undefined> =
  *     status: 200,
  *     body: { users: [] }
  *   })
+ * });
+ * ```
+ *
+ * @example With schema validation (Effect/Schema)
+ * ```typescript
+ * import { Schema as S } from "effect"
+ *
+ * export const createUser = defineHttp({
+ *   method: "POST",
+ *   path: "/api/users",
+ *   schema: S.decodeUnknownSync(S.Struct({ name: S.String, email: S.String })),
+ *   onRequest: async ({ req, data }) => {
+ *     // data is typed as { readonly name: string; readonly email: string }
+ *     return { status: 201, body: data };
+ *   }
  * });
  * ```
  *
@@ -95,32 +113,44 @@ export type HttpHandlerFn<C = undefined> =
  * });
  * ```
  */
-export type DefineHttpOptions<C = undefined> = HttpConfig & {
+export type DefineHttpOptions<T = undefined, C = undefined> = HttpConfig & {
+  /**
+   * Decode/validate function for the request body.
+   * Called with the parsed body; should return typed data or throw on validation failure.
+   * When provided, the handler receives validated `data` and invalid requests get a 400 response.
+   *
+   * Works with any validation library:
+   * - Effect: `S.decodeUnknownSync(MySchema)`
+   * - Zod: `(body) => myZodSchema.parse(body)`
+   */
+  schema?: (input: unknown) => T;
   /**
    * Factory function to create context/dependencies for the request handler.
    * Called once on cold start, result is cached and reused across invocations.
    */
   context?: () => C;
   /** HTTP request handler function */
-  onRequest: HttpHandlerFn<C>;
+  onRequest: HttpHandlerFn<T, C>;
 };
 
 /**
  * Internal handler object created by defineHttp
  * @internal
  */
-export type HttpHandler<C = undefined> = {
+export type HttpHandler<T = undefined, C = undefined> = {
   readonly __brand: "effortless-http";
   readonly config: HttpConfig;
+  readonly schema?: (input: unknown) => T;
   readonly context?: () => C;
-  readonly onRequest: HttpHandlerFn<C>;
+  readonly onRequest: HttpHandlerFn<T, C>;
 };
 
 /**
  * Define an HTTP endpoint that creates an API Gateway route + Lambda function
  *
+ * @typeParam T - Type of the validated request body (inferred from schema function)
  * @typeParam C - Type of the context/dependencies (inferred from context function)
- * @param options - Configuration, optional context factory, and request handler
+ * @param options - Configuration, optional schema, optional context factory, and request handler
  * @returns Handler object used by the deployment system
  *
  * @example Basic GET endpoint
@@ -135,17 +165,17 @@ export type HttpHandler<C = undefined> = {
  * });
  * ```
  *
- * @example POST endpoint with body parsing
+ * @example POST endpoint with schema validation
  * ```typescript
+ * import { Schema as S } from "effect"
+ *
  * export const createUser = defineHttp({
  *   method: "POST",
  *   path: "/users",
- *   memory: 512,
- *   timeout: 30,
- *   onRequest: async ({ req }) => {
- *     const { name, email } = req.body as { name: string; email: string };
- *     // ... create user
- *     return { status: 201, body: { id: "123", name, email } };
+ *   schema: S.decodeUnknownSync(S.Struct({ name: S.String, email: S.String })),
+ *   onRequest: async ({ data }) => {
+ *     // data is typed as { readonly name: string; readonly email: string }
+ *     return { status: 201, body: { id: "123", ...data } };
  *   }
  * });
  * ```
@@ -167,14 +197,15 @@ export type HttpHandler<C = undefined> = {
  * });
  * ```
  */
-export const defineHttp = <C = undefined>(
-  options: DefineHttpOptions<C>
-): HttpHandler<C> => {
-  const { onRequest, context, ...config } = options;
+export const defineHttp = <T = undefined, C = undefined>(
+  options: DefineHttpOptions<T, C>
+): HttpHandler<T, C> => {
+  const { onRequest, context, schema, ...config } = options;
   return {
     __brand: "effortless-http",
     config,
+    ...(schema ? { schema } : {}),
     ...(context ? { context } : {}),
     onRequest
-  } as HttpHandler<C>;
+  } as HttpHandler<T, C>;
 };

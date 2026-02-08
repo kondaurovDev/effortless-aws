@@ -21,7 +21,7 @@ type LambdaEvent = {
   isBase64Encoded?: boolean;
 };
 
-export const wrapHttp = <C>(handler: HttpHandler<C>) => {
+export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
   let deps: C | null = null;
   const getDeps = () => (deps ??= handler.context?.() as C);
 
@@ -37,9 +37,28 @@ export const wrapHttp = <C>(handler: HttpHandler<C>) => {
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = handler.context
-      ? await (handler.onRequest as any)({ req, ctx: getDeps() })
-      : await (handler.onRequest as any)({ req });
+    const args: Record<string, unknown> = { req };
+
+    if (handler.schema) {
+      try {
+        args.data = handler.schema(req.body);
+      } catch (error) {
+        return {
+          statusCode: 400,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            error: "Validation failed",
+            details: error instanceof Error ? error.message : String(error),
+          }),
+        };
+      }
+    }
+
+    if (handler.context) {
+      args.ctx = getDeps();
+    }
+
+    const response = await (handler.onRequest as any)(args);
 
     return {
       statusCode: response.status,
