@@ -4,6 +4,20 @@ Planned features for effortless. Some ideas are inspired by serverless community
 
 Since effortless controls both the runtime and the deployment, these features can be integrated deeper than in a standalone library — auto-creating infrastructure, wiring IAM permissions, and reducing boilerplate.
 
+See also: [CLI Roadmap](./roadmap-cli.md)
+
+## Features
+
+- [Idempotency](#idempotency)
+- [Parameters & Secrets](#parameters--secrets)
+- [Structured Logger](#structured-logger)
+- [Metrics (CloudWatch EMF)](#metrics-cloudwatch-emf)
+- [Tracer (X-Ray)](#tracer-x-ray)
+- [Middleware Pipeline](#middleware-pipeline)
+- [Typed Inter-Handler Communication](#typed-inter-handler-communication)
+- [DLQ & Failure Handling](#dlq--failure-handling)
+- [defineFunction & Durable Mode](#definefunction--durable-mode)
+
 ---
 
 ## Idempotency
@@ -209,16 +223,164 @@ export const api = defineHttp({
 
 ---
 
+## Typed Inter-Handler Communication
+
+**Problem**: Handlers need to interact with resources defined by other handlers — send to a queue, read from a table, put to a bucket. This requires manual AWS SDK calls, hardcoded resource URLs/ARNs, and separately configured IAM permissions.
+
+**Approach**: `define*` returns an object that serves as both a deployment descriptor and a typed runtime client. Use it directly — effortless detects the dependency at build time and wires everything.
+
+```typescript
+export const processOrder = defineQueue({
+  messageSchema: Schema.Struct({
+    orderId: Schema.String,
+    amount: Schema.Number,
+  }),
+  handler: async (messages) => {
+    for (const msg of messages) {
+      await fulfillOrder(msg.orderId, msg.amount);
+    }
+  },
+});
+
+export const createOrder = defineHttp({
+  method: "POST",
+  path: "/orders",
+  onRequest: async ({ req }) => {
+    // type-safe — payload shape inferred from processOrder's messageSchema
+    await processOrder.send({ orderId: "abc-123", amount: 99 });
+    return { status: 202, body: { queued: true } };
+  },
+});
+```
+
+The same pattern applies to all resource types:
+- `queue.send(payload)` — SQS
+- `table.put(item)`, `table.get(key)` — DynamoDB
+- `topic.publish(payload)` — SNS
+- `bucket.put(key, data)`, `bucket.getSignedUrl(key)` — S3
+
+**What effortless auto-wires on deploy**:
+- IAM permissions (e.g. `sqs:SendMessage` from `createOrder` to `processOrder` queue)
+- Resource URLs/ARNs injected via environment variables
+
+**Status**: Planned
+
+---
+
+## DLQ & Failure Handling
+
+**Problem**: When queue messages fail processing, they either retry infinitely or disappear. Setting up a Dead Letter Queue manually requires creating a second SQS queue, configuring redrive policy, and wiring a separate Lambda to process failures.
+
+**Approach**: `defineQueue` supports batch processing (like DynamoDB streams) and declarative DLQ configuration. Use `onMessage` for per-message processing or `onBatch` for the entire batch — they are mutually exclusive.
+
+Per-message processing:
+
+```typescript
+export const processOrder = defineQueue({
+  messageSchema: OrderSchema,
+  batchSize: 10,
+  batchWindow: "30 seconds",
+  dlq: { maxRetries: 3 },
+  onMessage: async ({ message }) => {
+    await fulfillOrder(message);
+  },
+  onFailed: async ({ failures }) => {
+    await alertOpsTeam(failures);
+  },
+});
+```
+
+Batch processing:
+
+```typescript
+export const importProducts = defineQueue({
+  messageSchema: ProductSchema,
+  batchSize: 100,
+  batchWindow: "60 seconds",
+  dlq: { maxRetries: 3 },
+  onBatch: async ({ messages }) => {
+    await db.bulkInsert(messages);
+  },
+});
+```
+
+**What effortless auto-creates on deploy**:
+- SQS DLQ `{project}-{stage}-{handler}-dlq`
+- Redrive policy on the main queue (`maxReceiveCount` from `maxRetries`)
+- Event source mapping with `batchSize` and `MaximumBatchingWindowInSeconds`
+- Lambda + event source mapping for `onFailed` (if provided)
+- IAM permissions for all of the above
+
+**Status**: Planned
+
+---
+
+## defineFunction & Durable Mode
+
+**Problem**: Not every Lambda needs a trigger. Background jobs, workflows, and shared logic need to be callable from other handlers. Complex multi-step workflows need checkpoint/replay to avoid repeated side effects on failure.
+
+**Approach**: `defineFunction` is a Lambda without a trigger — other handlers call it via inter-handler communication (`.invoke()` / `.start()`). The `durable` option accepts a function that derives the execution name from input, enabling [AWS Durable Functions](https://aws.amazon.com/blogs/compute/introducing-durable-functions-for-aws-lambda/) with `step()` checkpoints and `wait()` for external signals.
+
+```typescript
+export const processOrder = defineFunction({
+  timeout: "7 days",
+  durable: (input) => `order-${input.orderId}`,
+  onInvoke: async ({ input, step, wait }) => {
+    const order = await step("validate", () => validateOrder(input.orderId));
+    const payment = await step("charge", () => chargeCustomer(order));
+
+    const approval = await wait.callback("warehouse-approval", {
+      timeout: "24 hours",
+    });
+
+    if (!approval.approved) {
+      await step("refund", () => refundPayment(payment.id));
+      return { status: "cancelled" };
+    }
+
+    await step("ship", () => shipOrder(order.id));
+    return { status: "completed" };
+  },
+});
+
+export const createOrder = defineHttp({
+  method: "POST",
+  path: "/orders",
+  onRequest: async ({ req }) => {
+    const execId = await processOrder.start({ orderId: req.body.id });
+    return { status: 202, body: { executionId: execId } };
+  },
+});
+```
+
+Two invocation modes:
+- `fn.invoke(payload)` — synchronous, waits for result
+- `fn.start(payload)` — asynchronous, returns `executionId`
+
+**Idempotency**: The `durable` function derives execution name from input — calling with the same name returns the existing result, no DynamoDB table needed. Two levels don't mix: DynamoDB for regular handlers, execution name for durable.
+
+**What effortless auto-configures on deploy**:
+- Lambda with `DurableConfig` enabled (when `durable` is set)
+- `ExecutionTimeout` from config
+- IAM permissions for durable execution APIs and cross-handler invocation
+
+**Status**: Planned
+
+---
+
 ## Priority & Implementation Order
 
 | # | Feature | Complexity | Value | Effortless advantage |
 |---|---------|-----------|-------|---------------------|
-| 1 | **Idempotency** | Medium | Very high | Auto-creates DynamoDB table + IAM on deploy |
-| 2 | **Parameters & Secrets** | Low | High | Auto-adds IAM permissions on deploy |
-| 3 | **Structured Logger** | Low | High | Extends existing Effect Logger with Lambda context |
-| 4 | **Metrics (EMF)** | Low | Medium | Auto-flush, zero API calls |
-| 5 | **Tracer (X-Ray)** | Medium | Medium | Auto-enables tracing config on deploy |
-| 6 | **Middleware** | High | Medium | Infrastructure-aware middleware (auth, rate limit) |
+| 1 | **Inter-Handler Communication** | High | Very high | Type-safe clients, auto IAM, no hardcoded URLs |
+| 2 | **DLQ & Failure Handling** | Medium | Very high | Auto-creates DLQ + redrive policy + failure handler |
+| 3 | **defineFunction & Durable** | High | Very high | Triggerless Lambda + checkpoint/replay workflows |
+| 4 | **Idempotency** | Medium | Very high | Auto-creates DynamoDB table + IAM on deploy |
+| 5 | **Parameters & Secrets** | Low | High | Auto-adds IAM permissions on deploy |
+| 6 | **Structured Logger** | Low | High | Extends existing Effect Logger with Lambda context |
+| 7 | **Metrics (EMF)** | Low | Medium | Auto-flush, zero API calls |
+| 8 | **Tracer (X-Ray)** | Medium | Medium | Auto-enables tracing config on deploy |
+| 9 | **Middleware** | High | Medium | Infrastructure-aware middleware (auth, rate limit) |
 
 ---
 
