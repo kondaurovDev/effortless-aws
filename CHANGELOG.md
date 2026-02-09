@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.1.1
+
+### Patch Changes
+
+- [`3ae9dbf`](https://github.com/kondaurovDev/effortless-aws/commit/3ae9dbfb44cdd2efeb3d08f57f5316df03e84e9f) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Improve Lambda layer reliability: add warnings instead of silent failures, add completeness verification that auto-adds missing transitive deps, remove @vercel/nft dependency in favor of deterministic package.json-based collection
+
 ## 0.1.0
 
 ### Minor Changes
