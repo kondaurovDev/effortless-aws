@@ -253,9 +253,14 @@ describe("defineTable", () => {
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";
 
+        globalThis.__test_onBatchError = [];
+
         export default defineTable({
           name: "events",
           pk: { name: "id", type: "string" },
+          onError: (error) => {
+            globalThis.__test_onBatchError.push(error.message);
+          },
           onBatch: async ({ records }) => {
             throw new Error("batch failed");
           }
@@ -289,6 +294,7 @@ describe("defineTable", () => {
         { itemIdentifier: "100" },
         { itemIdentifier: "200" },
       ]);
+      expect((globalThis as any).__test_onBatchError).toEqual(["batch failed"]);
     });
 
   });

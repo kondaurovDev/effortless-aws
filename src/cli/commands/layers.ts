@@ -146,37 +146,6 @@ const layersCleanupCommand = Command.make(
     })
 ).pipe(Command.withDescription("Delete layer versions"));
 
-const findPackagePathForCopy = (projectDir: string, pkgName: string): string | null => {
-  const rootPath = path.join(projectDir, "node_modules", pkgName);
-  if (fs.existsSync(rootPath)) {
-    try {
-      return fs.realpathSync(rootPath);
-    } catch {
-      // ignore
-    }
-  }
-
-  const pnpmDir = path.join(projectDir, "node_modules", ".pnpm");
-  if (!fs.existsSync(pnpmDir)) return null;
-
-  const pnpmPkgName = pkgName.replace("/", "+");
-  try {
-    const entries = fs.readdirSync(pnpmDir);
-    for (const entry of entries) {
-      if (entry.startsWith(pnpmPkgName + "@")) {
-        const pkgPath = path.join(pnpmDir, entry, "node_modules", pkgName);
-        if (fs.existsSync(pkgPath)) {
-          return fs.realpathSync(pkgPath);
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  return null;
-};
-
 const layersBuildCommand = Command.make(
   "build",
   { output: outputOption, verbose: verboseOption },
@@ -215,7 +184,7 @@ const layersBuildCommand = Command.make(
 
       yield* Console.log(`\nLockfile hash: ${hash}`);
 
-      const { packages: allPackages, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps));
+      const { packages: allPackages, resolvedPaths, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps));
 
       if (layerWarnings.length > 0) {
         yield* Console.log(`\nWarnings (${layerWarnings.length}):`);
@@ -238,7 +207,7 @@ const layersBuildCommand = Command.make(
       let skipped = 0;
 
       for (const pkgName of allPackages) {
-        const srcPath = findPackagePathForCopy(projectDir, pkgName);
+        const srcPath = resolvedPaths.get(pkgName) ?? null;
         if (!srcPath) {
           skipped++;
           if (verbose) {

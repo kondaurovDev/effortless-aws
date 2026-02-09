@@ -1,5 +1,6 @@
 import type { HttpHandler } from "~/handlers/define-http";
-import { buildDeps, buildParams } from "./handler-utils";
+import { createHandlerRuntime } from "./handler-utils";
+import { truncateForStorage } from "./platform-types";
 
 const parseBody = (body: string | undefined, isBase64: boolean): unknown => {
   if (!body) return undefined;
@@ -23,32 +24,29 @@ type LambdaEvent = {
 };
 
 export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
-  let ctx: C | null = null;
-  let resolvedDeps: Record<string, unknown> | undefined;
-  let resolvedParams: Record<string, unknown> | undefined | null = null;
+  const rt = createHandlerRuntime(handler, "http");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const getDeps = () => (resolvedDeps ??= buildDeps((handler as any).deps));
+  const toResult = (r: { status: number; body?: unknown; headers?: Record<string, string> }) => ({
+    statusCode: r.status,
+    headers: { "Content-Type": "application/json", ...r.headers },
+    body: JSON.stringify(r.body),
+  });
 
-  const getParams = async () => {
-    if (resolvedParams !== null) return resolvedParams;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolvedParams = await buildParams((handler as any).params);
-    return resolvedParams;
-  };
-
-  const getCtx = async () => {
-    if (ctx !== null) return ctx;
-    if (handler.context) {
-      const params = await getParams();
-      ctx = params
-        ? await handler.context({ params })
-        : await handler.context();
-    }
-    return ctx;
+  const defaultError = (error: unknown, status: number) => {
+    console.error(`[effortless:${rt.handlerName}]`, error);
+    return {
+      statusCode: status,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        error: status === 400 ? "Validation failed" : "Internal server error",
+        details: error instanceof Error ? error.message : String(error),
+      }),
+    };
   };
 
   return async (event: LambdaEvent) => {
+    const startTime = Date.now();
+
     const req = {
       method: event.requestContext?.http?.method ?? event.httpMethod ?? "GET",
       path: event.requestContext?.http?.path ?? event.path ?? "/",
@@ -59,52 +57,31 @@ export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
       rawBody: event.body,
     };
 
-    const toResult = (r: { status: number; body?: unknown; headers?: Record<string, string> }) => ({
-      statusCode: r.status,
-      headers: { "Content-Type": "application/json", ...r.headers },
-      body: JSON.stringify(r.body),
-    });
+    const input = truncateForStorage({ method: req.method, path: req.path, query: req.query, body: req.body });
 
-    const defaultError = (error: unknown, status: number) => ({
-      statusCode: status,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        error: status === 400 ? "Validation failed" : "Internal server error",
-        details: error instanceof Error ? error.message : String(error),
-      }),
-    });
-
+    // Schema validation
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const args: Record<string, unknown> = { req };
-
     if (handler.schema) {
       try {
         args.data = handler.schema(req.body);
       } catch (error) {
+        rt.logError(startTime, input, error);
         return handler.onError
           ? toResult(handler.onError(error, req))
           : defaultError(error, 400);
       }
     }
 
-    if (handler.context) {
-      args.ctx = await getCtx();
-    }
-
-    const deps = getDeps();
-    if (deps) {
-      args.deps = deps;
-    }
-
-    const params = await getParams();
-    if (params) {
-      args.params = params;
-    }
+    // Resolve shared args
+    Object.assign(args, await rt.commonArgs());
 
     try {
       const response = await (handler.onRequest as any)(args);
+      rt.logExecution(startTime, input, response.body);
       return toResult(response);
     } catch (error) {
+      rt.logError(startTime, input, error);
       return handler.onError
         ? toResult(handler.onError(error, req))
         : defaultError(error, 500);

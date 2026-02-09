@@ -246,5 +246,202 @@ describe("layer", () => {
 
       expect(entries.length).toBe(0);
     });
+
+    it("should include packages via resolvedPaths even when not in root node_modules", async () => {
+      // Create a package in a non-standard location (simulating pnpm nested structure)
+      const nestedDir = path.join(tempDir, ".nested-pkg");
+      await fs.mkdir(nestedDir, { recursive: true });
+      await fs.writeFile(
+        path.join(nestedDir, "package.json"),
+        JSON.stringify({ name: "pkg-hidden", version: "1.0.0" })
+      );
+      await fs.writeFile(
+        path.join(nestedDir, "index.js"),
+        'module.exports = "hidden";'
+      );
+
+      // Without resolvedPaths, this package would be skipped
+      const resultWithout = await Effect.runPromise(
+        createLayerZip(tempDir, ["pkg-hidden"])
+      );
+      expect(resultWithout.skippedPackages).toContain("pkg-hidden");
+      expect(resultWithout.includedPackages).not.toContain("pkg-hidden");
+
+      // With resolvedPaths, it should be included
+      const resolvedPaths = new Map([["pkg-hidden", nestedDir]]);
+      const resultWith = await Effect.runPromise(
+        createLayerZip(tempDir, ["pkg-hidden"], resolvedPaths)
+      );
+      expect(resultWith.includedPackages).toContain("pkg-hidden");
+      expect(resultWith.skippedPackages).not.toContain("pkg-hidden");
+
+      const zip = new AdmZip(resultWith.buffer);
+      const entries = zip.getEntries().map((e: AdmZip.IZipEntry) => e.entryName);
+      expect(entries).toContain("nodejs/node_modules/pkg-hidden/package.json");
+      expect(entries).toContain("nodejs/node_modules/pkg-hidden/index.js");
+
+      await fs.rm(nestedDir, { recursive: true });
+    });
+  });
+
+  describe("collectLayerPackages", () => {
+    it("should return resolvedPaths for all collected packages", () => {
+      const result = collectLayerPackages(tempDir, ["pkg-a", "pkg-b"]);
+
+      // All packages should have resolved paths
+      for (const pkg of result.packages) {
+        expect(result.resolvedPaths.has(pkg)).toBe(true);
+        const resolvedPath = result.resolvedPaths.get(pkg)!;
+        expect(path.isAbsolute(resolvedPath)).toBe(true);
+      }
+
+      // Transitive dep pkg-c should also have a resolved path
+      expect(result.packages).toContain("pkg-c");
+      expect(result.resolvedPaths.has("pkg-c")).toBe(true);
+    });
+
+    it("should resolve pnpm nested deps via parent's node_modules", async () => {
+      // Simulate pnpm structure: pkg-parent depends on pkg-child,
+      // pkg-child is only accessible via pkg-parent's sibling node_modules
+      const pnpmDir = path.join(tempDir, "node_modules", ".pnpm");
+      const parentStore = path.join(pnpmDir, "pkg-parent@1.0.0", "node_modules");
+
+      await fs.mkdir(path.join(parentStore, "pkg-parent"), { recursive: true });
+      await fs.writeFile(
+        path.join(parentStore, "pkg-parent", "package.json"),
+        JSON.stringify({
+          name: "pkg-parent",
+          version: "1.0.0",
+          dependencies: { "pkg-child": "1.0.0" }
+        })
+      );
+      await fs.writeFile(
+        path.join(parentStore, "pkg-parent", "index.js"),
+        'module.exports = require("pkg-child");'
+      );
+
+      // pkg-child lives as a sibling in the pnpm store (only accessible via parent's node_modules)
+      await fs.mkdir(path.join(parentStore, "pkg-child"), { recursive: true });
+      await fs.writeFile(
+        path.join(parentStore, "pkg-child", "package.json"),
+        JSON.stringify({ name: "pkg-child", version: "1.0.0" })
+      );
+      await fs.writeFile(
+        path.join(parentStore, "pkg-child", "index.js"),
+        'module.exports = "child";'
+      );
+
+      // Create symlink at root level (like pnpm does)
+      const rootSymlink = path.join(tempDir, "node_modules", "pkg-parent");
+      await fs.symlink(path.join(parentStore, "pkg-parent"), rootSymlink);
+
+      const result = collectLayerPackages(tempDir, ["pkg-parent"]);
+
+      // Both should be discovered with resolved paths
+      expect(result.packages).toContain("pkg-parent");
+      expect(result.packages).toContain("pkg-child");
+      expect(result.resolvedPaths.has("pkg-parent")).toBe(true);
+      expect(result.resolvedPaths.has("pkg-child")).toBe(true);
+
+      // The ZIP should include both packages
+      const zipResult = await Effect.runPromise(
+        createLayerZip(tempDir, result.packages, result.resolvedPaths)
+      );
+      expect(zipResult.includedPackages).toContain("pkg-parent");
+      expect(zipResult.includedPackages).toContain("pkg-child");
+      expect(zipResult.skippedPackages).not.toContain("pkg-child");
+
+      const zip = new AdmZip(zipResult.buffer);
+      const entries = zip.getEntries().map((e: AdmZip.IZipEntry) => e.entryName);
+      expect(entries).toContain("nodejs/node_modules/pkg-child/package.json");
+
+      // Cleanup
+      await fs.rm(rootSymlink);
+      await fs.rm(pnpmDir, { recursive: true });
+    });
+
+    it("should collect deps from multiple package versions in Phase 2", async () => {
+      // Simulate: pkg-multi v3 at root (no deps), pkg-multi v2 in pnpm store (depends on pkg-v2-dep)
+      const nodeModules = path.join(tempDir, "node_modules");
+      const pnpmDir = path.join(nodeModules, ".pnpm");
+
+      // pkg-multi v3 at root — no dependencies
+      await fs.mkdir(path.join(nodeModules, "pkg-multi"), { recursive: true });
+      await fs.writeFile(
+        path.join(nodeModules, "pkg-multi", "package.json"),
+        JSON.stringify({ name: "pkg-multi", version: "3.0.0" })
+      );
+      await fs.writeFile(
+        path.join(nodeModules, "pkg-multi", "index.js"),
+        'module.exports = "v3";'
+      );
+
+      // pkg-multi v2 in pnpm store — depends on pkg-v2-dep
+      const v2Store = path.join(pnpmDir, "pkg-multi@2.0.0", "node_modules");
+      await fs.mkdir(path.join(v2Store, "pkg-multi"), { recursive: true });
+      await fs.writeFile(
+        path.join(v2Store, "pkg-multi", "package.json"),
+        JSON.stringify({
+          name: "pkg-multi",
+          version: "2.0.0",
+          dependencies: { "pkg-v2-dep": "1.0.0" }
+        })
+      );
+
+      // pkg-v2-dep in pnpm store (sibling of v2's pkg-multi)
+      await fs.mkdir(path.join(v2Store, "pkg-v2-dep"), { recursive: true });
+      await fs.writeFile(
+        path.join(v2Store, "pkg-v2-dep", "package.json"),
+        JSON.stringify({ name: "pkg-v2-dep", version: "1.0.0" })
+      );
+      await fs.writeFile(
+        path.join(v2Store, "pkg-v2-dep", "index.js"),
+        'module.exports = "v2-dep";'
+      );
+
+      // pkg-consumer depends on pkg-multi (Phase 1 will find v3 at root)
+      await fs.mkdir(path.join(nodeModules, "pkg-consumer"), { recursive: true });
+      await fs.writeFile(
+        path.join(nodeModules, "pkg-consumer", "package.json"),
+        JSON.stringify({
+          name: "pkg-consumer",
+          version: "1.0.0",
+          dependencies: { "pkg-multi": "3.0.0" }
+        })
+      );
+
+      const result = collectLayerPackages(tempDir, ["pkg-consumer"]);
+
+      // Phase 1 finds pkg-multi v3 (at root), which has no deps
+      // Phase 2 also checks findPackagePath result (also v3 at root)
+      // and the resolvedPaths path. Both point to v3, so pkg-v2-dep won't be auto-added
+      // because v3 has no deps. This verifies the dual-path check doesn't crash.
+      expect(result.packages).toContain("pkg-consumer");
+      expect(result.packages).toContain("pkg-multi");
+
+      // Now test with findPackagePath returning v2 (by making root point to v2 via symlink)
+      await fs.rm(path.join(nodeModules, "pkg-multi"), { recursive: true });
+      await fs.symlink(
+        path.join(v2Store, "pkg-multi"),
+        path.join(nodeModules, "pkg-multi")
+      );
+
+      const result2 = collectLayerPackages(tempDir, ["pkg-consumer"]);
+
+      // Now Phase 2 should find pkg-v2-dep via v2's deps
+      expect(result2.packages).toContain("pkg-v2-dep");
+      expect(result2.resolvedPaths.has("pkg-v2-dep")).toBe(true);
+
+      // ZIP should include pkg-v2-dep
+      const zipResult = await Effect.runPromise(
+        createLayerZip(tempDir, result2.packages, result2.resolvedPaths)
+      );
+      expect(zipResult.includedPackages).toContain("pkg-v2-dep");
+
+      // Cleanup
+      await fs.rm(path.join(nodeModules, "pkg-multi"));
+      await fs.rm(path.join(nodeModules, "pkg-consumer"), { recursive: true });
+      await fs.rm(pnpmDir, { recursive: true });
+    });
   });
 });
