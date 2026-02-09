@@ -26,11 +26,15 @@ type LambdaEvent = {
 export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
   const rt = createHandlerRuntime(handler, "http");
 
-  const toResult = (r: { status: number; body?: unknown; headers?: Record<string, string> }) => ({
-    statusCode: r.status,
-    headers: { "Content-Type": "application/json", ...r.headers },
-    body: JSON.stringify(r.body),
-  });
+  const toResult = (r: { status: number; body?: unknown; headers?: Record<string, string> }) => {
+    const customContentType = r.headers?.["content-type"] ?? r.headers?.["Content-Type"];
+    const isJson = !customContentType || customContentType.includes("application/json");
+    return {
+      statusCode: r.status,
+      headers: { ...(isJson ? { "Content-Type": "application/json" } : {}), ...r.headers },
+      body: isJson ? JSON.stringify(r.body) : String(r.body ?? ""),
+    };
+  };
 
   const defaultError = (error: unknown, status: number) => {
     console.error(`[effortless:${rt.handlerName}]`, error);

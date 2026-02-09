@@ -79,6 +79,29 @@ describe("defineHttp", () => {
     expect(body.ready).toBe(true);
   });
 
+  it("should pass body as-is when custom content-type is set", async () => {
+    const handlerCode = `
+      import { defineHttp } from "./src/handlers/define-http";
+
+      export default defineHttp({
+        method: "GET",
+        path: "/widget.js",
+        onRequest: async () => ({
+          status: 200,
+          body: "console.log('hello')",
+          headers: { "content-type": "text/javascript" }
+        })
+      });
+    `;
+
+    const mod = await importBundle({ code: handlerCode, projectDir });
+    const response = await mod.handler(makeEvent({ requestContext: { http: { method: "GET", path: "/widget.js" } } }));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("text/javascript");
+    expect(response.body).toBe("console.log('hello')");
+  });
+
   describe("schema", () => {
 
     it("should validate body and pass data to handler", async () => {
