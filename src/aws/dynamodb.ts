@@ -30,6 +30,7 @@ export type EnsureTableInput = {
   billingMode?: BillingMode;
   streamView?: StreamView;
   tags?: Record<string, string>;
+  ttlAttribute?: string;
 };
 
 export type EnsureTableResult = {
@@ -61,9 +62,38 @@ const waitForTableActive = (tableName: string) =>
     return yield* Effect.fail(new Error(`Timeout waiting for table ${tableName} to become active`));
   });
 
+const ensureTimeToLive = (tableName: string, attributeName: string) =>
+  Effect.gen(function* () {
+    const current = yield* dynamodb.make("describe_time_to_live", {
+      TableName: tableName,
+    });
+
+    const status = current.TimeToLiveDescription?.TimeToLiveStatus;
+    const currentAttr = current.TimeToLiveDescription?.AttributeName;
+
+    if (status === "ENABLED" && currentAttr === attributeName) {
+      return;
+    }
+
+    if (status === "ENABLING") {
+      yield* Effect.logInfo(`TTL is being enabled on ${tableName}, waiting...`);
+      yield* Effect.sleep(5000);
+      return;
+    }
+
+    yield* Effect.logInfo(`Enabling TTL on ${tableName} (attribute: ${attributeName})`);
+    yield* dynamodb.make("update_time_to_live", {
+      TableName: tableName,
+      TimeToLiveSpecification: {
+        Enabled: true,
+        AttributeName: attributeName,
+      },
+    });
+  });
+
 export const ensureTable = (input: EnsureTableInput) =>
   Effect.gen(function* () {
-    const { name, pk, sk, billingMode = "PAY_PER_REQUEST", streamView = "NEW_AND_OLD_IMAGES", tags } = input;
+    const { name, pk, sk, billingMode = "PAY_PER_REQUEST", streamView = "NEW_AND_OLD_IMAGES", tags, ttlAttribute } = input;
 
     const existingTable = yield* dynamodb.make("describe_table", { TableName: name }).pipe(
       Effect.map(result => result.Table),
@@ -72,6 +102,8 @@ export const ensureTable = (input: EnsureTableInput) =>
         () => Effect.succeed(undefined)
       )
     );
+
+    let result: EnsureTableResult;
 
     if (!existingTable) {
       yield* Effect.logInfo(`Creating table ${name}...`);
@@ -98,39 +130,45 @@ export const ensureTable = (input: EnsureTableInput) =>
       });
 
       const table = yield* waitForTableActive(name);
-      return {
+      result = {
         tableArn: table!.TableArn!,
         streamArn: table!.LatestStreamArn!
       };
+    } else {
+      yield* Effect.logInfo(`Table ${name} already exists`);
+
+      // Sync tags on existing table
+      if (tags) {
+        yield* dynamodb.make("tag_resource", {
+          ResourceArn: existingTable.TableArn!,
+          Tags: toAwsTagList(tags)
+        });
+      }
+
+      if (!existingTable.StreamSpecification?.StreamEnabled) {
+        yield* Effect.logInfo(`Enabling stream on table ${name}...`);
+        yield* dynamodb.make("update_table", {
+          TableName: name,
+          StreamSpecification: streamViewToSpec(streamView)
+        });
+        const table = yield* waitForTableActive(name);
+        result = {
+          tableArn: table!.TableArn!,
+          streamArn: table!.LatestStreamArn!
+        };
+      } else {
+        result = {
+          tableArn: existingTable.TableArn!,
+          streamArn: existingTable.LatestStreamArn!
+        };
+      }
     }
 
-    yield* Effect.logInfo(`Table ${name} already exists`);
-
-    // Sync tags on existing table
-    if (tags) {
-      yield* dynamodb.make("tag_resource", {
-        ResourceArn: existingTable.TableArn!,
-        Tags: toAwsTagList(tags)
-      });
+    if (ttlAttribute) {
+      yield* ensureTimeToLive(name, ttlAttribute);
     }
 
-    if (!existingTable.StreamSpecification?.StreamEnabled) {
-      yield* Effect.logInfo(`Enabling stream on table ${name}...`);
-      yield* dynamodb.make("update_table", {
-        TableName: name,
-        StreamSpecification: streamViewToSpec(streamView)
-      });
-      const table = yield* waitForTableActive(name);
-      return {
-        tableArn: table!.TableArn!,
-        streamArn: table!.LatestStreamArn!
-      };
-    }
-
-    return {
-      tableArn: existingTable.TableArn!,
-      streamArn: existingTable.LatestStreamArn!
-    };
+    return result;
   });
 
 export type EnsureEventSourceMappingInput = {

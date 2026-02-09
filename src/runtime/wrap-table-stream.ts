@@ -1,7 +1,8 @@
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { TableHandler, TableRecord, FailedRecord } from "~/handlers/define-table";
 import { createTableClient } from "./table-client";
-import { buildDeps, buildParams } from "./handler-utils";
+import { createHandlerRuntime } from "./handler-utils";
+import { truncateForStorage } from "./platform-types";
 
 type DynamoDBStreamRecord = {
   eventName: "INSERT" | "MODIFY" | "REMOVE";
@@ -51,6 +52,15 @@ const parseRecords = <T>(rawRecords: DynamoDBStreamRecord[], schema?: (input: un
   return { records, sequenceNumbers };
 };
 
+const collectFailures = (records: TableRecord<any>[], sequenceNumbers: Map<TableRecord<any>, string>): BatchItemFailure[] => {
+  const failures: BatchItemFailure[] = [];
+  for (const record of records) {
+    const seq = sequenceNumbers.get(record);
+    if (seq) failures.push({ itemIdentifier: seq });
+  }
+  return failures;
+};
+
 const ENV_TABLE_SELF = "EFF_TABLE_SELF";
 
 export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
@@ -58,32 +68,8 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
     throw new Error("wrapTableStream requires a handler with onRecord or onBatch defined");
   }
 
-  const handleError = handler.onError ?? ((e: unknown) => console.error(e));
-
-  let ctx: C | null = null;
-  let resolvedDeps: Record<string, unknown> | undefined;
-  let resolvedParams: Record<string, unknown> | undefined | null = null;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const getDeps = () => (resolvedDeps ??= buildDeps((handler as any).deps));
-
-  const getParams = async () => {
-    if (resolvedParams !== null) return resolvedParams;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    resolvedParams = await buildParams((handler as any).params);
-    return resolvedParams;
-  };
-
-  const getCtx = async () => {
-    if (ctx !== null) return ctx;
-    if (handler.context) {
-      const params = await getParams();
-      ctx = params
-        ? await handler.context({ params })
-        : await handler.context();
-    }
-    return ctx;
-  };
+  const rt = createHandlerRuntime(handler, "table");
+  const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
 
   let selfClient: ReturnType<typeof createTableClient> | null = null;
   const getSelfClient = () => {
@@ -94,97 +80,69 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
     return selfClient;
   };
 
-  /** Build common args (ctx + deps + params + table) to merge into each callback invocation */
-  const commonArgs = async (): Promise<Record<string, unknown>> => {
-    const args: Record<string, unknown> = {};
-    if (handler.context) args.ctx = await getCtx();
-    const deps = getDeps();
-    if (deps) args.deps = deps;
-    const params = await getParams();
-    if (params) args.params = params;
-    const table = getSelfClient();
-    if (table) args.table = table;
-    return args;
-  };
-
   return async (event: DynamoDBStreamEvent) => {
+    const startTime = Date.now();
     const rawRecords = event.Records ?? [];
+    const input = truncateForStorage({ recordCount: rawRecords.length });
+
     let records: TableRecord<T>[];
     let sequenceNumbers: Map<TableRecord<T>, string>;
     try {
       ({ records, sequenceNumbers } = parseRecords<T>(rawRecords, handler.schema));
     } catch (error) {
       handleError(error);
-      return {
-        batchItemFailures: rawRecords
-          .map(r => r.dynamodb?.SequenceNumber)
-          .filter((s): s is string => !!s)
-          .map(seq => ({ itemIdentifier: seq }))
-      };
+      rt.logError(startTime, input, error);
+      return { batchItemFailures: rawRecords.map(r => r.dynamodb?.SequenceNumber).filter((s): s is string => !!s).map(seq => ({ itemIdentifier: seq })) };
     }
+
+    const shared = { ...await rt.commonArgs(), table: getSelfClient() };
     const batchItemFailures: BatchItemFailure[] = [];
 
     if (handler.onBatch) {
-      // Batch mode: pass all records at once
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const onBatch = handler.onBatch as any;
-        await onBatch({ records, ...await commonArgs() });
+        await (handler.onBatch as any)({ records, ...shared });
       } catch (error) {
         handleError(error);
-        for (const record of records) {
+        batchItemFailures.push(...collectFailures(records, sequenceNumbers));
+      }
+    } else {
+      // Per-record mode
+      const results: R[] = [];
+      const failures: FailedRecord<T>[] = [];
+      const onRecord = handler.onRecord as any;
+
+      for (const record of records) {
+        try {
+          const result = await onRecord({ record, ...shared });
+          if (result !== undefined) results.push(result);
+        } catch (error) {
+          handleError(error);
+          failures.push({ record, error });
           const seq = sequenceNumbers.get(record);
-          if (seq) {
-            batchItemFailures.push({ itemIdentifier: seq });
-          }
+          if (seq) batchItemFailures.push({ itemIdentifier: seq });
         }
       }
 
-      return { batchItemFailures };
-    }
-
-    // Per-record mode
-    const results: R[] = [];
-    const failures: FailedRecord<T>[] = [];
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const onRecord = handler.onRecord as any;
-    const shared = await commonArgs();
-
-    for (const record of records) {
-      try {
-        const result = await onRecord({ record, ...shared });
-
-        if (result !== undefined) {
-          results.push(result);
-        }
-      } catch (error) {
-        handleError(error);
-        failures.push({ record, error });
-        const seq = sequenceNumbers.get(record);
-        if (seq) {
-          batchItemFailures.push({ itemIdentifier: seq });
-        }
-      }
-    }
-
-    if (handler.onBatchComplete) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const onBatchComplete = handler.onBatchComplete as any;
-        await onBatchComplete({ results, failures, ...shared });
-      } catch (error) {
-        handleError(error);
-        for (const record of records) {
-          const seq = sequenceNumbers.get(record);
-          if (seq) {
-            const alreadyFailed = batchItemFailures.some((f) => f.itemIdentifier === seq);
-            if (!alreadyFailed) {
+      if (handler.onBatchComplete) {
+        try {
+          await (handler.onBatchComplete as any)({ results, failures, ...shared });
+        } catch (error) {
+          handleError(error);
+          // Mark all non-failed records as failed too
+          for (const record of records) {
+            const seq = sequenceNumbers.get(record);
+            if (seq && !batchItemFailures.some(f => f.itemIdentifier === seq)) {
               batchItemFailures.push({ itemIdentifier: seq });
             }
           }
         }
       }
+    }
+
+    if (batchItemFailures.length > 0) {
+      rt.logError(startTime, input, `${batchItemFailures.length} record(s) failed`);
+    } else {
+      rt.logExecution(startTime, input, { processedCount: records.length });
     }
 
     return { batchItemFailures };

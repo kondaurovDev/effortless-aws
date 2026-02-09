@@ -54,12 +54,13 @@ export const computeLockfileHash = (projectDir: string) =>
     }
 
     // Collect all transitive production packages
-    const { packages: allPackages } = collectTransitiveDeps(projectDir, prodDeps);
+    const { packages: allPackages, resolvedPaths } = collectTransitiveDeps(projectDir, prodDeps);
 
     // Build a sorted list of package@version pairs
     const packageVersions: string[] = [];
     for (const pkgName of Array.from(allPackages).sort()) {
-      const pkgPath = findInPnpmStore(projectDir, pkgName)
+      const pkgPath = resolvedPaths.get(pkgName)
+        ?? findInPnpmStore(projectDir, pkgName)
         ?? getPackageRealPath(projectDir, pkgName);
 
       if (pkgPath) {
@@ -162,6 +163,7 @@ const findInPnpmStore = (projectDir: string, pkgName: string): string | null => 
 
 export type CollectResult = {
   packages: Set<string>;
+  resolvedPaths: Map<string, string>;
   warnings: string[];
 };
 
@@ -179,6 +181,7 @@ const collectTransitiveDeps = (
   rootDeps: string[],
   searchPath: string = path.join(projectDir, "node_modules"),
   visited = new Set<string>(),
+  resolvedPaths = new Map<string, string>(),
   warnings: string[] = []
 ): CollectResult => {
   const rootNodeModules = path.join(projectDir, "node_modules");
@@ -221,6 +224,7 @@ const collectTransitiveDeps = (
     }
 
     visited.add(dep);
+    resolvedPaths.set(dep, realPath);
 
     // Get this package's dependencies
     const pkgDeps = getPackageDeps(realPath);
@@ -233,11 +237,11 @@ const collectTransitiveDeps = (
         ? path.dirname(path.dirname(realPath))
         : path.dirname(realPath);
 
-      collectTransitiveDeps(projectDir, pkgDeps, pkgNodeModules, visited, warnings);
+      collectTransitiveDeps(projectDir, pkgDeps, pkgNodeModules, visited, resolvedPaths, warnings);
     }
   }
 
-  return { packages: visited, warnings };
+  return { packages: visited, resolvedPaths, warnings };
 };
 
 /** AWS packages available in the Lambda runtime — excluded from layer */
@@ -246,6 +250,7 @@ const isAwsRuntime = (pkg: string) =>
 
 export type CollectLayerResult = {
   packages: string[];
+  resolvedPaths: Map<string, string>;
   warnings: string[];
 };
 
@@ -255,32 +260,60 @@ export type CollectLayerResult = {
  * and auto-adds any missing transitive deps as a safety net.
  */
 export const collectLayerPackages = (projectDir: string, dependencies: string[]): CollectLayerResult => {
-  if (dependencies.length === 0) return { packages: [], warnings: [] };
+  if (dependencies.length === 0) return { packages: [], resolvedPaths: new Map(), warnings: [] };
 
   // Phase 1: collect all transitive deps from package.json declarations
-  const { packages, warnings } = collectTransitiveDeps(projectDir, dependencies);
+  const { packages, resolvedPaths, warnings } = collectTransitiveDeps(projectDir, dependencies);
 
   // Phase 2: verify completeness — ensure all deps of included packages are also included
+  // Check both Phase 1 resolved path and findPackagePath result, since pnpm may have
+  // multiple versions of a package with different dependency sets.
   // Loop until no new packages are discovered (handles multi-level gaps)
   let changed = true;
   while (changed) {
     changed = false;
     for (const pkg of [...packages]) {
       if (isAwsRuntime(pkg)) continue;
-      const pkgPath = findPackagePath(projectDir, pkg);
-      if (!pkgPath) continue;
-      const pkgDeps = getPackageDeps(pkgPath);
-      for (const dep of pkgDeps) {
-        if (!packages.has(dep) && !isAwsRuntime(dep)) {
-          packages.add(dep);
-          warnings.push(`Auto-added missing transitive dep: "${dep}" (required by "${pkg}")`);
-          changed = true;
+
+      // Collect all known locations for this package (may differ when multiple versions exist)
+      const pkgPaths = new Set<string>();
+      const resolved = resolvedPaths.get(pkg);
+      if (resolved) pkgPaths.add(resolved);
+      const found = findPackagePath(projectDir, pkg);
+      if (found) pkgPaths.add(found);
+
+      if (pkgPaths.size === 0) continue;
+
+      for (const pkgPath of pkgPaths) {
+        const pkgDeps = getPackageDeps(pkgPath);
+        for (const dep of pkgDeps) {
+          if (!packages.has(dep) && !isAwsRuntime(dep)) {
+            packages.add(dep);
+            changed = true;
+
+            // Resolve the auto-added dep's path
+            let depPath = findPackagePath(projectDir, dep);
+            // Fallback: look in parent package's node_modules (pnpm nested structure)
+            if (!depPath) {
+              const isScoped = pkg.startsWith("@");
+              const parentNodeModules = isScoped
+                ? path.dirname(path.dirname(pkgPath))
+                : path.dirname(pkgPath);
+              const depInParent = path.join(parentNodeModules, dep);
+              if (fsSync.existsSync(depInParent)) {
+                try {
+                  depPath = fsSync.realpathSync(depInParent);
+                } catch {}
+              }
+            }
+            if (depPath) resolvedPaths.set(dep, depPath);
+          }
         }
       }
     }
   }
 
-  return { packages: Array.from(packages), warnings };
+  return { packages: Array.from(packages), resolvedPaths, warnings };
 };
 
 /**
@@ -305,7 +338,7 @@ export type CreateLayerZipResult = {
  * Create layer zip with nodejs/node_modules structure.
  * Uses @vercel/nft traced packages.
  */
-export const createLayerZip = (projectDir: string, packages: string[]) =>
+export const createLayerZip = (projectDir: string, packages: string[], resolvedPaths?: Map<string, string>) =>
   Effect.async<CreateLayerZipResult, Error>((resume) => {
     const chunks: Buffer[] = [];
     const archive = archiver("zip", { zlib: { level: 9 } });
@@ -323,7 +356,7 @@ export const createLayerZip = (projectDir: string, packages: string[]) =>
     archive.on("error", (err) => resume(Effect.fail(err)));
 
     for (const pkgName of packages) {
-      const realPath = findPackagePath(projectDir, pkgName);
+      const realPath = resolvedPaths?.get(pkgName) ?? findPackagePath(projectDir, pkgName);
       if (typeof realPath === "string" && realPath.length > 0 && !addedPaths.has(realPath)) {
         addedPaths.add(realPath);
         includedPackages.push(pkgName);
@@ -404,7 +437,7 @@ export const ensureLayer = (config: LayerConfig) =>
     }
 
     // Collect all packages via transitive dep walking + completeness verification
-    const { packages: allPackages, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(config.projectDir, dependencies));
+    const { packages: allPackages, resolvedPaths, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(config.projectDir, dependencies));
 
     // Surface all warnings so issues are visible, not silently swallowed
     for (const warning of layerWarnings) {
@@ -415,7 +448,7 @@ export const ensureLayer = (config: LayerConfig) =>
     yield* Effect.logDebug(`Layer packages: ${allPackages.join(", ")}`);
 
     // Create layer zip
-    const { buffer: layerZip, includedPackages, skippedPackages } = yield* createLayerZip(config.projectDir, allPackages);
+    const { buffer: layerZip, includedPackages, skippedPackages } = yield* createLayerZip(config.projectDir, allPackages, resolvedPaths);
 
     if (skippedPackages.length > 0) {
       yield* Effect.logWarning(`Skipped ${skippedPackages.length} packages (not found): ${skippedPackages.slice(0, 10).join(", ")}${skippedPackages.length > 10 ? "..." : ""}`);

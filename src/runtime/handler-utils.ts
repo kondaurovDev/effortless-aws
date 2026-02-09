@@ -1,6 +1,9 @@
+import { randomUUID } from "crypto";
 import type { AnyParamRef } from "~/handlers/param";
 import { createTableClient } from "./table-client";
 import { getParameters } from "./ssm-client";
+import { createPlatformClient } from "./platform-client";
+import { truncateForStorage } from "./platform-types";
 
 export const ENV_TABLE_PREFIX = "EFF_TABLE_";
 export const ENV_PARAM_PREFIX = "EFF_PARAM_";
@@ -55,4 +58,68 @@ export const buildParams = async (
   }
 
   return result;
+};
+
+export type HandlerRuntime = {
+  commonArgs(): Promise<Record<string, unknown>>;
+  logExecution(startTime: number, input: unknown, output: unknown): void;
+  logError(startTime: number, input: unknown, error: unknown): void;
+  handlerName: string;
+};
+
+export const createHandlerRuntime = (
+  handler: { context?: (...args: any[]) => any; deps?: any; params?: any },
+  handlerType: "http" | "table"
+): HandlerRuntime => {
+  const platform = createPlatformClient();
+  const handlerName = process.env.EFF_HANDLER ?? "unknown";
+
+  let ctx: unknown = null;
+  let resolvedDeps: Record<string, unknown> | undefined;
+  let resolvedParams: Record<string, unknown> | undefined | null = null;
+
+  const getDeps = () => (resolvedDeps ??= buildDeps(handler.deps));
+
+  const getParams = async () => {
+    if (resolvedParams !== null) return resolvedParams;
+    resolvedParams = await buildParams(handler.params);
+    return resolvedParams;
+  };
+
+  const getCtx = async () => {
+    if (ctx !== null) return ctx;
+    if (handler.context) {
+      const params = await getParams();
+      ctx = params
+        ? await handler.context({ params })
+        : await handler.context();
+    }
+    return ctx;
+  };
+
+  const commonArgs = async (): Promise<Record<string, unknown>> => {
+    const args: Record<string, unknown> = {};
+    if (handler.context) args.ctx = await getCtx();
+    const deps = getDeps();
+    if (deps) args.deps = deps;
+    const params = await getParams();
+    if (params) args.params = params;
+    return args;
+  };
+
+  const logExecution = (startTime: number, input: unknown, output: unknown) => {
+    platform?.appendExecution(handlerName, handlerType, {
+      id: randomUUID(), ts: new Date().toISOString(), ms: Date.now() - startTime,
+      in: input, out: truncateForStorage(output),
+    });
+  };
+
+  const logError = (startTime: number, input: unknown, error: unknown) => {
+    platform?.appendError(handlerName, handlerType, {
+      id: randomUUID(), ts: new Date().toISOString(), ms: Date.now() - startTime,
+      in: input, err: error instanceof Error ? error.message : String(error),
+    });
+  };
+
+  return { commonArgs, logExecution, logError, handlerName };
 };

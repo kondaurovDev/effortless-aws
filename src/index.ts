@@ -12,3 +12,8 @@ export type { HttpConfig, HttpRequest, HttpResponse, HttpMethod, HttpHandler, Ht
 export type { TableConfig, TableRecord, TableHandler, TableKey, KeyType, StreamView, DefineTableOptions, TableRecordFn, TableBatchFn, TableBatchCompleteFn, FailedRecord } from "./handlers/define-table"
 export type { TableClient, QueryParams } from "./runtime/table-client"
 export type { ParamRef, ResolveParams } from "./handlers/param"
+
+// Platform
+export { createPlatformClient } from "./runtime/platform-client"
+export type { PlatformClient } from "./runtime/platform-client"
+export type { PlatformEntity, ExecutionLogEntity, ExecutionEntry, ErrorEntry, BasePlatformEntity } from "./runtime/platform-types"

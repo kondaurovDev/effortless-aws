@@ -4,6 +4,7 @@ import {
   Aws,
   ensureProjectApi,
   addRouteToApi,
+  ensureTable,
   makeTags,
   resolveStage,
   type TagContext,
@@ -176,6 +177,39 @@ const mergeResolved = (
   return { depsEnv: env, depsPermissions: permissions };
 };
 
+// ============ Platform table ============
+
+const PLATFORM_PERMISSIONS = [
+  "dynamodb:PutItem",
+  "dynamodb:GetItem",
+  "dynamodb:UpdateItem",
+  "dynamodb:Query",
+] as const;
+
+const ensurePlatformTable = (project: string, stage: string, region: string) =>
+  Effect.gen(function* () {
+    const tableName = `${project}-${stage}-platform`;
+    const tagCtx: TagContext = { project, stage, handler: "platform" };
+
+    yield* Effect.logInfo(`Ensuring platform table: ${tableName}`);
+
+    yield* ensureTable({
+      name: tableName,
+      pk: { name: "pk", type: "string" },
+      sk: { name: "sk", type: "string" },
+      billingMode: "PAY_PER_REQUEST",
+      streamView: "NEW_AND_OLD_IMAGES",
+      tags: makeTags(tagCtx, "dynamodb"),
+      ttlAttribute: "ttl",
+    }).pipe(
+      Effect.provide(
+        Aws.makeClients({ dynamodb: { region } })
+      )
+    );
+
+    return tableName;
+  });
+
 // ============ HTTP handlers deployment ============
 
 type DeployHttpHandlersInput = {
@@ -185,6 +219,8 @@ type DeployHttpHandlersInput = {
   layerArn: string | undefined;
   external: string[];
   tableNameMap: Map<string, string>;
+  platformEnv: Record<string, string>;
+  platformPermissions: readonly string[];
 };
 
 const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
@@ -208,12 +244,17 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
           resolveDeps(fn.depsKeys, ctx.tableNameMap),
           resolveParams(fn.paramEntries, ctx.input.project, stage)
         );
+        const withPlatform = {
+          depsEnv: { ...resolved?.depsEnv, ...ctx.platformEnv },
+          depsPermissions: [...(resolved?.depsPermissions ?? []), ...ctx.platformPermissions],
+        };
         const { exportName, functionArn, config } = yield* deployLambda({
           input: deployInput,
           fn,
           ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
           ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
-          ...(resolved ? { depsEnv: resolved.depsEnv, depsPermissions: resolved.depsPermissions } : {})
+          depsEnv: withPlatform.depsEnv,
+          depsPermissions: withPlatform.depsPermissions,
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -254,6 +295,8 @@ type DeployTableHandlersInput = {
   layerArn: string | undefined;
   external: string[];
   tableNameMap: Map<string, string>;
+  platformEnv: Record<string, string>;
+  platformPermissions: readonly string[];
 };
 
 const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
@@ -277,12 +320,17 @@ const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
           resolveDeps(fn.depsKeys, ctx.tableNameMap),
           resolveParams(fn.paramEntries, ctx.input.project, stage)
         );
+        const withPlatform = {
+          depsEnv: { ...resolved?.depsEnv, ...ctx.platformEnv },
+          depsPermissions: [...(resolved?.depsPermissions ?? []), ...ctx.platformPermissions],
+        };
         const result = yield* deployTableFunction({
           input: deployInput,
           fn,
           ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
           ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
-          ...(resolved ? { depsEnv: resolved.depsEnv, depsPermissions: resolved.depsPermissions } : {})
+          depsEnv: withPlatform.depsEnv,
+          depsPermissions: withPlatform.depsPermissions,
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -349,6 +397,11 @@ export const deployProject = (input: DeployProjectInput) =>
       projectDir: input.projectDir
     });
 
+    // Ensure platform table
+    const stage = resolveStage(input.stage);
+    const platformTableName = yield* ensurePlatformTable(input.project, stage, input.region);
+    const platformEnv = { EFF_PLATFORM_TABLE: platformTableName };
+
     // Setup API Gateway for HTTP handlers
     let apiId: string | undefined;
     let apiUrl: string | undefined;
@@ -386,7 +439,9 @@ export const deployProject = (input: DeployProjectInput) =>
           input,
           layerArn,
           external,
-          tableNameMap
+          tableNameMap,
+          platformEnv,
+          platformPermissions: PLATFORM_PERMISSIONS,
         })
       : [];
 
@@ -395,7 +450,9 @@ export const deployProject = (input: DeployProjectInput) =>
       input,
       layerArn,
       external,
-      tableNameMap
+      tableNameMap,
+      platformEnv,
+      platformPermissions: PLATFORM_PERMISSIONS,
     });
 
     if (apiUrl) {
