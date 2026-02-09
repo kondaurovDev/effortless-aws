@@ -190,36 +190,149 @@ Effortless is:
 
 ---
 
-## Why Not SST/Serverless Framework?
+## Why Not SST?
 
-They build on CloudFormation:
+SST v3 moved from CloudFormation to Pulumi/Terraform — faster deploys and multi-cloud support. It has a solid Console (logs, errors, team management). It's the closest mainstream competitor.
 
+**But SST is still infrastructure AS code**, not FROM code:
+
+```typescript
+// SST — you define infrastructure explicitly in sst.config.ts
+const table = new sst.aws.Dynamo("Orders", {
+  fields: { id: "string" },
+  primaryIndex: { hashKey: "id" },
+});
+
+// then link it to your function
+new sst.aws.Function("Api", {
+  handler: "src/api.handler",
+  link: [table],
+});
+
+// then in your handler, you use the SDK manually
+import { Resource } from "sst";
+const tableName = Resource.Orders.name;
+// ...raw DynamoDB SDK calls, no typed client
 ```
-SST → CDK → CloudFormation → AWS
-Serverless Framework → CloudFormation → AWS
+
+```typescript
+// Effortless — infrastructure IS the code
+export const orders = defineTable({
+  schema: { id: Schema.String, amount: Schema.Number },
+  primaryKey: "id",
+  onInsert: async ({ newItem }) => {
+    // typed: newItem.amount is number
+  },
+});
+
+// In another handler — typed client, auto IAM, no config
+await orders.put({ id: "abc", amount: 99 });
 ```
 
-They inherit CloudFormation's:
-- Slow deployments
-- Stack limits (500 resources)
-- Complex error messages
-- Rollback behavior
+Key differences:
 
-We bypass all of this.
+| | SST v3 | Effortless |
+|---|---|---|
+| Infrastructure definition | Separate config file (`sst.config.ts`) | Export handlers from app code |
+| Typed client from schema | No — raw SDK, manual types | Yes — `defineTable` → typed `.put()`, `.get()` |
+| State management | Pulumi state (S3 + lock) | No state files — AWS tags |
+| Deployment engine | Pulumi/Terraform | Direct AWS SDK calls |
+| Dashboard | Yes (SST Console) | Planned (control plane + web UI) |
+| Deploy speed | ~30s (Pulumi diff) | ~5-10s (direct API calls) |
+
+SST is great for teams already comfortable with IaC who want better DX. Effortless is for teams who don't want to write infrastructure code at all.
 
 ---
 
-## Summary
+## Why Not Nitric?
 
-| Aspect | CloudFormation/CDK | Effortless |
-|--------|-------------------|------------|
-| Speed | Minutes | Seconds |
-| State | Stacks/Files | AWS Tags |
-| Abstraction | High | Minimal |
-| Scope | Everything | Lambda ecosystem |
-| Config | YAML/TypeScript | TypeScript exports |
-| Debugging | Stack events | API calls |
-| Rollback | Automatic | Manual |
-| Learning curve | Steep | Flat |
+Nitric is the closest to effortless philosophically — true infrastructure-from-code where you write app code and infrastructure is inferred.
+
+**But Nitric trades depth for breadth:**
+
+```typescript
+// Nitric — multi-cloud, but generic API
+import { api, collection } from "@nitric/sdk";
+
+const orders = collection("orders").for("writing");
+
+api("main").post("/orders", async (ctx) => {
+  await orders.doc("abc").set({ amount: 99 });
+  // no schema validation, no typed fields
+  // works on AWS, GCP, Azure — but lowest common denominator
+});
+```
+
+```typescript
+// Effortless — AWS-native, schema-driven
+export const orders = defineTable({
+  schema: { id: Schema.String, amount: Schema.Number },
+  primaryKey: "id",
+});
+// orders.put() is typed, validated, auto-IAM'd
+```
+
+| | Nitric | Effortless |
+|---|---|---|
+| Multi-cloud | Yes (AWS, GCP, Azure) | No — AWS only |
+| Typed clients from schema | No | Yes |
+| Schema validation at runtime | No | Yes (Effect Schema) |
+| Deployment engine | Pulumi/Terraform | Direct AWS SDK |
+| Own runtime/SDK | Yes (gRPC sidecar) | No — native AWS Lambda |
+| State files | Yes (Terraform/Pulumi state) | No — AWS tags |
+| AWS-specific features | Limited (lowest common denominator) | Full (DynamoDB streams, API Gateway features, etc.) |
+
+Nitric is better if you need multi-cloud. Effortless is better if you're on AWS and want deep integration, type safety, and zero abstraction overhead.
+
+---
+
+## Why Not Ampt?
+
+Ampt (spun off from Serverless Cloud) does infrastructure-from-code with sub-second sandbox deploys.
+
+**But Ampt is a managed platform — you're locked into their service:**
+
+| | Ampt | Effortless |
+|---|---|---|
+| Runs in your AWS account | No — Ampt-managed | Yes — your account, your control |
+| Vendor dependency | Ampt service must exist | None — direct AWS SDK |
+| Open source | No | Yes |
+| Pricing | Per-invocation (Ampt pricing) | AWS costs only |
+| Portability | Locked to Ampt | Standard AWS Lambda |
+
+If Ampt shuts down, your app needs rewriting. Effortless deploys standard AWS resources — your app runs with or without effortless.
+
+---
+
+## Why Not Serverless Framework?
+
+Serverless Framework v3+ builds on CloudFormation:
+
+```
+Serverless Framework → CloudFormation → AWS
+```
+
+It inherits CloudFormation's slow deployments, stack limits (500 resources), complex error messages, and rollback behavior. You also write YAML config (`serverless.yml`) separately from your code.
+
+Effortless bypasses all of this with direct SDK calls and zero config files.
+
+---
+
+## Comparison Summary
+
+| Aspect | SST v3 | Nitric | Ampt | Effortless |
+|--------|--------|--------|------|------------|
+| Infra from code (not config) | No | Yes | Yes | **Yes** |
+| Typed client from `define*` | No | No | No | **Yes** |
+| Schema → validation + types | No | No | No | **Yes** |
+| Auto IAM wiring | Yes (linking) | Yes | Yes | **Yes** |
+| No state files | No | No | N/A | **Yes** |
+| Runs in your AWS account | Yes | Yes | No | **Yes** |
+| Dashboard / Console | Yes | Yes | Yes | Planned |
+| Multi-cloud | Partial | Yes | No | No |
+| Deploy speed | ~30s | ~30s | <1s | ~5-10s |
+| Open source | Yes | Yes | No | **Yes** |
+
+**What only effortless does**: one `define*` call creates the AWS resource, generates a typed runtime client, wires IAM permissions, and validates data with the schema — all from a single TypeScript export. No config files, no state files, no separate infrastructure definitions.
 
 **Philosophy:** Direct is better than indirect. Fast is better than safe-but-slow. Simple is better than complete.

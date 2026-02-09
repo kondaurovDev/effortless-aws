@@ -12,6 +12,7 @@ import {
   collectLayerPackages
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
+import type { ParamEntry } from "~/build/handler-registry";
 
 // Re-export from shared
 export {
@@ -36,6 +37,7 @@ import { deployTableFunction } from "./deploy-table";
 
 type PrepareLayerInput = {
   project: string;
+  stage: string;
   region: string;
   projectDir: string;
 };
@@ -44,6 +46,7 @@ const prepareLayer = (input: PrepareLayerInput) =>
   Effect.gen(function* () {
     const layerResult = yield* ensureLayer({
       project: input.project,
+      stage: input.stage,
       region: input.region,
       projectDir: input.projectDir
     }).pipe(
@@ -72,6 +75,103 @@ const prepareLayer = (input: PrepareLayerInput) =>
     };
   });
 
+// ============ Deps resolution ============
+
+const TABLE_CLIENT_PERMISSIONS = [
+  "dynamodb:GetItem",
+  "dynamodb:PutItem",
+  "dynamodb:DeleteItem",
+  "dynamodb:Query",
+  "dynamodb:Scan",
+  "dynamodb:UpdateItem",
+  "dynamodb:BatchGetItem",
+  "dynamodb:BatchWriteItem",
+] as const;
+
+/**
+ * Build a map of all table handler export names to their resolved DynamoDB table names.
+ * Table names are deterministic: ${project}-${stage}-${handlerName}
+ */
+const buildTableNameMap = (
+  tableHandlers: DiscoveredHandlers["tableHandlers"],
+  project: string,
+  stage: string
+): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const { exports } of tableHandlers) {
+    for (const fn of exports) {
+      const handlerName = fn.config.name ?? fn.exportName;
+      map.set(fn.exportName, `${project}-${stage}-${handlerName}`);
+    }
+  }
+  return map;
+};
+
+/**
+ * Resolve deps keys to environment variables and IAM permissions.
+ */
+const resolveDeps = (
+  depsKeys: string[],
+  tableNameMap: Map<string, string>
+): { depsEnv: Record<string, string>; depsPermissions: readonly string[] } | undefined => {
+  if (depsKeys.length === 0) return undefined;
+
+  const depsEnv: Record<string, string> = {};
+  for (const key of depsKeys) {
+    const tableName = tableNameMap.get(key);
+    if (tableName) {
+      depsEnv[`EFF_TABLE_${key}`] = tableName;
+    }
+  }
+
+  if (Object.keys(depsEnv).length === 0) return undefined;
+
+  return { depsEnv, depsPermissions: TABLE_CLIENT_PERMISSIONS };
+};
+
+// ============ Params resolution ============
+
+const SSM_PERMISSIONS = [
+  "ssm:GetParameter",
+  "ssm:GetParameters",
+] as const;
+
+/**
+ * Resolve param entries to environment variables and IAM permissions.
+ * SSM path convention: /${project}/${stage}/${key}
+ */
+const resolveParams = (
+  paramEntries: ParamEntry[],
+  project: string,
+  stage: string
+): { paramsEnv: Record<string, string>; paramsPermissions: readonly string[] } | undefined => {
+  if (paramEntries.length === 0) return undefined;
+
+  const paramsEnv: Record<string, string> = {};
+  for (const { propName, ssmKey } of paramEntries) {
+    paramsEnv[`EFF_PARAM_${propName}`] = `/${project}/${stage}/${ssmKey}`;
+  }
+
+  return { paramsEnv, paramsPermissions: SSM_PERMISSIONS };
+};
+
+/**
+ * Merge deps and params resolution into a single env/permissions payload.
+ */
+const mergeResolved = (
+  deps: { depsEnv: Record<string, string>; depsPermissions: readonly string[] } | undefined,
+  params: { paramsEnv: Record<string, string>; paramsPermissions: readonly string[] } | undefined
+): { depsEnv: Record<string, string>; depsPermissions: readonly string[] } | undefined => {
+  if (!deps && !params) return undefined;
+
+  const env = { ...deps?.depsEnv, ...params?.paramsEnv };
+  const permissions = [...(deps?.depsPermissions ?? []), ...(params?.paramsPermissions ?? [])];
+
+  if (Object.keys(env).length === 0) return undefined;
+
+  return { depsEnv: env, depsPermissions: permissions };
+};
+
 // ============ HTTP handlers deployment ============
 
 type DeployHttpHandlersInput = {
@@ -80,6 +180,7 @@ type DeployHttpHandlersInput = {
   input: DeployProjectInput;
   layerArn: string | undefined;
   external: string[];
+  tableNameMap: Map<string, string>;
 };
 
 const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
@@ -98,11 +199,17 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
       if (ctx.input.stage) deployInput.stage = ctx.input.stage;
 
       for (const fn of exports) {
+        const stage = resolveStage(ctx.input.stage);
+        const resolved = mergeResolved(
+          resolveDeps(fn.depsKeys, ctx.tableNameMap),
+          resolveParams(fn.paramEntries, ctx.input.project, stage)
+        );
         const { exportName, functionArn, config } = yield* deployLambda({
           input: deployInput,
           fn,
           ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
-          ...(ctx.external.length > 0 ? { external: ctx.external } : {})
+          ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+          ...(resolved ? { depsEnv: resolved.depsEnv, depsPermissions: resolved.depsPermissions } : {})
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -142,6 +249,7 @@ type DeployTableHandlersInput = {
   input: DeployProjectInput;
   layerArn: string | undefined;
   external: string[];
+  tableNameMap: Map<string, string>;
 };
 
 const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
@@ -160,11 +268,17 @@ const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
       if (ctx.input.stage) deployInput.stage = ctx.input.stage;
 
       for (const fn of exports) {
+        const stage = resolveStage(ctx.input.stage);
+        const resolved = mergeResolved(
+          resolveDeps(fn.depsKeys, ctx.tableNameMap),
+          resolveParams(fn.paramEntries, ctx.input.project, stage)
+        );
         const result = yield* deployTableFunction({
           input: deployInput,
           fn,
           ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
-          ...(ctx.external.length > 0 ? { external: ctx.external } : {})
+          ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+          ...(resolved ? { depsEnv: resolved.depsEnv, depsPermissions: resolved.depsPermissions } : {})
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -220,9 +334,13 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logInfo(`Discovered ${totalHttpHandlers} HTTP handler(s) and ${totalTableHandlers} table handler(s)`);
 
+    // Build table name map for deps resolution
+    const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
+
     // Prepare layer
     const { layerArn, external } = yield* prepareLayer({
       project: input.project,
+      stage: resolveStage(input.stage),
       region: input.region,
       projectDir: input.projectDir
     });
@@ -241,6 +359,7 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Effect.logInfo("Setting up API Gateway...");
       const api = yield* ensureProjectApi({
         projectName: input.project,
+        stage: tagCtx.stage,
         region: input.region,
         tags: makeTags(tagCtx, "api-gateway")
       }).pipe(
@@ -262,7 +381,8 @@ export const deployProject = (input: DeployProjectInput) =>
           apiId,
           input,
           layerArn,
-          external
+          external,
+          tableNameMap
         })
       : [];
 
@@ -270,7 +390,8 @@ export const deployProject = (input: DeployProjectInput) =>
       handlers: tableHandlers,
       input,
       layerArn,
-      external
+      external,
+      tableNameMap
     });
 
     if (apiUrl) {

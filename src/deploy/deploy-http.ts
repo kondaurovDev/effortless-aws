@@ -24,10 +24,12 @@ type DeployLambdaInput = {
   fn: ExtractedFunction;
   layerArn?: string;
   external?: string[];
+  depsEnv?: Record<string, string>;
+  depsPermissions?: readonly string[];
 };
 
 /** @internal */
-export const deployLambda = ({ input, fn, layerArn, external }: DeployLambdaInput) =>
+export const deployLambda = ({ input, fn, layerArn, external, depsEnv, depsPermissions }: DeployLambdaInput) =>
   Effect.gen(function* () {
     const { exportName, config } = fn;
     const handlerName = config.name ?? exportName;
@@ -41,7 +43,9 @@ export const deployLambda = ({ input, fn, layerArn, external }: DeployLambdaInpu
       ...(config.memory ? { memory: config.memory } : {}),
       ...(config.timeout ? { timeout: config.timeout } : {}),
       ...(layerArn ? { layerArn } : {}),
-      ...(external ? { external } : {})
+      ...(external ? { external } : {}),
+      ...(depsEnv ? { depsEnv } : {}),
+      ...(depsPermissions ? { depsPermissions } : {})
     });
 
     return { exportName, functionArn, config, handlerName };
@@ -73,6 +77,7 @@ export const deploy = (input: DeployInput) =>
     // Ensure layer exists
     const { layerArn, external } = yield* ensureLayerAndExternal({
       project: input.project,
+      stage: tagCtx.stage,
       region: input.region,
       projectDir: input.projectDir
     });
@@ -89,6 +94,7 @@ export const deploy = (input: DeployInput) =>
     yield* Effect.logInfo("Setting up API Gateway...");
     const { apiId } = yield* ensureProjectApi({
       projectName: input.project,
+      stage: tagCtx.stage,
       region: input.region,
       tags: makeTags(tagCtx, "api-gateway")
     });
@@ -129,23 +135,25 @@ export const deployAll = (input: DeployInput) =>
 
     yield* Effect.logInfo(`Found ${functions.length} HTTP handler(s) to deploy`);
 
-    // Ensure layer exists
-    const { layerArn, external } = yield* ensureLayerAndExternal({
-      project: input.project,
-      region: input.region,
-      projectDir: input.projectDir
-    });
-
     const tagCtx: TagContext = {
       project: input.project,
       stage: resolveStage(input.stage),
       handler: "api"
     };
 
+    // Ensure layer exists
+    const { layerArn, external } = yield* ensureLayerAndExternal({
+      project: input.project,
+      stage: tagCtx.stage,
+      region: input.region,
+      projectDir: input.projectDir
+    });
+
     // Create single API Gateway for project
     yield* Effect.logInfo("Setting up API Gateway...");
     const { apiId } = yield* ensureProjectApi({
       projectName: input.project,
+      stage: tagCtx.stage,
       region: input.region,
       tags: makeTags(tagCtx, "api-gateway")
     });

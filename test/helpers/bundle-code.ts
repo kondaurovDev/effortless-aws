@@ -5,6 +5,13 @@ import * as crypto from "crypto";
 import { bundle, type BundleInput } from "~/build/bundle";
 import type { HandlerType } from "~/build/handler-registry";
 
+// AWS SDK packages are externalized in production (via Lambda layer).
+// Externalize them in tests so file-based imports resolve from node_modules.
+const AWS_EXTERNAL = [
+  "@aws-sdk/client-dynamodb",
+  "@aws-sdk/util-dynamodb",
+];
+
 type BundleCodeInput = Omit<BundleInput, "file"> & {
   code: string;
   exportName?: string;
@@ -25,12 +32,13 @@ export const bundleCode = (input: BundleCodeInput) =>
 
     try {
       // Bundle
+      const external = [...AWS_EXTERNAL, ...(input.external ?? [])];
       const result = yield* bundle({
         file: tempFile,
         projectDir: input.projectDir,
         ...(input.format && { format: input.format }),
         ...(input.exportName && { exportName: input.exportName }),
-        ...(input.external && { external: input.external }),
+        external,
         ...(input.type && { type: input.type }),
       });
 
@@ -42,3 +50,21 @@ export const bundleCode = (input: BundleCodeInput) =>
       }
     }
   });
+
+/**
+ * Bundle code and import it via a temp .mjs file.
+ * Unlike data URLs, file-based imports can resolve bare specifiers (e.g. @aws-sdk/*).
+ */
+export const importBundle = async (input: BundleCodeInput) => {
+  const code = await Effect.runPromise(bundleCode(input));
+  const hash = crypto.createHash("md5").update(code).digest("hex").slice(0, 8);
+  const tempMjs = path.join(input.projectDir, `.temp-bundle-${hash}.mjs`);
+  fs.writeFileSync(tempMjs, code);
+  try {
+    return await import(tempMjs);
+  } finally {
+    if (fs.existsSync(tempMjs)) {
+      fs.unlinkSync(tempMjs);
+    }
+  }
+};

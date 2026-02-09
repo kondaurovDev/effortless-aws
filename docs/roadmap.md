@@ -17,6 +17,7 @@ See also: [CLI Roadmap](./roadmap-cli.md)
 - [Typed Inter-Handler Communication](#typed-inter-handler-communication)
 - [DLQ & Failure Handling](#dlq--failure-handling)
 - [defineFunction & Durable Mode](#definefunction--durable-mode)
+- [Control Plane & Web Dashboard](#control-plane--web-dashboard)
 
 ---
 
@@ -368,6 +369,57 @@ Two invocation modes:
 
 ---
 
+## Control Plane & Web Dashboard
+
+**Problem**: Currently effortless deploys from the developer's machine using local AWS credentials. This means every developer needs long-lived IAM access keys configured locally — complex onboarding, security risk (keys don't expire), and no shared visibility into what's deployed.
+
+**Approach**: Deploy a **control plane Lambda** into the user's AWS account that has permissions to create and manage effortless resources. The CLI and a web dashboard communicate with this Lambda instead of directly with AWS.
+
+### Phase 1: Control Plane Lambda
+
+A management Lambda with an IAM role scoped to effortless operations (create/update/delete Lambda, DynamoDB, API Gateway, SQS, etc.).
+
+```
+CLI
+  ↓ (HTTPS)
+API Gateway + auth
+  ↓
+Control Plane Lambda (scoped IAM role)
+  ├── deploy:  receive bundle via S3 presigned URL → create/update resources
+  ├── status:  read tags → return resource state
+  ├── logs:    query CloudWatch Logs → stream back
+  └── cleanup: delete resources by tags
+```
+
+**Bootstrap**: One-time setup via CloudFormation one-click template or `effortless init` command. After that, developers only need an API key or short-lived token — no AWS credentials.
+
+**Key considerations**:
+- Upload bundles via S3 presigned URL (Lambda 6MB sync payload limit)
+- Long deploys run async: CLI submits job → polls for status
+- Auth options: API key (simple), Cognito (teams), IAM Identity Center (enterprise)
+
+### Phase 2: Web Dashboard
+
+Minimal web app backed by the same control plane API:
+
+- **Resources** — list all deployed functions, tables, queues with status
+- **Logs** — real-time log viewer with filtering by handler, level, request ID
+- **Deploy** — trigger deploys, see deploy history and diffs
+- **Metrics** — invocation count, error rate, duration (from CloudWatch/EMF)
+
+### Phase 3: Observability & Collaboration
+
+- **Monitoring dashboards** — auto-generated per-handler metrics, alerting
+- **Preview environments** — deploy from PR via GitHub integration
+- **Team management** — multiple developers, role-based access
+- **Trace viewer** — X-Ray traces visualized in the dashboard
+
+**What makes this powerful**: effortless controls the entire stack (build → deploy → runtime → observability). Unlike generic dashboards, this knows the semantics — it can show a `defineTable` with its stream handler, DLQ, and connected functions as one logical unit.
+
+**Status**: Planned
+
+---
+
 ## Priority & Implementation Order
 
 | # | Feature | Complexity | Value | Effortless advantage |
@@ -381,6 +433,8 @@ Two invocation modes:
 | 7 | **Metrics (EMF)** | Low | Medium | Auto-flush, zero API calls |
 | 8 | **Tracer (X-Ray)** | Medium | Medium | Auto-enables tracing config on deploy |
 | 9 | **Middleware** | High | Medium | Infrastructure-aware middleware (auth, rate limit) |
+| 10 | **Control Plane** | High | Very high | No local AWS keys, one-click setup, shared visibility |
+| 11 | **Web Dashboard** | High | High | Observability + deploy UI backed by control plane API |
 
 ---
 

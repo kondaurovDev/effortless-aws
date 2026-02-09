@@ -25,15 +25,16 @@ export const api = defineHttp({
   name?: string,                      // defaults to export name
   memory?: number,
   timeout?: DurationInput,
-  cors?: boolean | CorsConfig,
-  auth?: "none" | "iam" | "jwt" | AuthConfig,
-  requestSchema?: Schema.Schema<T>,   // validate request body
+  permissions?: Permission[],         // additional IAM permissions (e.g. ["s3:PutObject"])
+  schema?: (input: unknown) => T,     // validate & parse request body
   context?: () => C,                  // factory for dependencies (cached on cold start)
+  deps?: { [key]: TableHandler },     // inter-handler dependencies
 
-  onRequest: async ({ req, ctx }: { req: HttpRequest<T>, ctx?: C }) => {
-    // req.body is typed and validated
-    // req.params, req.query, req.headers available
-    // ctx contains context if provided
+  onRequest: async ({ req, ctx, data, deps }) => {
+    // req.method, req.path, req.headers, req.query, req.params, req.body
+    // ctx — context if provided
+    // data — parsed body (when schema is set)
+    // deps — typed table clients (when deps is set)
     return {
       status: 200,
       body: { data: "response" },
@@ -43,9 +44,49 @@ export const api = defineHttp({
 });
 ```
 
+### Schema validation
+
+```typescript
+export const createUser = defineHttp({
+  method: "POST",
+  path: "/users",
+  schema: (input) => {
+    const obj = input as any;
+    if (!obj?.name) throw new Error("name is required");
+    return { name: obj.name as string };
+  },
+  onRequest: async ({ data }) => {
+    // data is { name: string } — typed from schema return type
+    return { status: 201, body: { created: data.name } };
+  }
+});
+```
+
+When `schema` throws, the framework returns a 400 response automatically with the error message.
+
+### Dependencies
+
+```typescript
+import { orders } from "./orders.js";
+
+export const createOrder = defineHttp({
+  method: "POST",
+  path: "/orders",
+  deps: { orders },
+  onRequest: async ({ req, deps }) => {
+    // deps.orders is TableClient<Order> — typed from the table's generic
+    await deps.orders.put({ orderId: "abc-123", amount: 99 });
+    return { status: 201 };
+  }
+});
+```
+
+Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. See [architecture.md](architecture.md#inter-handler-dependencies-deps) for details.
+
 **Built-in best practices**:
 - **Cold start optimization** — the `context` factory runs once on cold start and is cached across invocations. Use it for DB connections, SDK clients, config loading.
-- **Typed request body** — when `requestSchema` is set, the body is parsed and validated before `onRequest` runs. Invalid requests get a 400 response automatically.
+- **Schema validation** — when `schema` is set, the body is parsed and validated before `onRequest` runs. Invalid requests get a 400 response automatically.
+- **Typed dependencies** — `deps` provides typed `TableClient<T>` instances with auto-wired IAM permissions and environment variables.
 - **Auto-infrastructure** — API Gateway HTTP API, route, Lambda integration, and IAM permissions are created on deploy.
 
 ---
@@ -55,7 +96,6 @@ export const api = defineHttp({
 Creates: DynamoDB Table + (optional) Stream + Lambda + Event Source Mapping
 
 ```typescript
-// With type - record.new/old are typed
 type Order = {
   id: string;
   createdAt: number;
@@ -72,74 +112,135 @@ export const orders = defineTable<Order>({
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED",  // default: PAY_PER_REQUEST
   ttlAttribute?: string,
 
-  // Optional - stream (only if onRecord is provided)
+  // Optional - stream
   streamView?: "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY",  // default: NEW_AND_OLD_IMAGES
   batchSize?: number,                // 1-10000, default: 100
   startingPosition?: "LATEST" | "TRIM_HORIZON",  // default: LATEST
-  filterPatterns?: FilterPattern[],  // filter events
 
   // Optional - lambda
   memory?: number,
   timeout?: DurationInput,
+  permissions?: Permission[],         // additional IAM permissions
   context?: () => C,                  // factory for dependencies (cached on cold start)
+  deps?: { [key]: TableHandler },     // inter-handler dependencies
 
-  // Optional - if omitted, only the table is created (no Lambda)
-  // Called once per record - partial batch failures handled automatically
-  onRecord: async ({ record, ctx }: { record: TableRecord<Order>, ctx?: C }) => {
-    if (record.eventName === "INSERT") {
-      console.log("New:", record.new);  // Order
-    }
-    if (record.eventName === "MODIFY") {
-      console.log("Changed:", record.old, "→", record.new);
-    }
-    if (record.eventName === "REMOVE") {
-      console.log("Deleted:", record.old);
-    }
-  }
+  // Stream handler — choose one mode:
+
+  // Mode 1: per-record processing
+  onRecord: async ({ record, table, ctx, deps }) => { ... },
+  onBatchComplete?: async ({ results, failures, table, ctx, deps }) => { ... },
+
+  // Mode 2: batch processing
+  onBatch: async ({ records, table, ctx, deps }) => { ... },
 });
+```
 
-// Without onRecord - just creates the table (no Lambda, no stream)
-export const users = defineTable({
-  pk: { name: "id", type: "string" }
-});
+### Callback arguments
 
-// Without type - record.new/old is Record<string, unknown>
-export const logs = defineTable({
+All stream callbacks (`onRecord`, `onBatch`, `onBatchComplete`) receive:
+
+| Arg | Type | Description |
+|-----|------|-------------|
+| `record` / `records` | `TableRecord<T>` / `TableRecord<T>[]` | Stream records with typed `new`/`old` values |
+| `table` | `TableClient<T>` | Typed client for **this** table (auto-injected) |
+| `ctx` | `C` | Context from `context()` factory (if provided) |
+| `deps` | `{ [key]: TableClient }` | Typed clients for dependent tables (if `deps` is set) |
+
+### Per-record processing
+
+```typescript
+export const orders = defineTable<Order>({
   pk: { name: "id", type: "string" },
-  onRecord: async ({ record }) => {
-    console.log(record.eventName, record.new);
+  onRecord: async ({ record, table }) => {
+    if (record.eventName === "INSERT") {
+      // table is TableClient<Order> — write back to the same table
+      await table.put({ ...record.new!, status: "processed" });
+    }
   }
 });
+```
 
-// With onBatchComplete - accumulate results and process at end
-type ProcessedOrder = { id: string; amount: number };
+Each record is processed individually. If one fails, only that record is retried via `PartialBatchResponse`.
 
+### Batch processing
+
+```typescript
+export const events = defineTable<Event>({
+  pk: { name: "id", type: "string" },
+  onBatch: async ({ records, table }) => {
+    // Process all records at once
+    for (const r of records) {
+      await table.put({ ...r.new!, processed: true });
+    }
+  }
+});
+```
+
+All records in a batch are processed together. If the handler throws, all records are reported as failed.
+
+### Table self-client (`table`)
+
+Every table handler automatically receives a `table: TableClient<T>` argument — a typed client for its own table. No configuration needed. Use it to read/write back to the same table from stream handlers.
+
+```typescript
+TableClient<T>
+  put(item: T): Promise<void>
+  get(key: Partial<T>): Promise<T | undefined>
+  delete(key: Partial<T>): Promise<void>
+  query(params: QueryParams): Promise<T[]>
+  tableName: string
+```
+
+### Dependencies
+
+```typescript
+import { users } from "./users.js";
+
+export const orders = defineTable<Order>({
+  pk: { name: "id", type: "string" },
+  deps: { users },
+  onRecord: async ({ record, table, deps }) => {
+    // deps.users is TableClient<User>
+    const user = await deps.users.get({ id: record.new!.userId });
+    await table.put({ ...record.new!, userName: user?.name });
+  }
+});
+```
+
+### Batch accumulation
+
+```typescript
 export const ordersWithBatch = defineTable<Order>({
   pk: { name: "id", type: "string" },
-
-  // Return value is collected into results array
   onRecord: async ({ record }) => {
-    // TypeScript infers R = ProcessedOrder from return type
+    // Return value is collected into results array
     return { id: record.new!.id, amount: record.new!.amount };
   },
-
-  // Called after all records processed
-  onBatchComplete: async ({ results, failures }) => {
-    // results: ProcessedOrder[] - accumulated from onRecord
-    // failures: FailedRecord<Order>[] - records that threw errors
+  onBatchComplete: async ({ results, failures, table }) => {
+    // results: { id, amount }[] — accumulated from onRecord
+    // failures: FailedRecord<Order>[] — records that threw
     console.log(`Processed ${results.length}, failed ${failures.length}`);
-    await batchWriteToAnotherTable(results);
   }
+});
+```
+
+### Resource-only (no Lambda)
+
+```typescript
+// Just creates the DynamoDB table — no stream, no Lambda
+export const users = defineTable({
+  pk: { name: "id", type: "string" }
 });
 ```
 
 **Built-in best practices**:
 - **Partial batch failures** — each record is processed individually. If one fails, only that record is retried via `PartialBatchResponse`. The rest of the batch succeeds.
 - **Typed records** — the generic `defineTable<Order>` gives you typed `record.new` and `record.old` with automatic DynamoDB unmarshalling.
+- **Table self-client** — `table` arg provides a typed `TableClient<T>` for the handler's own table, auto-injected with no config.
+- **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for other tables with auto-wired IAM and env vars.
 - **Batch accumulation** — `onRecord` return values are collected into `results` for `onBatchComplete`. Use this for bulk writes, aggregations, or reporting.
-- **Failure tracking** — failed records are captured as `FailedRecord<T>` with the original record and error, available in `onBatchComplete`.
 - **Cold start optimization** — the `context` factory runs once and is cached across invocations.
-- **Progressive complexity** — omit `onRecord` for a table-only definition. Add it for stream processing. Add `onBatchComplete` for batch operations. Each level builds on the previous one.
+- **Progressive complexity** — omit handlers for table-only. Add `onRecord` for stream processing. Add `onBatch` for batch mode. Add `deps` for cross-table access.
 - **Auto-infrastructure** — DynamoDB table, stream, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
 
 ---

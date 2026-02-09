@@ -7,7 +7,8 @@ export type {
   HttpMethod,
   HttpHandler,
   HttpHandlerFn,
-  DefineHttpOptions
+  DefineHttpOptions,
+  ResolveDeps
 } from "./define-http";
 
 // Table handlers
@@ -21,9 +22,13 @@ export type {
   StreamView,
   DefineTableOptions,
   TableRecordFn,
+  TableBatchFn,
   TableBatchCompleteFn,
   FailedRecord
 } from "./define-table";
+
+// Table client
+export type { TableClient, QueryParams } from "../runtime/table-client";
 
 // Permissions
 export type { Permission } from "./permissions";

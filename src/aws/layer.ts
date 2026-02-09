@@ -13,6 +13,7 @@ const FIXED_DATE = new Date(0);
 
 export type LayerConfig = {
   project: string;
+  stage: string;
   region: string;
   projectDir: string;
   tags?: Record<string, string>;
@@ -445,7 +446,7 @@ export const ensureLayer = (config: LayerConfig) =>
       return null;
     }
 
-    const layerName = `${config.project}-deps`;
+    const layerName = `${config.project}-${config.stage}-deps`;
 
     // Check for existing layer with same hash
     const existing = yield* getExistingLayerByHash(layerName, hash);

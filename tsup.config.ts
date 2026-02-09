@@ -38,4 +38,17 @@ export default defineConfig([
       js: `import { createRequire } from 'module'; const require = createRequire(import.meta.url);`,
     },
   },
+  // Runtime wrappers - separate files for esbuild to consume at deploy time
+  {
+    entry: {
+      "runtime/wrap-http": "src/runtime/wrap-http.ts",
+      "runtime/wrap-table-stream": "src/runtime/wrap-table-stream.ts",
+    },
+    format: ["esm"],
+    dts: false,
+    sourcemap: false,
+    platform: "node",
+    target: "node22",
+    external: [/^@aws-sdk\//],
+  },
 ]);

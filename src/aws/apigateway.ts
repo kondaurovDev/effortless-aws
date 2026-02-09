@@ -6,6 +6,7 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS"
 
 export type ProjectApiConfig = {
   projectName: string;
+  stage: string;
   region: string;
   tags?: Record<string, string>;
 };
@@ -20,7 +21,7 @@ export type RouteConfig = {
 
 export const ensureProjectApi = (config: ProjectApiConfig) =>
   Effect.gen(function* () {
-    const apiName = config.projectName;
+    const apiName = `${config.projectName}-${config.stage}`;
 
     const existingApis = yield* apigatewayv2.make("get_apis", {});
     const existingApi = existingApis.Items?.find(api => api.Name === apiName);

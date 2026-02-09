@@ -7,6 +7,7 @@ const computeCodeHash = (code: Uint8Array): string =>
 
 export type LambdaConfig = {
   project: string;
+  stage: string;
   name: string;
   region: string;
   roleArn: string;
@@ -17,6 +18,7 @@ export type LambdaConfig = {
   runtime?: Runtime;
   tags?: Record<string, string>;
   layers?: string[];
+  environment?: Record<string, string>;
 };
 
 const arraysEqual = (a: string[], b: string[]): boolean => {
@@ -30,12 +32,13 @@ export const ensureLambda = (
   config: LambdaConfig
 ) =>
   Effect.gen(function* () {
-    const functionName = `${config.project}-${config.name}`;
+    const functionName = `${config.project}-${config.stage}-${config.name}`;
     const memory = config.memory;
     const timeout = config.timeout;
     const handler = config.handler ?? "index.handler";
     const runtime = config.runtime ?? Runtime.nodejs22x;
     const layers = config.layers ?? [];
+    const environment = config.environment ?? {};
 
     const existingFunction = yield* lambda.make("get_function", {
       FunctionName: functionName
@@ -55,12 +58,17 @@ export const ensureLambda = (
       const existingLayers = existingFunction.Layers?.map(l => l.Arn!).filter(Boolean) ?? [];
       const layersChanged = !arraysEqual(existingLayers, layers);
 
+      const existingEnv = existingFunction.Environment?.Variables ?? {};
+      const envKeys = [...new Set([...Object.keys(existingEnv), ...Object.keys(environment)])].sort();
+      const envChanged = envKeys.some(k => existingEnv[k] !== environment[k]);
+
       const configChanged =
         existingFunction.MemorySize !== memory ||
         existingFunction.Timeout !== timeout ||
         existingFunction.Handler !== handler ||
         existingFunction.Runtime !== runtime ||
-        layersChanged;
+        layersChanged ||
+        envChanged;
 
       if (!codeChanged && !configChanged) {
         yield* Effect.logInfo(`Function ${functionName} unchanged, skipping update`);
@@ -89,7 +97,8 @@ export const ensureLambda = (
           Timeout: timeout,
           Handler: handler,
           Runtime: runtime,
-          Layers: layers.length > 0 ? layers : undefined
+          Layers: layers.length > 0 ? layers : undefined,
+          Environment: Object.keys(environment).length > 0 ? { Variables: environment } : undefined
         });
 
         yield* updateConfig.pipe(
@@ -126,7 +135,8 @@ export const ensureLambda = (
       MemorySize: memory,
       Timeout: timeout,
       Tags: config.tags,
-      Layers: layers.length > 0 ? layers : undefined
+      Layers: layers.length > 0 ? layers : undefined,
+      Environment: Object.keys(environment).length > 0 ? { Variables: environment } : undefined
     });
 
     yield* waitForFunctionActive(functionName);

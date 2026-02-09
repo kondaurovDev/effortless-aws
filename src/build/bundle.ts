@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import * as esbuild from "esbuild";
 import * as fsSync from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import archiver from "archiver";
 import { globSync } from "glob";
 import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
@@ -32,6 +33,8 @@ export const extractConfig = (source: string): HttpConfig | null => {
 
 // ============ Bundle (uses registry) ============
 
+const runtimeDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../dist/runtime");
+
 export const bundle = (input: BundleInput & { exportName?: string; external?: string[]; type?: HandlerType }) =>
   Effect.gen(function* () {
     const exportName = input.exportName ?? "default";
@@ -41,7 +44,11 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
     // Get source path for import statement
     const sourcePath = path.isAbsolute(input.file) ? input.file : `./${input.file}`;
 
-    const entryPoint = generateEntryPoint(sourcePath, exportName, type);
+    const entryPoint = generateEntryPoint(sourcePath, exportName, type, runtimeDir);
+
+    // AWS SDK v3 is available in the Lambda Node.js runtime — never bundle it
+    const awsExternals = ["@aws-sdk/*", "@smithy/*"];
+    const allExternals = [...new Set([...awsExternals, ...externals])];
 
     const result = yield* Effect.tryPromise({
       try: () => esbuild.build({
@@ -57,7 +64,7 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
         minify: false,
         sourcemap: false,
         format: input.format ?? "esm",
-        ...(externals.length > 0 ? { external: externals } : { packages: "bundle" as const })
+        external: allExternals
       }),
       catch: (error) => new Error(`esbuild failed: ${error}`)
     });

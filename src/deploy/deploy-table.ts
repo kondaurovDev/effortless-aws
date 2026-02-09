@@ -23,12 +23,14 @@ type DeployTableFunctionInput = {
   fn: ExtractedTableFunction;
   layerArn?: string;
   external?: string[];
+  depsEnv?: Record<string, string>;
+  depsPermissions?: readonly string[];
 };
 
 const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*"] as const;
 
 /** @internal */
-export const deployTableFunction = ({ input, fn, layerArn, external }: DeployTableFunctionInput) =>
+export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions }: DeployTableFunctionInput) =>
   Effect.gen(function* () {
     const { exportName, config } = fn;
     const handlerName = config.name ?? exportName;
@@ -40,7 +42,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external }: DeployTab
     };
 
     yield* Effect.logInfo("Creating DynamoDB table...");
-    const tableName = `${input.project}-${handlerName}`;
+    const tableName = `${input.project}-${tagCtx.stage}-${handlerName}`;
     const { tableArn, streamArn } = yield* ensureTable({
       name: tableName,
       pk: config.pk,
@@ -49,6 +51,9 @@ export const deployTableFunction = ({ input, fn, layerArn, external }: DeployTab
       streamView: config.streamView ?? "NEW_AND_OLD_IMAGES",
       tags: makeTags(tagCtx, "dynamodb")
     });
+
+    // Merge EFF_TABLE_SELF (own table name) into deps env vars
+    const selfEnv: Record<string, string> = { EFF_TABLE_SELF: tableName, ...depsEnv };
 
     const { functionArn } = yield* deployCoreLambda({
       input,
@@ -60,7 +65,9 @@ export const deployTableFunction = ({ input, fn, layerArn, external }: DeployTab
       ...(config.memory ? { memory: config.memory } : {}),
       ...(config.timeout ? { timeout: config.timeout } : {}),
       ...(layerArn ? { layerArn } : {}),
-      ...(external ? { external } : {})
+      ...(external ? { external } : {}),
+      depsEnv: selfEnv,
+      ...(depsPermissions ? { depsPermissions } : {})
     });
 
     yield* Effect.logInfo("Setting up event source mapping...");
@@ -98,6 +105,7 @@ export const deployTable = (input: DeployInput) =>
     // Ensure layer exists
     const { layerArn, external } = yield* ensureLayerAndExternal({
       project: input.project,
+      stage: resolveStage(input.stage),
       region: input.region,
       projectDir: input.projectDir
     });
@@ -134,6 +142,7 @@ export const deployAllTables = (input: DeployInput) =>
     // Ensure layer exists
     const { layerArn, external } = yield* ensureLayerAndExternal({
       project: input.project,
+      stage: resolveStage(input.stage),
       region: input.region,
       projectDir: input.projectDir
     });

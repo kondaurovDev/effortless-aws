@@ -61,12 +61,14 @@ export type LayerInfo = {
 
 export const ensureLayerAndExternal = (input: {
   project: string;
+  stage: string;
   region: string;
   projectDir: string;
 }) =>
   Effect.gen(function* () {
     const layerResult = yield* ensureLayer({
       project: input.project,
+      stage: input.stage,
       region: input.region,
       projectDir: input.projectDir
     });
@@ -97,6 +99,10 @@ export type DeployCoreLambdaInput = {
   bundleType?: "http" | "table";
   layerArn?: string;
   external?: string[];
+  /** Environment variables to set on the Lambda (e.g., for deps) */
+  depsEnv?: Record<string, string>;
+  /** Additional IAM permissions for deps access */
+  depsPermissions?: readonly string[];
 };
 
 export const deployCoreLambda = ({
@@ -109,7 +115,9 @@ export const deployCoreLambda = ({
   timeout = 30,
   bundleType,
   layerArn,
-  external
+  external,
+  depsEnv,
+  depsPermissions
 }: DeployCoreLambdaInput) =>
   Effect.gen(function* () {
     const tagCtx: TagContext = {
@@ -126,11 +134,13 @@ export const deployCoreLambda = ({
 
     const mergedPermissions = [
       ...(defaultPermissions ?? []),
-      ...(permissions ?? [])
+      ...(permissions ?? []),
+      ...(depsPermissions ?? [])
     ];
 
     const roleArn = yield* ensureRole(
       input.project,
+      tagCtx.stage,
       handlerName,
       mergedPermissions.length > 0 ? mergedPermissions : undefined,
       makeTags(tagCtx, "iam-role")
@@ -144,8 +154,16 @@ export const deployCoreLambda = ({
     });
     const code = yield* zip({ content: bundled });
 
+    const environment: Record<string, string> = {
+      EFF_PROJECT: input.project,
+      EFF_STAGE: tagCtx.stage,
+      EFF_HANDLER: handlerName,
+      ...depsEnv
+    };
+
     const functionArn = yield* ensureLambda({
       project: input.project,
+      stage: tagCtx.stage,
       name: handlerName,
       region: input.region,
       roleArn,
@@ -153,7 +171,8 @@ export const deployCoreLambda = ({
       memory,
       timeout,
       tags: makeTags(tagCtx, "lambda"),
-      ...(layerArn ? { layers: [layerArn] } : {})
+      ...(layerArn ? { layers: [layerArn] } : {}),
+      environment
     });
 
     return { functionArn, tagCtx };

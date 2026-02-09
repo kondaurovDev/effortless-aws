@@ -19,12 +19,13 @@ const BASIC_EXECUTION_POLICY_ARN = "arn:aws:iam::aws:policy/service-role/AWSLamb
 
 export const ensureRole = (
   project: string,
+  stage: string,
   name: string,
   additionalActions?: string[],
   tags?: Record<string, string>
 ) =>
   Effect.gen(function* () {
-    const roleName = `${project}-${name}-role`;
+    const roleName = `${project}-${stage}-${name}-role`;
 
     const existingRole = yield* iam.make("get_role", { RoleName: roleName }).pipe(
       Effect.map(r => r.Role),

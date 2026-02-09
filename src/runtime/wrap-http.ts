@@ -1,4 +1,5 @@
 import type { HttpHandler } from "~/handlers/define-http";
+import { buildDeps, buildParams } from "./handler-utils";
 
 const parseBody = (body: string | undefined, isBase64: boolean): unknown => {
   if (!body) return undefined;
@@ -22,8 +23,30 @@ type LambdaEvent = {
 };
 
 export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
-  let deps: C | null = null;
-  const getDeps = () => (deps ??= handler.context?.() as C);
+  let ctx: C | null = null;
+  let resolvedDeps: Record<string, unknown> | undefined;
+  let resolvedParams: Record<string, unknown> | undefined | null = null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const getDeps = () => (resolvedDeps ??= buildDeps((handler as any).deps));
+
+  const getParams = async () => {
+    if (resolvedParams !== null) return resolvedParams;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    resolvedParams = await buildParams((handler as any).params);
+    return resolvedParams;
+  };
+
+  const getCtx = async () => {
+    if (ctx !== null) return ctx;
+    if (handler.context) {
+      const params = await getParams();
+      ctx = params
+        ? await handler.context({ params })
+        : await handler.context();
+    }
+    return ctx;
+  };
 
   return async (event: LambdaEvent) => {
     const req = {
@@ -36,6 +59,21 @@ export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
       rawBody: event.body,
     };
 
+    const toResult = (r: { status: number; body?: unknown; headers?: Record<string, string> }) => ({
+      statusCode: r.status,
+      headers: { "Content-Type": "application/json", ...r.headers },
+      body: JSON.stringify(r.body),
+    });
+
+    const defaultError = (error: unknown, status: number) => ({
+      statusCode: status,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        error: status === 400 ? "Validation failed" : "Internal server error",
+        details: error instanceof Error ? error.message : String(error),
+      }),
+    });
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const args: Record<string, unknown> = { req };
 
@@ -43,27 +81,33 @@ export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
       try {
         args.data = handler.schema(req.body);
       } catch (error) {
-        return {
-          statusCode: 400,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            error: "Validation failed",
-            details: error instanceof Error ? error.message : String(error),
-          }),
-        };
+        return handler.onError
+          ? toResult(handler.onError(error, req))
+          : defaultError(error, 400);
       }
     }
 
     if (handler.context) {
-      args.ctx = getDeps();
+      args.ctx = await getCtx();
     }
 
-    const response = await (handler.onRequest as any)(args);
+    const deps = getDeps();
+    if (deps) {
+      args.deps = deps;
+    }
 
-    return {
-      statusCode: response.status,
-      headers: { "Content-Type": "application/json", ...response.headers },
-      body: JSON.stringify(response.body),
-    };
+    const params = await getParams();
+    if (params) {
+      args.params = params;
+    }
+
+    try {
+      const response = await (handler.onRequest as any)(args);
+      return toResult(response);
+    } catch (error) {
+      return handler.onError
+        ? toResult(handler.onError(error, req))
+        : defaultError(error, 500);
+    }
   };
 };
