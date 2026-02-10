@@ -304,6 +304,51 @@ destroy:
   delete all resources for this project/stage
 ```
 
+## Stage Isolation
+
+Each stage (`dev`, `staging`, `prod`, etc.) is a **fully independent set of AWS resources** with no shared infrastructure between stages. This is a deliberate design decision.
+
+```
+eff deploy --stage dev       eff deploy --stage prod
+         │                            │
+         ▼                            ▼
+┌──────────────────────┐   ┌──────────────────────┐
+│  my-app-dev          │   │  my-app-prod         │
+│                      │   │                      │
+│  API Gateway         │   │  API Gateway         │
+│  Lambda functions    │   │  Lambda functions     │
+│  DynamoDB tables     │   │  DynamoDB tables      │
+│  IAM roles           │   │  IAM roles            │
+│  Lambda layer        │   │  Lambda layer         │
+│  Platform table      │   │  Platform table       │
+└──────────────────────┘   └──────────────────────┘
+       (isolated)                 (isolated)
+```
+
+### Why not a shared API Gateway with multiple stages?
+
+AWS API Gateway V2 (HTTP API) supports built-in stages, which might seem like a natural way to separate environments. However, sharing an API Gateway across stages has significant drawbacks:
+
+- **Blast radius** — a misconfigured route or a broken deployment on `dev` can affect `prod` if they share the same API Gateway resource.
+- **Throttling and rate limits** — API Gateway limits (requests per second, burst) are shared across all stages of the same API. A load test on `dev` could throttle `prod` traffic.
+- **Stage variables in HTTP API** — API Gateway V2 does not support stage variables in Lambda integrations, so there's no clean way to route the same path to different Lambda functions per stage.
+- **Independent lifecycle** — separate resources can be created, updated, and destroyed independently. Destroying `dev` never risks touching `prod`.
+
+### Naming convention
+
+All resources include both the project name and stage in their identifiers, ensuring no collisions:
+
+| Resource | Naming pattern |
+|---|---|
+| Lambda function | `${project}-${stage}-${handler}` |
+| IAM role | `${project}-${stage}-${handler}-role` |
+| API Gateway | `${project}-${stage}` |
+| DynamoDB table | `${project}-${stage}-${handler}` |
+| Platform table | `${project}-${stage}-platform` |
+| Lambda layer | `${project}-${stage}-deps` |
+
+---
+
 ## Inter-Handler Dependencies (`deps`)
 
 Handlers can declare dependencies on other handlers. The framework auto-wires environment variables, IAM permissions, and provides typed runtime clients.
