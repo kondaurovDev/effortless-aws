@@ -1,5 +1,13 @@
 # effortless-aws
 
+## 0.3.0
+
+### Minor Changes
+
+- [`d06cea3`](https://github.com/kondaurovDev/effortless-aws/commit/d06cea324c8718d0ad59213b7671b47e9045d7bf) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add static file bundling for Lambda handlers
+
+  Handlers can now declare `static: ["src/templates/*.ejs"]` to bundle files into the Lambda ZIP. A typed `readStatic(path)` helper is injected into the handler callback args to read bundled files at runtime.
+
 ## 0.2.1
 
 ### Patch Changes
