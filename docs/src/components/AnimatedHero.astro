@@ -1,0 +1,109 @@
+---
+const phrases = [
+  { text: "Deploy in seconds", color: "#f97316" },
+  { text: "No YAML, no state files", color: "#a78bfa" },
+  { text: "Write code, not config", color: "#f472b6" },
+  { text: "Just TypeScript", color: "#38bdf8" },
+];
+---
+
+<div class="animated-hero">
+  <h1>
+    <span class="title">Effortless AWS</span>
+    <span class="rotating-wrapper">
+      {phrases.map((phrase, i) => (
+        <span class="rotating-text" style={`--i: ${i}; color: ${phrase.color};`}>
+          {phrase.text}
+        </span>
+      ))}
+    </span>
+  </h1>
+  <p class="tagline">Export handlers, deploy to AWS. No infrastructure files needed.</p>
+  <a class="cta" href="/getting-started/">Getting Started →</a>
+</div>
+
+<style>
+  .animated-hero {
+    text-align: center;
+    padding: 3rem 1rem 2rem;
+  }
+
+  .animated-hero h1 {
+    margin: 0;
+  }
+
+  .title {
+    display: block;
+    font-size: clamp(2.5rem, 6vw, 4rem);
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--sl-color-white);
+    margin-bottom: 0.5rem;
+  }
+
+  .rotating-wrapper {
+    display: block;
+    position: relative;
+    height: 1.5em;
+    overflow: hidden;
+    font-size: clamp(1.3rem, 3vw, 2rem);
+    font-weight: 700;
+    line-height: 1.5;
+  }
+
+  .rotating-text {
+    display: block;
+    position: absolute;
+    width: 100%;
+    left: 0;
+    opacity: 0;
+    transform: translateY(30px);
+    animation: rotate-text 8s ease-in-out infinite;
+    animation-delay: calc(var(--i) * 2s);
+  }
+
+  .tagline {
+    font-size: clamp(1rem, 2vw, 1.15rem);
+    color: var(--sl-color-gray-3);
+    margin: 1rem 0 1.5rem;
+  }
+
+  .cta {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    background: var(--sl-color-accent);
+    color: white !important;
+    font-weight: 600;
+    font-size: 1.1rem;
+    border-radius: 0.5rem;
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  .cta:hover {
+    opacity: 0.9;
+  }
+
+  @keyframes rotate-text {
+    0% {
+      opacity: 0;
+      transform: translateY(30px);
+    }
+    5% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    20% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    25% {
+      opacity: 0;
+      transform: translateY(-30px);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-30px);
+    }
+  }
+</style>

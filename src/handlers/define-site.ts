@@ -18,6 +18,8 @@ export type SiteConfig = {
   memory?: number;
   /** Lambda timeout in seconds (default: 5) */
   timeout?: number;
+  /** Enable observability logging to platform table (default: false) */
+  observe?: boolean;
 };
 
 /**

@@ -4,9 +4,18 @@ import starlight from "@astrojs/starlight";
 export default defineConfig({
   integrations: [
     starlight({
-      title: "Effortless AWS",
+      title: "Effortless",
+      logo: {
+        light: "./src/assets/logo-light.svg",
+        dark: "./src/assets/logo-dark.svg",
+      },
+      favicon: "/logo.png",
+      customCss: ["./src/styles/custom.css"],
       social: {
         github: "https://github.com/kondaurovDev/effortless-aws",
+      },
+      components: {
+        SocialIcons: "./src/components/HeaderLinks.astro",
       },
       sidebar: [
         {

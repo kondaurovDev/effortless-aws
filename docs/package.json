@@ -8,14 +8,19 @@
     "preview": "astro preview"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "sharp"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ],
+    "overrides": {
+      "effortless-aws": "link:.."
+    }
   },
   "devDependencies": {
-    "astro": "^5.0.0",
     "@astrojs/starlight": "^0.32.0",
-    "effortless-aws": "^0.4.0",
+    "astro": "^5.0.0",
+    "effortless-aws": "^0.4.1",
     "sharp": "^0.33.0",
     "typescript": "^5.9.0"
   }
 }
-

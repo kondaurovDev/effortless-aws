@@ -1,0 +1,14 @@
+/* Hide the auto-generated page title on the home page (has AnimatedHero) */
+main:has(.animated-hero) > .content-panel:first-child {
+  display: none;
+}
+
+/* Logo: bigger, tighter gap */
+.site-title {
+  gap: 0.25rem !important;
+}
+
+.site-title img {
+  height: 2rem;
+  width: auto;
+}

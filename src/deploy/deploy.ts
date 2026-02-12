@@ -245,9 +245,10 @@ const deployHttpHandlers = (ctx: DeployHttpHandlersInput) =>
           resolveDeps(fn.depsKeys, ctx.tableNameMap),
           resolveParams(fn.paramEntries, ctx.input.project, stage)
         );
+        const observe = fn.config.observe !== false;
         const withPlatform = {
-          depsEnv: { ...resolved?.depsEnv, ...ctx.platformEnv },
-          depsPermissions: [...(resolved?.depsPermissions ?? []), ...ctx.platformPermissions],
+          depsEnv: { ...resolved?.depsEnv, ...(observe ? ctx.platformEnv : {}) },
+          depsPermissions: [...(resolved?.depsPermissions ?? []), ...(observe ? ctx.platformPermissions : [])],
         };
         const { exportName, functionArn, config } = yield* deployLambda({
           input: deployInput,
@@ -322,9 +323,10 @@ const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
           resolveDeps(fn.depsKeys, ctx.tableNameMap),
           resolveParams(fn.paramEntries, ctx.input.project, stage)
         );
+        const observe = fn.config.observe !== false;
         const withPlatform = {
-          depsEnv: { ...resolved?.depsEnv, ...ctx.platformEnv },
-          depsPermissions: [...(resolved?.depsPermissions ?? []), ...ctx.platformPermissions],
+          depsEnv: { ...resolved?.depsEnv, ...(observe ? ctx.platformEnv : {}) },
+          depsPermissions: [...(resolved?.depsPermissions ?? []), ...(observe ? ctx.platformPermissions : [])],
         };
         const result = yield* deployTableFunction({
           input: deployInput,
@@ -349,6 +351,14 @@ const deployTableHandlers = (ctx: DeployTableHandlersInput) =>
 
     return results;
   });
+
+// ============ Site route helpers ============
+
+/** Build the two API Gateway route paths for a site handler. */
+export function buildSiteRoutePaths(configPath: string): [root: string, greedy: string] {
+  const basePath = configPath.replace(/\/+$/, "");
+  return [basePath || "/", `${basePath}/{file+}`];
+}
 
 // ============ Site handlers deployment ============
 
@@ -378,9 +388,10 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
       if (ctx.input.stage) deployInput.stage = ctx.input.stage;
 
       for (const fn of exports) {
+        const observe = fn.config.observe === true;
         const withPlatform = {
-          depsEnv: { ...ctx.platformEnv },
-          depsPermissions: [...ctx.platformPermissions],
+          depsEnv: observe ? { ...ctx.platformEnv } : {},
+          depsPermissions: observe ? [...ctx.platformPermissions] : [],
         };
         const { exportName, functionArn, config, handlerName } = yield* deploySiteLambda({
           input: deployInput,
@@ -398,8 +409,7 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
           )
         );
 
-        // Strip trailing slash from base path
-        const basePath = config.path.replace(/\/+$/, "") || "/";
+        const [rootPath, greedyPath] = buildSiteRoutePaths(config.path);
 
         // Route 1: root path (serves index.html)
         const { apiUrl: rootUrl } = yield* addRouteToApi({
@@ -407,7 +417,7 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
           region: ctx.input.region,
           functionArn,
           method: "GET",
-          path: basePath
+          path: rootPath
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -423,7 +433,7 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
           region: ctx.input.region,
           functionArn,
           method: "GET",
-          path: `${basePath}/{file+}`
+          path: greedyPath
         }).pipe(
           Effect.provide(
             Aws.makeClients({
@@ -434,7 +444,7 @@ const deploySiteHandlers = (ctx: DeploySiteHandlersInput) =>
         );
 
         results.push({ exportName, url: rootUrl, functionArn });
-        yield* Effect.logInfo(`  GET ${basePath} → ${handlerName} (site)`);
+        yield* Effect.logInfo(`  GET ${rootPath} → ${handlerName} (site)`);
       }
     }
 

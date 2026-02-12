@@ -1,0 +1,17 @@
+---
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+---
+<a href="/getting-started/" class="header-doc-link">Docs</a>
+<Default {...Astro.props} />
+
+<style>
+  .header-doc-link {
+    color: var(--sl-color-white);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.875rem;
+  }
+  .header-doc-link:hover {
+    color: var(--sl-color-text-accent);
+  }
+</style>

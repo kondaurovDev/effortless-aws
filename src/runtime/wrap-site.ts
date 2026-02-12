@@ -45,12 +45,10 @@ const CONTENT_TYPES: Record<string, string> = {
   ".zip": "application/zip",
 };
 
-// Extensions that need base64 encoding for API Gateway v2
-const BINARY_EXTENSIONS = new Set([
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".bmp",
-  ".woff", ".woff2", ".ttf", ".otf", ".eot",
-  ".mp4", ".webm", ".mp3", ".ogg",
-  ".pdf", ".wasm", ".gz", ".zip",
+// Text extensions served as UTF-8; everything else is binary (base64 for API Gateway v2)
+const TEXT_EXTENSIONS = new Set([
+  ".html", ".htm", ".css", ".js", ".mjs", ".json", ".xml",
+  ".txt", ".csv", ".md", ".svg", ".map",
 ]);
 
 type LambdaEvent = {
@@ -115,7 +113,7 @@ function serveFile(
 ) {
   const ext = extname(filePath).toLowerCase();
   const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
-  const binary = BINARY_EXTENSIONS.has(ext);
+  const binary = !TEXT_EXTENSIONS.has(ext);
 
   // HTML: always revalidate. Other assets: long cache (assumes hashed filenames).
   const isHtml = ext === ".html" || ext === ".htm";

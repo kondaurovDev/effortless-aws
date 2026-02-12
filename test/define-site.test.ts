@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import * as path from "path"
 
 import { extractSiteConfigs } from "~/build/bundle"
+import { buildSiteRoutePaths } from "~/deploy/deploy"
 import { importBundle } from "./helpers/bundle-code"
 
 const projectDir = path.resolve(__dirname, "..")
@@ -126,6 +127,41 @@ describe("defineSite extraction", () => {
 
     const configs = extractSiteConfigs(source);
     expect(configs).toHaveLength(0);
+  });
+
+});
+
+// ============ Route path resolution ============
+
+describe("buildSiteRoutePaths", () => {
+
+  it("root path: / → GET / and GET /{file+}", () => {
+    const [root, greedy] = buildSiteRoutePaths("/");
+    expect(root).toBe("/");
+    expect(greedy).toBe("/{file+}");
+  });
+
+  it("subpath: /app → GET /app and GET /app/{file+}", () => {
+    const [root, greedy] = buildSiteRoutePaths("/app");
+    expect(root).toBe("/app");
+    expect(greedy).toBe("/app/{file+}");
+  });
+
+  it("trailing slash: /app/ → GET /app and GET /app/{file+}", () => {
+    const [root, greedy] = buildSiteRoutePaths("/app/");
+    expect(root).toBe("/app");
+    expect(greedy).toBe("/app/{file+}");
+  });
+
+  it("nested path: /docs/v2 → GET /docs/v2 and GET /docs/v2/{file+}", () => {
+    const [root, greedy] = buildSiteRoutePaths("/docs/v2");
+    expect(root).toBe("/docs/v2");
+    expect(greedy).toBe("/docs/v2/{file+}");
+  });
+
+  it("no double slashes in greedy path for root", () => {
+    const [, greedy] = buildSiteRoutePaths("/");
+    expect(greedy).not.toContain("//");
   });
 
 });

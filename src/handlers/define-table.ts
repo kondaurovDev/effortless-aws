@@ -54,6 +54,8 @@ export type TableConfig = {
   timeout?: number;
   /** Additional IAM permissions for the Lambda */
   permissions?: Permission[];
+  /** Enable observability logging to platform table (default: true) */
+  observe?: boolean;
 };
 
 /**

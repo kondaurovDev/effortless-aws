@@ -50,6 +50,31 @@ See [Roadmap](./roadmap) for the full list of planned features.
 npm install effortless-aws
 ```
 
+## AWS Credentials
+
+Effortless deploys directly to your AWS account using the AWS SDK. You need working credentials before running `npx eff deploy`.
+
+Any standard AWS credential method works:
+
+- **`~/.aws/credentials`** — static access keys (simplest for local dev)
+- **Environment variables** — `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`
+- **SSO** — `aws sso login` if your org uses IAM Identity Center
+- **IAM role** — for CI/CD environments (GitHub Actions, etc.)
+
+Verify with:
+
+```bash
+aws sts get-caller-identity
+```
+
+:::caution
+The IAM user or role needs permissions to manage Lambda, API Gateway, DynamoDB, IAM roles, and SSM. `AdministratorAccess` is simplest for development — scope it down for production.
+:::
+
+:::note[Coming soon]
+A [Control Plane Lambda](/roadmap#control-plane--web-dashboard) is planned that will handle deploys inside your AWS account — no local credentials needed. One-time setup, then developers only need an API key.
+:::
+
 ## Quick Start
 
 ### 1. Create config file
