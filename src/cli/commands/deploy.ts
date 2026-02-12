@@ -60,13 +60,16 @@ export const deployCommand = Command.make(
               region: finalRegion,
             });
 
-            const total = results.httpResults.length + results.tableResults.length;
+            const total = results.httpResults.length + results.tableResults.length + results.siteResults.length;
             yield* Console.log(`\nDeployed ${total} handler(s):`);
             for (const r of results.httpResults) {
               yield* Console.log(`  [http] ${r.exportName}: ${r.url}`);
             }
             for (const r of results.tableResults) {
               yield* Console.log(`  [table] ${r.exportName}: ${r.tableArn}`);
+            }
+            for (const r of results.siteResults) {
+              yield* Console.log(`  [site] ${r.exportName}: ${r.url}`);
             }
           }),
         onSome: (targetValue) =>
@@ -127,7 +130,7 @@ export const deployCommand = Command.make(
 
               let foundFile: string | null = null;
               let foundExport: string | null = null;
-              let isTableHandler = false;
+              let handlerType: "http" | "table" | "site" = "http";
 
               for (const { file, exports } of discovered.httpHandlers) {
                 for (const { exportName, config: handlerConfig } of exports) {
@@ -146,7 +149,21 @@ export const deployCommand = Command.make(
                     if (handlerConfig.name === targetValue) {
                       foundFile = file;
                       foundExport = exportName;
-                      isTableHandler = true;
+                      handlerType = "table";
+                      break;
+                    }
+                  }
+                  if (foundFile) break;
+                }
+              }
+
+              if (!foundFile) {
+                for (const { file, exports } of discovered.siteHandlers) {
+                  for (const { exportName, config: handlerConfig } of exports) {
+                    if (handlerConfig.name === targetValue) {
+                      foundFile = file;
+                      foundExport = exportName;
+                      handlerType = "site";
                       break;
                     }
                   }
@@ -167,6 +184,11 @@ export const deployCommand = Command.make(
                     yield* Console.log(`  [table] ${c.name}`);
                   }
                 }
+                for (const { exports } of discovered.siteHandlers) {
+                  for (const { config: c } of exports) {
+                    yield* Console.log(`  [site] ${c.name}`);
+                  }
+                }
                 return;
               }
 
@@ -181,10 +203,11 @@ export const deployCommand = Command.make(
                 exportName: foundExport,
               };
 
-              if (isTableHandler) {
+              if (handlerType === "table") {
                 const result = yield* deployTable(input);
                 yield* Console.log(`\nTable deployed: ${result.tableArn}`);
               } else {
+                // Both http and site handlers deploy via the same deploy() path
                 const result = yield* deploy(input);
                 yield* Console.log(`\nDeployed: ${result.url}`);
               }

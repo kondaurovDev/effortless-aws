@@ -29,6 +29,7 @@
     "prebuild": "pnpm run gen",
     "build": "tsup",
     "typecheck": "tsc --noEmit",
+    "pretest": "tsup",
     "test": "vitest run",
     "link": "pnpm build && pnpm link --global"
   },

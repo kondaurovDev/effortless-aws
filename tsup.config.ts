@@ -43,6 +43,7 @@ export default defineConfig([
     entry: {
       "runtime/wrap-http": "src/runtime/wrap-http.ts",
       "runtime/wrap-table-stream": "src/runtime/wrap-table-stream.ts",
+      "runtime/wrap-site": "src/runtime/wrap-site.ts",
     },
     format: ["esm"],
     dts: false,

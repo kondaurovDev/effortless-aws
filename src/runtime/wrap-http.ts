@@ -1,6 +1,17 @@
-import type { HttpHandler } from "~/handlers/define-http";
+import type { HttpHandler, ContentType } from "~/handlers/define-http";
 import { createHandlerRuntime } from "./handler-utils";
 import { truncateForStorage } from "./platform-types";
+
+const CONTENT_TYPE_MAP: Record<ContentType, string> = {
+  json: "application/json",
+  html: "text/html; charset=utf-8",
+  text: "text/plain; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  js: "application/javascript; charset=utf-8",
+  xml: "application/xml; charset=utf-8",
+  csv: "text/csv; charset=utf-8",
+  svg: "image/svg+xml; charset=utf-8",
+};
 
 const parseBody = (body: string | undefined, isBase64: boolean): unknown => {
   if (!body) return undefined;
@@ -26,12 +37,17 @@ type LambdaEvent = {
 export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
   const rt = createHandlerRuntime(handler, "http");
 
-  const toResult = (r: { status: number; body?: unknown; headers?: Record<string, string> }) => {
-    const customContentType = r.headers?.["content-type"] ?? r.headers?.["Content-Type"];
-    const isJson = !customContentType || customContentType.includes("application/json");
+  const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string> }) => {
+    const resolved = r.contentType ? CONTENT_TYPE_MAP[r.contentType] : undefined;
+    const customContentType = resolved ?? r.headers?.["content-type"] ?? r.headers?.["Content-Type"];
+    const isJson = !customContentType || customContentType === "application/json";
     return {
       statusCode: r.status,
-      headers: { ...(isJson ? { "Content-Type": "application/json" } : {}), ...r.headers },
+      headers: {
+        "Content-Type": customContentType ?? "application/json",
+        ...r.headers,
+        ...(resolved ? { "Content-Type": resolved } : {}),
+      },
       body: isJson ? JSON.stringify(r.body) : String(r.body ?? ""),
     };
   };
@@ -63,8 +79,6 @@ export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
 
     const input = truncateForStorage({ method: req.method, path: req.path, query: req.query, body: req.body });
 
-    // Schema validation
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const args: Record<string, unknown> = { req };
     if (handler.schema) {
       try {

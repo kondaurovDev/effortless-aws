@@ -163,6 +163,12 @@ export const handlerRegistry = {
     wrapperFn: "wrapTableStream",
     wrapperPath: "~/runtime/wrap-table-stream",
   },
+  site: {
+    defineFn: "defineSite",
+    handlerProps: [],
+    wrapperFn: "wrapSite",
+    wrapperPath: "~/runtime/wrap-site",
+  },
 } as const;
 
 export type HandlerType = keyof typeof handlerRegistry;

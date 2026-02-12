@@ -102,6 +102,99 @@ describe("defineHttp", () => {
     expect(response.body).toBe("console.log('hello')");
   });
 
+  describe("contentType", () => {
+
+    it("should resolve contentType shorthand to full MIME type", async () => {
+      const handlerCode = `
+        import { defineHttp } from "./src/handlers/define-http";
+
+        export default defineHttp({
+          method: "GET",
+          path: "/page",
+          onRequest: async () => ({
+            status: 200,
+            body: "<h1>Hello</h1>",
+            contentType: "html"
+          })
+        });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir });
+      const response = await mod.handler(makeEvent({ requestContext: { http: { method: "GET", path: "/page" } } }));
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["Content-Type"]).toBe("text/html; charset=utf-8");
+      expect(response.body).toBe("<h1>Hello</h1>");
+    });
+
+    it("should resolve js contentType and not JSON-stringify the body", async () => {
+      const handlerCode = `
+        import { defineHttp } from "./src/handlers/define-http";
+
+        export default defineHttp({
+          method: "GET",
+          path: "/widget.js",
+          onRequest: async () => ({
+            status: 200,
+            body: "console.log('widget')",
+            contentType: "js"
+          })
+        });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir });
+      const response = await mod.handler(makeEvent({ requestContext: { http: { method: "GET", path: "/widget.js" } } }));
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["Content-Type"]).toBe("application/javascript; charset=utf-8");
+      expect(response.body).toBe("console.log('widget')");
+    });
+
+    it("should default to JSON when contentType is not specified", async () => {
+      const handlerCode = `
+        import { defineHttp } from "./src/handlers/define-http";
+
+        export default defineHttp({
+          method: "GET",
+          path: "/data",
+          onRequest: async () => ({
+            status: 200,
+            body: { ok: true }
+          })
+        });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir });
+      const response = await mod.handler(makeEvent({ requestContext: { http: { method: "GET", path: "/data" } } }));
+
+      expect(response.headers["Content-Type"]).toBe("application/json");
+      expect(response.body).toBe('{"ok":true}');
+    });
+
+    it("should let contentType override headers content-type", async () => {
+      const handlerCode = `
+        import { defineHttp } from "./src/handlers/define-http";
+
+        export default defineHttp({
+          method: "GET",
+          path: "/test",
+          onRequest: async () => ({
+            status: 200,
+            body: "<p>hi</p>",
+            contentType: "html",
+            headers: { "content-type": "text/plain" }
+          })
+        });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir });
+      const response = await mod.handler(makeEvent({ requestContext: { http: { method: "GET", path: "/test" } } }));
+
+      expect(response.headers["Content-Type"]).toBe("text/html; charset=utf-8");
+    });
+
+  });
+
   describe("schema", () => {
 
     it("should validate body and pass data to handler", async () => {
