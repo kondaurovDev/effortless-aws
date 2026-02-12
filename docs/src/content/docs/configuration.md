@@ -1,4 +1,7 @@
-# Configuration
+---
+title: Configuration
+description: Project and per-handler configuration options.
+---
 
 ## Project Config
 

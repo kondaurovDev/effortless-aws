@@ -1,0 +1,21 @@
+{
+  "name": "effortless-docs",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp"]
+  },
+  "devDependencies": {
+    "astro": "^5.0.0",
+    "@astrojs/starlight": "^0.32.0",
+    "effortless-aws": "^0.3.0",
+    "sharp": "^0.33.0",
+    "typescript": "^5.9.0"
+  }
+}
+

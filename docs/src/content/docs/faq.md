@@ -1,4 +1,7 @@
-# FAQ
+---
+title: FAQ
+description: Why AWS, why not CloudFormation, and comparisons with SST, Nitric, and others.
+---
 
 ## Why AWS?
 

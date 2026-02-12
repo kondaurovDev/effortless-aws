@@ -1,4 +1,7 @@
-# CLI Commands
+---
+title: CLI Commands
+description: Available CLI commands for deploying, managing, and debugging.
+---
 
 CLI available as `effortless` or short alias `eff`:
 
@@ -64,4 +67,3 @@ npx eff list [options]
 Options:
   --stage <name>     Deployment stage
 ```
-

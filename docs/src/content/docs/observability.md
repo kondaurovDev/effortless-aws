@@ -1,4 +1,7 @@
-# Observability
+---
+title: Observability
+description: Automatic execution logging and error tracking via the platform table.
+---
 
 ## Overview
 

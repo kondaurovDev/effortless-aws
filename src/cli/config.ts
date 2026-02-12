@@ -78,6 +78,7 @@ export const getPatternsFromConfig = (config: EffortlessConfig | null): string[]
   const rawPatterns = Array.isArray(handlersConfig) ? handlersConfig : [handlersConfig];
   return rawPatterns.map(p => {
     if (!p.includes("*") && !p.includes("?")) {
+      if (/\.tsx?$/.test(p)) return p;
       return `${p.replace(/\/$/, "")}/**/*.ts`;
     }
     return p;

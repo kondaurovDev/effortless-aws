@@ -1,6 +1,7 @@
-# Getting Started
-
-Export handlers, deploy to AWS. No infrastructure files needed.
+---
+title: Getting Started
+description: Export handlers, deploy to AWS. No infrastructure files needed.
+---
 
 ## Motivation
 
@@ -41,7 +42,7 @@ Inspired by [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/types
 
 Some of these ideas are inspired by [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/) — a great runtime toolkit for Lambda. Effortless takes a different angle: since it controls both the runtime and the infrastructure, it can wire things end-to-end (e.g. auto-create a DynamoDB table for idempotency, or auto-add IAM permissions when you reference an SSM parameter).
 
-See [Roadmap](./roadmap.md) for the full list of planned features.
+See [Roadmap](./roadmap) for the full list of planned features.
 
 ## Installation
 
@@ -126,9 +127,9 @@ npx eff deploy
 
 ## Next Steps
 
-- [Handlers](./handlers.md) - All handler types (defineQueue, defineHttp, defineSchedule, defineEvent, defineS3, defineTable)
-- [Configuration](./configuration.md) - Project and per-handler configuration
-- [CLI](./cli.md) - Available CLI commands
-- [Architecture](./architecture.md) - How it works under the hood
-- [FAQ](./faq.md) - Why AWS, why not CloudFormation, etc.
-- [Roadmap](./roadmap.md) - Planned features (idempotency, parameters, logger, metrics, tracing, middleware)
+- [Handlers](./handlers) - All handler types (defineQueue, defineHttp, defineSchedule, defineEvent, defineS3, defineTable)
+- [Configuration](./configuration) - Project and per-handler configuration
+- [CLI](./cli) - Available CLI commands
+- [Architecture](./architecture) - How it works under the hood
+- [FAQ](./faq) - Why AWS, why not CloudFormation, etc.
+- [Roadmap](./roadmap) - Planned features (idempotency, parameters, logger, metrics, tracing, middleware)

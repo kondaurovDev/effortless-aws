@@ -1,10 +1,13 @@
-# Roadmap
+---
+title: Roadmap
+description: Planned features — idempotency, parameters, logger, metrics, tracing, middleware, and more.
+---
 
 Planned features for effortless. Some ideas are inspired by serverless community patterns and projects like [AWS Lambda Powertools](https://docs.powertools.aws.dev/lambda/typescript/latest/).
 
 Since effortless controls both the runtime and the deployment, these features can be integrated deeper than in a standalone library — auto-creating infrastructure, wiring IAM permissions, and reducing boilerplate.
 
-See also: [CLI Roadmap](./roadmap-cli.md)
+See also: [CLI Roadmap](./roadmap-cli)
 
 ## Features
 
@@ -320,7 +323,7 @@ export const importProducts = defineQueue({
 
 **Problem**: Not every Lambda needs a trigger. Background jobs, workflows, and shared logic need to be callable from other handlers. Complex multi-step workflows need checkpoint/replay to avoid repeated side effects on failure.
 
-**Approach**: `defineFunction` is a Lambda without a trigger — other handlers call it via inter-handler communication (`.invoke()` / `.start()`). The `durable` option accepts a function that derives the execution name from input, enabling [AWS Durable Functions](https://aws.amazon.com/blogs/compute/introducing-durable-functions-for-aws-lambda/) with `step()` checkpoints and `wait()` for external signals.
+**Approach**: `defineFunction` is a Lambda without a trigger — other handlers call it via inter-handler communication (`.invoke()` / `.start()`). The `durable` option accepts a function that derives the execution name from input, enabling durable functions with `step()` checkpoints and `wait()` for external signals.
 
 ```typescript
 export const processOrder = defineFunction({
@@ -392,11 +395,6 @@ Control Plane Lambda (scoped IAM role)
 ```
 
 **Bootstrap**: One-time setup via CloudFormation one-click template or `effortless init` command. After that, developers only need an API key or short-lived token — no AWS credentials.
-
-**Key considerations**:
-- Upload bundles via S3 presigned URL (Lambda 6MB sync payload limit)
-- Long deploys run async: CLI submits job → polls for status
-- Auth options: API key (simple), Cognito (teams), IAM Identity Center (enterprise)
 
 ### Phase 2: Web Dashboard
 

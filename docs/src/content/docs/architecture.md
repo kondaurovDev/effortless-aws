@@ -1,4 +1,7 @@
-# Architecture
+---
+title: Architecture
+description: How effortless works under the hood — build pipeline, deploy flow, and resource management.
+---
 
 ## Overview
 
@@ -564,7 +567,7 @@ extractParamEntries()  →    resolveParams()           →    buildParams(handl
 reads param("key")          generates env vars:            reads EFF_PARAM_<prop>
 calls from AST              EFF_PARAM_dbUrl=               env vars, batch-fetches
 → [{propName, ssmKey}]      /proj/stg/database-url         SSM, applies transforms
-                            + SSM IAM permissions
+
                                                            mergeResolved()
                             mergeResolved()                 combines deps + params
                             combines deps + params          into single env/perms
@@ -674,43 +677,6 @@ ensureLayer()
      Hash-based versioning: only publishes a new layer version when deps change
      Reuses existing layer if hash matches
 ```
-
-#### Phase 1: Recursive collection
-
-Starting from direct `dependencies` in the project's `package.json`, the builder walks the dependency tree by reading each package's own `package.json`:
-
-```
-googleapis
-  → google-auth-library     (declared in googleapis/package.json)
-    → gaxios                 (declared in google-auth-library/package.json)
-      → node-fetch           (declared in gaxios/package.json)
-        → whatwg-url          (declared in node-fetch/package.json)
-```
-
-For **pnpm**, each recursive step resolves through the `.pnpm` store structure:
-1. Find package in current `searchPath` (e.g., `.pnpm/googleapis@140.0.0/node_modules/`)
-2. `realpathSync` to resolve symlinks to actual package location
-3. Fall back to root `node_modules/` (for hoisted deps)
-4. Fall back to scanning `.pnpm/` directory entries
-
-#### Phase 2: Completeness verification
-
-After collection, a verification loop acts as a safety net. For every package in the set, it checks that all declared dependencies are also present. If a transitive dep was missed (e.g., due to a broken symlink or pnpm edge case), it's **automatically added** and a warning is logged:
-
-```
-⚠ [layer] Auto-added missing transitive dep: "whatwg-url" (required by "node-fetch")
-```
-
-This eliminates the class of runtime errors like `Cannot find module 'whatwg-url'` — if a package declares a dependency, it will be in the layer.
-
-### Warnings
-
-All layer operations produce visible warnings instead of silently swallowing errors:
-
-- **Package not found**: `Package "foo" not found (searched: ...) — entire subtree skipped`
-- **Auto-added deps**: `Auto-added missing transitive dep: "bar" (required by "foo")`
-- **Symlink failures**: `realpathSync failed for "foo" at /path: ENOENT`
-- **Skipped packages**: `Skipped N packages (not found): ...`
 
 ### Layer Reuse
 

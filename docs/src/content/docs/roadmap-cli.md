@@ -1,4 +1,7 @@
-# CLI Roadmap
+---
+title: CLI Roadmap
+description: Planned CLI commands — invoke, logs, diff.
+---
 
 Planned CLI commands to improve the development workflow. The goal: fast feedback loop without leaving the terminal.
 

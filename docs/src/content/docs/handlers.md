@@ -1,4 +1,7 @@
-# Handlers
+---
+title: Handlers
+description: All handler types — defineHttp, defineTable, defineQueue, defineSchedule, defineEvent, defineS3.
+---
 
 | Handler | Status |
 |---------|--------|
@@ -81,7 +84,7 @@ export const createOrder = defineHttp({
 });
 ```
 
-Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. See [architecture.md](architecture.md#inter-handler-dependencies-deps) for details.
+Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. See [architecture](./architecture#inter-handler-dependencies-deps) for details.
 
 **Built-in best practices**:
 - **Cold start optimization** — the `context` factory runs once on cold start and is cached across invocations. Use it for DB connections, SDK clients, config loading.
