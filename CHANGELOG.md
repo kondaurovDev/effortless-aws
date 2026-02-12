@@ -1,5 +1,13 @@
 # effortless-aws
 
+## 0.4.2
+
+### Patch Changes
+
+- [`5503acb`](https://github.com/kondaurovDev/effortless-aws/commit/5503acb3d0b0064d0d3b325ed923ee78a4505c89) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix handler file pattern resolution: exact `.ts`/`.tsx` file paths in `handlers` config are now passed through as-is instead of being treated as directories
+
+  Fix static file resolution failing with EISDIR when glob patterns match directories (e.g. `defineSite` with nested `dist/` folder)
+
 ## 0.4.1
 
 ### Patch Changes
