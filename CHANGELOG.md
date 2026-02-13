@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.5.0
+
+### Minor Changes
+
+- [`67a8cf7`](https://github.com/kondaurovDev/effortless-aws/commit/67a8cf7ca6f1d13227102d2adb0f19f58a9b03cc) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add static site hosting with CloudFront CDN and S3
+
 ## 0.4.2
 
 ### Patch Changes
