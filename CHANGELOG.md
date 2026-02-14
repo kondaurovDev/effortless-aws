@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.6.0
+
+### Minor Changes
+
+- [`a9fa164`](https://github.com/kondaurovDev/effortless-aws/commit/a9fa1646784e3d0158ff17d073cfbaf0d8fcf956) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add FIFO queue handler support with `defineFifoQueue`
+
 ## 0.5.0
 
 ### Minor Changes
