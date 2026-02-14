@@ -2,6 +2,7 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
+  site: "https://effortless-aws.website",
   integrations: [
     starlight({
       title: "Effortless",
@@ -10,6 +11,22 @@ export default defineConfig({
         dark: "./src/assets/logo-dark.svg",
       },
       favicon: "/favicon.svg",
+      head: [
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image",
+            content: "https://effortless-aws.website/og-image.png",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:image",
+            content: "https://effortless-aws.website/og-image.png",
+          },
+        },
+      ],
       customCss: ["./src/styles/custom.css"],
       social: {
         github: "https://github.com/kondaurovDev/effortless-aws",
@@ -47,8 +64,10 @@ export default defineConfig({
         {
           label: "Resources",
           items: [
+            { label: "Why Serverless?", slug: "why-serverless" },
             { label: "Why AWS?", slug: "why-aws" },
             { label: "Comparisons", slug: "comparisons" },
+            { label: "FAQ", slug: "faq" },
             { label: "Roadmap", slug: "roadmap" },
             { label: "CLI Roadmap", slug: "roadmap-cli" },
           ],

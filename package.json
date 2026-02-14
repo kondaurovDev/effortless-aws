@@ -4,6 +4,7 @@
   "license": "MIT",
   "type": "module",
   "description": "Code-first AWS Lambda framework",
+  "homepage": "https://effortless-aws.website",
   "repository": {
     "type": "git",
     "url": "https://github.com/kondaurovDev/effortless-aws.git"

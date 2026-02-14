@@ -10,16 +10,13 @@ You want to build a backend on AWS Lambda. You write a handler function. Then th
 Adding a single Lambda endpoint today looks like this:
 
 1. Write the handler code
-2. Define the Lambda in CloudFormation/CDK/Terraform/SST config
-3. Create an IAM role with the right permissions
-4. Wire up API Gateway route
-5. Configure environment variables for table names
-6. Update the deployment pipeline
-7. Wait 2-5 minutes for CloudFormation to deploy
+2. Define the Lambda in a separate infrastructure file (CDK construct, SST config, Terraform resource)
+3. Wire up API Gateway route to the Lambda
+4. Link the table to the function or grant permissions
+5. Pass the table name via environment variables
+6. Wait 1-5 minutes for CloudFormation/Pulumi to deploy
 
-**Seven steps for one endpoint.** And if you need a DynamoDB table with a stream processor, multiply that by three.
-
-The code is the easy part. Everything around it — the YAML, the state files, the IAM policies, the config wiring — that's where the time goes.
+**Six steps for one endpoint.** Tools like CDK and SST automate parts of this (IAM roles, for example), but you still write infrastructure definitions in separate files, keep them in sync with your handler code, and wait for CloudFormation or Pulumi to reconcile state.
 
 ### What a typical project looks like
 
@@ -29,16 +26,14 @@ my-service/
 │   └── handlers/
 │       └── createOrder.ts        ← your code (the part you care about)
 ├── infra/
-│   ├── stacks/
-│   │   ├── ApiStack.ts           ← API Gateway config
-│   │   ├── DatabaseStack.ts      ← DynamoDB config
-│   │   └── FunctionStack.ts      ← Lambda config
-│   └── permissions.ts            ← IAM policies
+│   ├── ApiStack.ts               ← API Gateway + routes
+│   ├── DatabaseStack.ts          ← DynamoDB tables + grants
+│   └── FunctionStack.ts          ← Lambda definitions + linking
 ├── sst.config.ts                 ← or cdk.json, serverless.yml, main.tf...
 └── package.json
 ```
 
-Your handler is one file. The infrastructure around it is five. And they all need to stay in sync manually.
+Your handler is one file. The infrastructure around it is three or four. Every time you add an endpoint, rename a table, or change a dependency — you update both your code and the infra files.
 
 ## The Effortless approach
 
@@ -52,8 +47,24 @@ my-service/
 └── package.json
 ```
 
+```bash
+npx eff deploy    # ~10 seconds
+```
+
+This single file creates:
+- DynamoDB table with partition key
+- Stream processor Lambda (triggered on inserts/updates)
+- HTTP Lambda with DynamoDB write permissions
+- API Gateway `POST /orders` route
+- IAM roles for both Lambdas
+- Environment variables for table name wiring
+
+**No YAML. No state files. No IAM policy writing.**
+
+<details>
+<summary>See the code — src/orders.ts</summary>
+
 ```typescript
-// src/orders.ts
 import { defineTable, defineHttp, typed } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number };
@@ -81,25 +92,28 @@ export const createOrder = defineHttp({
 });
 ```
 
-```bash
-npx eff deploy    # ~10 seconds
-```
+</details>
 
-This single file creates:
-- DynamoDB table with partition key
-- Stream processor Lambda (triggered on inserts/updates)
-- HTTP Lambda with DynamoDB write permissions
-- API Gateway `POST /orders` route
-- IAM roles for both Lambdas
-- Environment variables for table name wiring
+## What Effortless is not
 
-**No YAML. No state files. No IAM policy writing.**
+- **Not multi-cloud.** AWS only. This focus is what makes deep integration possible.
+- **Not a managed platform.** Deploys to your AWS account. You own the resources.
+- **Not a full IaC tool.** Focused on the Lambda ecosystem (Lambda, API Gateway, DynamoDB, SQS, EventBridge, S3, CloudFront). For VPCs, RDS, or ECS — use Terraform/CDK alongside.
+- **Not zero-config.** You still need `effortless.config.ts` for project name and region. But that's one file, not five.
 
 ## Use cases
 
 ### REST API with database
 
 The most common Lambda pattern: HTTP endpoints that read/write from DynamoDB.
+
+- **Schema validation** — invalid requests rejected before your handler runs
+- **Typed clients** — `deps.users.put()` knows the shape of `User`
+- **Auto IAM** — each Lambda gets exactly the DynamoDB permissions it needs
+- **Table name wiring** — no hardcoded ARNs or environment variable plumbing
+
+<details>
+<summary>See the code</summary>
 
 ```typescript
 import { defineTable, defineHttp, typed } from "effortless-aws";
@@ -146,15 +160,14 @@ export const getUser = defineHttp({
 });
 ```
 
-What you get without writing any infrastructure:
-- **Schema validation** — invalid requests rejected before your handler runs
-- **Typed clients** — `deps.users.put()` knows the shape of `User`
-- **Auto IAM** — each Lambda gets exactly the DynamoDB permissions it needs
-- **Table name wiring** — no hardcoded ARNs or environment variable plumbing
+</details>
 
 ### Event-driven processing
 
-DynamoDB streams let you react to data changes without polling.
+DynamoDB streams let you react to data changes without polling. The stream, event source mapping, batch size config, and partial failure reporting are all handled automatically.
+
+<details>
+<summary>See the code</summary>
 
 ```typescript
 import { defineTable, typed } from "effortless-aws";
@@ -185,11 +198,14 @@ export const analytics = defineTable({
 });
 ```
 
-The stream, event source mapping, batch size config, and partial failure reporting are all handled automatically.
+</details>
 
 ### Static site / SPA behind API Gateway
 
-Serve a React/Vue/Astro app alongside your API — same project, same deploy.
+Serve a React/Vue/Astro app alongside your API — same project, same deploy. Or use CloudFront + S3 for global CDN distribution.
+
+<details>
+<summary>See the code</summary>
 
 ```typescript
 import { defineApp, defineHttp } from "effortless-aws";
@@ -224,9 +240,14 @@ export const site = defineCdn({
 });
 ```
 
+</details>
+
 ### Secrets and configuration
 
-Pull secrets from SSM Parameter Store at cold start — cached, typed, auto-permissioned.
+Pull secrets from SSM Parameter Store at cold start — cached, typed, auto-permissioned. No manual SSM calls, no `GetParameter` permission writing, no environment variable plumbing.
+
+<details>
+<summary>See the code</summary>
 
 ```typescript
 import { defineHttp, param } from "effortless-aws";
@@ -246,26 +267,20 @@ export const checkout = defineHttp({
 });
 ```
 
-No manual SSM calls. No `GetParameter` permission writing. No environment variable plumbing.
+</details>
 
 ## What you don't need to learn
 
 | Concept | Traditional | Effortless |
 |---------|-------------|------------|
-| IAM policies | Write JSON policies, attach to roles | Automatic from `deps` and `params` |
+| IAM policies | `.grant*()` calls or `link` in infra files | Automatic from `deps` and `params` |
 | CloudFormation / CDK | Learn constructs, stacks, synthesis | Not used |
 | Terraform / HCL | Learn HCL, manage state, plan/apply | Not used |
 | State management | S3 backends, locking, drift detection | AWS tags — no state files |
+| Infra ↔ code sync | Keep infra files in sync with handler code | One file — handler is the infra |
 | API Gateway config | Routes, integrations, stages, deployments | Derived from `method` + `path` |
 | DynamoDB streams | Event source mappings, batch config, failure handling | Add `onRecord` to your table |
 | Lambda Layers | Build, publish, version, attach to functions | Automatic for `node_modules` |
-
-## What Effortless is not
-
-- **Not multi-cloud.** AWS only. This focus is what makes deep integration possible.
-- **Not a managed platform.** Deploys to your AWS account. You own the resources.
-- **Not a full IaC tool.** Focused on the Lambda ecosystem (Lambda, API Gateway, DynamoDB, SQS, EventBridge, S3, CloudFront). For VPCs, RDS, or ECS — use Terraform/CDK alongside.
-- **Not zero-config.** You still need `effortless.config.ts` for project name and region. But that's one file, not five.
 
 ## Next steps
 

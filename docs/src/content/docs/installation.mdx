@@ -3,11 +3,56 @@ title: Installation
 description: Install effortless-aws, set up credentials, and deploy your first handler.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 ## Install the package
 
-```bash
-npm install effortless-aws
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install effortless-aws
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add effortless-aws
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add effortless-aws
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bun add effortless-aws
+    ```
+  </TabItem>
+</Tabs>
+
+## TypeScript config
+
+Effortless requires TypeScript with modern module resolution. If you don't have a `tsconfig.json` yet, create one:
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}
 ```
+
+Why these settings matter:
+- **`strict`** — required for handler type inference (`data`, `deps`, `ctx` only appear in args when configured)
+- **`moduleResolution: "Bundler"`** — allows imports without file extensions (e.g. `import { orders } from "./db"` instead of `"./db.js"`)
 
 ## AWS Credentials
 
@@ -75,9 +120,28 @@ export const hello = defineHttp({
 
 ### 3. Deploy
 
-```bash
-npx eff deploy
-```
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npx eff deploy
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm eff deploy
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn eff deploy
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bunx eff deploy
+    ```
+  </TabItem>
+</Tabs>
 
 That's it. Lambda + API Gateway + IAM role created in ~10 seconds.
 
