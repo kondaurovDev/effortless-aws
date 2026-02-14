@@ -76,7 +76,10 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
     if (selfClient) return selfClient;
     const tableName = process.env[ENV_TABLE_SELF];
     if (!tableName) return undefined;
-    selfClient = createTableClient(tableName);
+    const keys = handler.config?.pk
+      ? { pk: handler.config.pk.name, sk: handler.config.sk?.name }
+      : undefined;
+    selfClient = createTableClient(tableName, keys);
     return selfClient;
   };
 

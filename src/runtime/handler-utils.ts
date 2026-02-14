@@ -22,7 +22,9 @@ export const buildDeps = (deps: Record<string, unknown> | undefined): Record<str
     if (!tableName) {
       throw new Error(`Missing environment variable ${ENV_TABLE_PREFIX}${key} for dep "${key}"`);
     }
-    result[key] = createTableClient(tableName);
+    const dep = deps[key] as any;
+    const keys = dep?.config?.pk ? { pk: dep.config.pk.name, sk: dep.config.sk?.name } : undefined;
+    result[key] = createTableClient(tableName, keys);
   }
   return result;
 };

@@ -45,6 +45,47 @@ describe("createTableClient", () => {
       });
     });
 
+    it("should add ConditionExpression when overwrite: false and return success", async () => {
+      mockPutItem.mockResolvedValueOnce({});
+      const client = createTableClient<TestItem>("orders", { pk: "id" });
+
+      const result = await client.put({ id: "1", name: "Alice", age: 30 }, { overwrite: false });
+
+      expect(mockPutItem).toHaveBeenCalledWith({
+        TableName: "orders",
+        Item: marshall({ id: "1", name: "Alice", age: 30 }, { removeUndefinedValues: true }),
+        ConditionExpression: "attribute_not_exists(#pk)",
+        ExpressionAttributeNames: { "#pk": "id" },
+      });
+      expect(result).toEqual({ success: true });
+    });
+
+    it("should return ALREADY_EXISTS when item exists and overwrite: false", async () => {
+      const err = new Error("conditional check failed");
+      err.name = "ConditionalCheckFailedException";
+      mockPutItem.mockRejectedValueOnce(err);
+      const client = createTableClient<TestItem>("orders", { pk: "id" });
+
+      const result = await client.put({ id: "1", name: "Alice", age: 30 }, { overwrite: false });
+
+      expect(result).toEqual({ success: false, error: "ALREADY_EXISTS" });
+    });
+
+    it("should rethrow non-conditional errors even with overwrite: false", async () => {
+      mockPutItem.mockRejectedValueOnce(new Error("network error"));
+      const client = createTableClient<TestItem>("orders", { pk: "id" });
+
+      await expect(client.put({ id: "1", name: "Alice", age: 30 }, { overwrite: false }))
+        .rejects.toThrow("network error");
+    });
+
+    it("should throw when overwrite: false used without key config", async () => {
+      const client = createTableClient<TestItem>("orders");
+
+      await expect(client.put({ id: "1", name: "Alice", age: 30 }, { overwrite: false }))
+        .rejects.toThrow("Cannot use overwrite: false");
+    });
+
   });
 
   describe("get", () => {
