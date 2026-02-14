@@ -1,11 +1,4 @@
-import { defineApp, defineStaticSite } from "effortless-aws";
-
-export const docs = defineApp({
-  path: "/",
-  dir: "dist",
-  build: "pnpm run build",
-  spa: false,
-});
+import { defineStaticSite } from "effortless-aws";
 
 export const docsCDN = defineStaticSite({
   dir: "dist",
