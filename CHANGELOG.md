@@ -1,5 +1,23 @@
 # effortless-aws
 
+## 0.7.0
+
+### Minor Changes
+
+- [`e96806a`](https://github.com/kondaurovDev/effortless-aws/commit/e96806ac509198c547024b60917f1eacd5a9a448) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Improve CLI, simplify handler API, and refactor deploy pipeline
+
+  - Add `logs` command for viewing Lambda CloudWatch logs
+  - Add `layer` command (renamed from `layers`) for managing Lambda layers
+  - Enhance `status` command with detailed resource information
+  - Improve `cleanup` command with better resource discovery
+  - Add stale route cleanup for API Gateway
+  - Refactor deploy pipeline with improved logging and colored output
+  - Simplify handler definitions: remove `param`, `permissions`, and `typed` modules
+  - Remove platform table (platform-client, platform-types)
+  - Consolidate shared deploy logic into `shared.ts`
+  - Refactor runtime wrappers with unified initialization pattern
+  - Update docs: rewrite architecture, expand configuration, remove observability page
+
 ## 0.6.0
 
 ### Minor Changes
