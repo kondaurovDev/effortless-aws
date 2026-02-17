@@ -1,8 +1,24 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import sitemap from "@astrojs/sitemap";
+import { rename, unlink } from "node:fs/promises";
 
 export default defineConfig({
+  site: "https://effortless-aws.website",
   integrations: [
+    sitemap(),
+    {
+      name: "flatten-sitemap",
+      hooks: {
+        "astro:build:done": async ({ dir }) => {
+          await unlink(new URL("sitemap-index.xml", dir));
+          await rename(
+            new URL("sitemap-0.xml", dir),
+            new URL("sitemap.xml", dir),
+          );
+        },
+      },
+    },
     starlight({
       title: "Effortless",
       logo: {
@@ -17,6 +33,36 @@ export default defineConfig({
       components: {
         SocialIcons: "./src/components/HeaderLinks.astro",
       },
+      head: [
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image",
+            content: "https://effortless-aws.website/og-banner.png",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:type",
+            content: "website",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:site_name",
+            content: "Effortless AWS",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:card",
+            content: "summary_large_image",
+          },
+        },
+      ],
       sidebar: [
         {
           label: "Getting Started",

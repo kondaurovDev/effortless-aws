@@ -3,7 +3,8 @@
   "version": "0.7.0",
   "license": "MIT",
   "type": "module",
-  "description": "Code-first AWS Lambda framework",
+  "description": "Code-first AWS Lambda framework. Export handlers, deploy with one command.",
+  "homepage": "https://effortless-aws.website",
   "repository": {
     "type": "git",
     "url": "https://github.com/kondaurovDev/effortless-aws.git"
@@ -15,10 +16,14 @@
     "aws",
     "lambda",
     "serverless",
-    "effect",
+    "framework",
     "typescript",
     "dynamodb",
-    "api-gateway"
+    "api-gateway",
+    "sqs",
+    "infrastructure-from-code",
+    "deploy",
+    "effect"
   ],
   "bin": {
     "eff": "./dist/cli/index.js",
