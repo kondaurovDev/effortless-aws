@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.7.1
+
+### Patch Changes
+
+- [`529bd87`](https://github.com/kondaurovDev/effortless-aws/commit/529bd872e6ac950828a2ad54eacbd129086db471) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add homepage URL, expand description and keywords for npm discoverability
+
 ## 0.7.0
 
 ### Minor Changes
