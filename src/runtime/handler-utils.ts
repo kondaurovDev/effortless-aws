@@ -64,7 +64,7 @@ export const buildParams = async (
   for (const { propName, ssmPath } of entries) {
     const raw = values.get(ssmPath) ?? "";
     const ref = params[propName];
-    result[propName] = ref?.transform ? ref.transform(raw) : raw;
+    result[propName] = typeof ref === "object" && ref?.transform ? ref.transform(raw) : raw;
   }
 
   return result;
@@ -87,7 +87,7 @@ export const readStatic = (filePath: string): string =>
   readFileSync(join(process.cwd(), filePath), "utf-8");
 
 export const createHandlerRuntime = (
-  handler: { context?: (...args: any[]) => any; deps?: any; params?: any; static?: string[] },
+  handler: { setup?: (...args: any[]) => any; deps?: any; config?: any; static?: string[] },
   handlerType: "http" | "table" | "app" | "fifo-queue",
   logLevel: LogLevel = "info"
 ): HandlerRuntime => {
@@ -102,28 +102,32 @@ export const createHandlerRuntime = (
 
   const getParams = async () => {
     if (resolvedParams !== null) return resolvedParams;
-    resolvedParams = await buildParams(handler.params);
+    resolvedParams = await buildParams(handler.config);
     return resolvedParams;
   };
 
-  const getCtx = async () => {
+  const getSetup = async () => {
     if (ctx !== null) return ctx;
-    if (handler.context) {
+    if (handler.setup) {
       const params = await getParams();
-      ctx = params
-        ? await handler.context({ params })
-        : await handler.context();
+      const deps = getDeps();
+      const args: Record<string, unknown> = {};
+      if (params) args.config = params;
+      if (deps) args.deps = deps;
+      ctx = Object.keys(args).length > 0
+        ? await handler.setup(args)
+        : await handler.setup();
     }
     return ctx;
   };
 
   const commonArgs = async (): Promise<Record<string, unknown>> => {
     const args: Record<string, unknown> = {};
-    if (handler.context) args.ctx = await getCtx();
+    if (handler.setup) args.ctx = await getSetup();
     const deps = getDeps();
     if (deps) args.deps = deps;
     const params = await getParams();
-    if (params) args.params = params;
+    if (params) args.config = params;
     if (handler.static) args.readStatic = readStatic;
     return args;
   };

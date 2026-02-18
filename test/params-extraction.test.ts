@@ -13,10 +13,10 @@ describe("params extraction", () => {
         export const api = defineHttp({
           method: "GET",
           path: "/orders",
-          params: {
+          config: {
             dbUrl: param("database-url"),
           },
-          onRequest: async ({ req, params }) => ({ status: 200 })
+          onRequest: async ({ req, config }) => ({ status: 200 })
         });
       `;
 
@@ -35,11 +35,11 @@ describe("params extraction", () => {
         export const api = defineHttp({
           method: "GET",
           path: "/orders",
-          params: {
+          config: {
             dbUrl: param("database-url"),
             apiKey: param("stripe-api-key"),
           },
-          onRequest: async ({ req, params }) => ({ status: 200 })
+          onRequest: async ({ req, config }) => ({ status: 200 })
         });
       `;
 
@@ -60,10 +60,10 @@ describe("params extraction", () => {
         export const api = defineHttp({
           method: "GET",
           path: "/orders",
-          params: {
-            config: param("app-config", TOML.parse),
+          config: {
+            appConfig: param("app-config", TOML.parse),
           },
-          onRequest: async ({ req, params }) => ({ status: 200 })
+          onRequest: async ({ req, config }) => ({ status: 200 })
         });
       `;
 
@@ -71,7 +71,7 @@ describe("params extraction", () => {
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.paramEntries).toEqual([
-        { propName: "config", ssmKey: "app-config" }
+        { propName: "appConfig", ssmKey: "app-config" }
       ]);
     });
 
@@ -99,7 +99,7 @@ describe("params extraction", () => {
         export default defineHttp({
           method: "GET",
           path: "/orders",
-          params: {
+          config: {
             dbUrl: param("database-url"),
           },
           onRequest: async ({ req }) => ({ status: 200 })
@@ -122,7 +122,7 @@ describe("params extraction", () => {
         export const api = defineHttp({
           method: "GET",
           path: "/orders",
-          params: {
+          config: {
             dbUrl: param("database-url"),
           },
           onRequest: async ({ req }) => ({ status: 200 })
@@ -132,7 +132,7 @@ describe("params extraction", () => {
       const configs = extractConfigs(source);
 
       expect(configs[0]!.config).toEqual({ method: "GET", path: "/orders" });
-      expect(configs[0]!.config).not.toHaveProperty("params");
+      expect(configs[0]!.config).not.toHaveProperty("config");
     });
 
   });
@@ -146,10 +146,10 @@ describe("params extraction", () => {
         export const orders = defineTable({
           name: "orders",
           pk: { name: "id", type: "string" },
-          params: {
+          config: {
             webhookUrl: param("webhook-url"),
           },
-          onRecord: async ({ record, params }) => {}
+          onRecord: async ({ record, config }) => {}
         });
       `;
 
@@ -185,7 +185,7 @@ describe("params extraction", () => {
         export const orders = defineTable({
           name: "orders",
           pk: { name: "id", type: "string" },
-          params: {
+          config: {
             webhookUrl: param("webhook-url"),
           },
           onRecord: async ({ record }) => {}
@@ -194,7 +194,7 @@ describe("params extraction", () => {
 
       const configs = extractTableConfigs(source);
 
-      expect(configs[0]!.config).not.toHaveProperty("params");
+      expect(configs[0]!.config).not.toHaveProperty("config");
       expect(configs[0]!.config.name).toBe("orders");
     });
 

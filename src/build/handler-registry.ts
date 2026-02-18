@@ -7,7 +7,7 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "context", "schema", "onError", "deps", "params", "static"];
+const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "setup", "schema", "onError", "deps", "config", "static"];
 
 const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   const props = obj.getProperties()
@@ -71,44 +71,52 @@ const extractDepsKeys = (obj: ObjectLiteralExpression): string[] => {
 };
 
 /**
- * Extract param entries from the params property of a handler config.
- * Reads: params: { dbUrl: param("database-url"), config: param("app-config", TOML.parse) }
- * Returns: [{ propName: "dbUrl", ssmKey: "database-url" }, { propName: "config", ssmKey: "app-config" }]
+ * Extract param entries from the config property of a handler definition.
+ * Reads: config: { dbUrl: "database-url", appConfig: param("app-config", TOML.parse) }
+ * Returns: [{ propName: "dbUrl", ssmKey: "database-url" }, { propName: "appConfig", ssmKey: "app-config" }]
  */
 export type ParamEntry = { propName: string; ssmKey: string };
 
 const extractParamEntries = (obj: ObjectLiteralExpression): ParamEntry[] => {
-  const paramsProp = obj.getProperties().find(p => {
+  const configProp = obj.getProperties().find(p => {
     if (p.getKind() === SyntaxKind.PropertyAssignment) {
-      return (p as PropertyAssignment).getName() === "params";
+      return (p as PropertyAssignment).getName() === "config";
     }
     return false;
   });
 
-  if (!paramsProp || paramsProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
+  if (!configProp || configProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
 
-  const init = (paramsProp as PropertyAssignment).getInitializer();
+  const init = (configProp as PropertyAssignment).getInitializer();
   if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
 
-  const paramsObj = init as ObjectLiteralExpression;
+  const configObj = init as ObjectLiteralExpression;
   const entries: ParamEntry[] = [];
 
-  for (const p of paramsObj.getProperties()) {
+  for (const p of configObj.getProperties()) {
     if (p.getKind() !== SyntaxKind.PropertyAssignment) continue;
 
     const propAssign = p as PropertyAssignment;
     const propName = propAssign.getName();
     const propInit = propAssign.getInitializer();
 
-    // Expect: param("some-key") or param("some-key", transform)
-    if (!propInit || propInit.getKind() !== SyntaxKind.CallExpression) continue;
+    if (!propInit) continue;
+
+    // Plain string: config: { dbUrl: "database-url" }
+    if (propInit.getKind() === SyntaxKind.StringLiteral) {
+      const ssmKey = propInit.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue();
+      entries.push({ propName, ssmKey });
+      continue;
+    }
+
+    // param() call: config: { dbUrl: param("database-url") } or param("key", transform)
+    if (propInit.getKind() !== SyntaxKind.CallExpression) continue;
 
     const callExpr = propInit as CallExpression;
     const callArgs = callExpr.getArguments();
     if (callArgs.length === 0) continue;
 
     const firstArg = callArgs[0]!;
-    // Extract string literal value
     if (firstArg.getKind() === SyntaxKind.StringLiteral) {
       const ssmKey = firstArg.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue();
       entries.push({ propName, ssmKey });

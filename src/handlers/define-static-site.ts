@@ -20,7 +20,7 @@ export type StaticSiteConfig = {
  */
 export type StaticSiteHandler = {
   readonly __brand: "effortless-static-site";
-  readonly config: StaticSiteConfig;
+  readonly __spec: StaticSiteConfig;
 };
 
 /**
@@ -48,5 +48,5 @@ export type StaticSiteHandler = {
  */
 export const defineStaticSite = (options: StaticSiteConfig): StaticSiteHandler => ({
   __brand: "effortless-static-site",
-  config: options,
+  __spec: options,
 });

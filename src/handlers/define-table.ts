@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../helpers";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
 import type { TableClient } from "../runtime/table-client";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -26,7 +26,7 @@ export type TableKey = {
 export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY";
 
 /**
- * Configuration options extracted from DefineTableOptions (without onRecord/context)
+ * Configuration options extracted from DefineTableOptions (without onRecord/setup)
  */
 export type TableConfig = LambdaWithPermissions & {
   /** Partition key definition */
@@ -80,13 +80,16 @@ export type FailedRecord<T = Record<string, unknown>> = {
 };
 
 /**
- * Context factory type — conditional on whether params are declared.
- * Without params: `() => C | Promise<C>`
- * With params: `(args: { params: ResolveParams<P> }) => C | Promise<C>`
+ * Setup factory type — conditional on whether deps/config are declared.
+ * No deps/config: `() => C | Promise<C>`
+ * With deps/config: `(args: { deps?, config? }) => C | Promise<C>`
  */
-type ContextFactory<C, P> = [P] extends [undefined]
+type SetupFactory<C, D, P> = [D | P] extends [undefined]
   ? () => C | Promise<C>
-  : (args: { params: ResolveParams<P & {}> }) => C | Promise<C>;
+  : (args:
+      & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+      & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+    ) => C | Promise<C>;
 
 /**
  * Callback function type for processing a single DynamoDB stream record
@@ -95,7 +98,7 @@ export type TableRecordFn<T = Record<string, unknown>, C = undefined, R = void, 
   (args: { record: TableRecord<T>; table: TableClient<T> }
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
   ) => Promise<R>;
 
@@ -106,7 +109,7 @@ export type TableBatchCompleteFn<T = Record<string, unknown>, C = undefined, R =
   (args: { results: R[]; failures: FailedRecord<T>[]; table: TableClient<T> }
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
   ) => Promise<void>;
 
@@ -117,7 +120,7 @@ export type TableBatchFn<T = Record<string, unknown>, C = undefined, D = undefin
   (args: { records: TableRecord<T>[]; table: TableClient<T> }
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
   ) => Promise<void>;
 
@@ -135,12 +138,12 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
    */
   onError?: (error: unknown) => void;
   /**
-   * Factory function to create context/dependencies for callbacks.
+   * Factory function to initialize shared state for callbacks.
    * Called once on cold start, result is cached and reused across invocations.
-   * When params are declared, receives resolved params as argument.
+   * When deps/params are declared, receives them as argument.
    * Supports both sync and async return values.
    */
-  context?: ContextFactory<C, P>;
+  setup?: SetupFactory<C, D, P>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -149,9 +152,9 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
   /**
    * SSM Parameter Store parameters.
    * Declare with `param()` helper. Values are fetched and cached at cold start.
-   * Typed values are injected into the handler via the `params` argument.
+   * Typed values are injected into the handler via the `config` argument.
    */
-  params?: P;
+  config?: P;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
    * Files are accessible at runtime via the `readStatic` callback argument.
@@ -198,13 +201,13 @@ export type DefineTableOptions<
  */
 export type TableHandler<T = Record<string, unknown>, C = undefined, R = void, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
   readonly __brand: "effortless-table";
-  readonly config: TableConfig;
+  readonly __spec: TableConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (error: unknown) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly context?: (...args: any[]) => C | Promise<C>;
+  readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: D;
-  readonly params?: P;
+  readonly config?: P;
   readonly static?: string[];
   readonly onRecord?: TableRecordFn<T, C, R, D, P, S>;
   readonly onBatchComplete?: TableBatchCompleteFn<T, C, R, D, P, S>;
@@ -252,15 +255,15 @@ export const defineTable = <
 >(
   options: DefineTableOptions<T, C, R, D, P, S>
 ): TableHandler<T, C, R, D, P, S> => {
-  const { onRecord, onBatchComplete, onBatch, onError, schema, context, deps, params, static: staticFiles, ...config } = options;
+  const { onRecord, onBatchComplete, onBatch, onError, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-table",
-    config,
+    __spec,
     ...(schema ? { schema } : {}),
     ...(onError ? { onError } : {}),
-    ...(context ? { context } : {}),
+    ...(setup ? { setup } : {}),
     ...(deps ? { deps } : {}),
-    ...(params ? { params } : {}),
+    ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
     ...(onRecord ? { onRecord } : {}),
     ...(onBatchComplete ? { onBatchComplete } : {}),

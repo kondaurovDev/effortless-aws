@@ -19,12 +19,12 @@ export const hello = defineHttp({
   name: "api-hello",
   method: "GET",
   path: "/hello",
-  params: {
+  config: {
     greeting: param("greeting-text"),
   },
-  onRequest: async ({ req, params }) => ({
+  onRequest: async ({ req, config }) => ({
     status: 200,
-    body: { message: params.greeting, path: req.path }
+    body: { message: config.greeting, path: req.path }
   })
 });
 
@@ -54,20 +54,20 @@ export const user = defineHttp({
   method: "POST",
   path: "/user",
   deps: { sessions },
-  params: {
+  config: {
     maxAge: param("session-max-age", Number),
   },
-  context: ({ params }) => ({
-    sessionTtl: params.maxAge * 60,
+  setup: ({ config }) => ({
+    sessionTtl: config.maxAge * 60,
   }),
   schema: (input) => decodeUser(input),
-  onRequest: async ({ data, deps, params, ctx }) => {
+  onRequest: async ({ data, deps, config, ctx }) => {
     // deps.sessions is TableClient<Session>
-    // params.maxAge is number
+    // config.maxAge is number
     // ctx.sessionTtl is number
     // data is { greeting: string; isAdult: boolean }
     void deps.sessions;
-    void params.maxAge;
+    void config.maxAge;
     void ctx.sessionTtl;
     return {
       status: 200,

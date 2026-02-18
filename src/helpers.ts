@@ -49,7 +49,7 @@ export type LambdaWithPermissions = LambdaConfig & {
 // ============ Params ============
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyParamRef = ParamRef<any>;
+export type AnyParamRef = ParamRef<any> | string;
 
 /**
  * Reference to an SSM Parameter Store parameter.
@@ -63,12 +63,13 @@ export type ParamRef<T = string> = {
 };
 
 /**
- * Maps a params declaration to resolved value types.
+ * Maps a config declaration to resolved value types.
+ * Plain strings resolve to `string`, `ParamRef<T>` resolves to `T`.
  *
- * @typeParam P - Record of param names to ParamRef instances
+ * @typeParam P - Record of config keys to string or ParamRef instances
  */
-export type ResolveParams<P> = {
-  [K in keyof P]: P[K] extends ParamRef<infer T> ? T : never;
+export type ResolveConfig<P> = {
+  [K in keyof P]: P[K] extends ParamRef<infer T> ? T : string;
 };
 
 /**
@@ -83,7 +84,7 @@ export type ResolveParams<P> = {
  *
  * @example Simple string parameter
  * ```typescript
- * params: {
+ * config: {
  *   dbUrl: param("database-url"),
  * }
  * ```
@@ -92,8 +93,8 @@ export type ResolveParams<P> = {
  * ```typescript
  * import TOML from "smol-toml";
  *
- * params: {
- *   config: param("app-config", TOML.parse),
+ * config: {
+ *   appConfig: param("app-config", TOML.parse),
  * }
  * ```
  */
@@ -127,7 +128,7 @@ export function param<T = string>(
  * ```typescript
  * type User = { id: string; email: string };
  *
- * // Before (breaks inference for context, deps, params):
+ * // Before (breaks inference for setup, deps, config):
  * export const users = defineTable<User>({ pk: { name: "id", type: "string" } });
  *
  * // After (all generics inferred correctly):
@@ -142,7 +143,7 @@ export function param<T = string>(
  * export const orders = defineTable({
  *   pk: { name: "id", type: "string" },
  *   schema: typed<Order>(),
- *   context: async () => ({ db: createClient() }),
+ *   setup: async () => ({ db: createClient() }),
  *   onRecord: async ({ record, ctx }) => {
  *     // record.new is Order, ctx is { db: Client } — all inferred
  *   },

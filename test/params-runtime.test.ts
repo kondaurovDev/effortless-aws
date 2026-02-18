@@ -85,16 +85,16 @@ describe("params runtime injection", () => {
 
       setupSsmMock({ "/myapp/prod/database-url": "postgres://localhost:5432/db" });
 
-      let capturedParams: any = null;
+      let capturedConfig: any = null;
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/test" },
-        params: {
+        __spec: { method: "GET", path: "/test" },
+        config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         onRequest: async (args: any) => {
-          capturedParams = args.params;
+          capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
         },
       } as unknown as HttpHandler<undefined, undefined, any, any>;
@@ -103,32 +103,32 @@ describe("params runtime injection", () => {
       const response = await wrapped(makeHttpEvent());
 
       expect(response.statusCode).toBe(200);
-      expect(capturedParams).not.toBeNull();
-      expect(capturedParams.dbUrl).toBe("postgres://localhost:5432/db");
+      expect(capturedConfig).not.toBeNull();
+      expect(capturedConfig.dbUrl).toBe("postgres://localhost:5432/db");
     });
 
     it("should apply transform function to param value", async () => {
       process.env = {
         ...originalEnv,
-        EFF_PARAM_config: "/myapp/prod/app-config",
+        EFF_PARAM_appConfig: "/myapp/prod/app-config",
       };
 
       setupSsmMock({ "/myapp/prod/app-config": '{"feature": true}' });
 
-      let capturedParams: any = null;
+      let capturedConfig: any = null;
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/test" },
-        params: {
-          config: {
+        __spec: { method: "GET", path: "/test" },
+        config: {
+          appConfig: {
             __brand: "effortless-param",
             key: "app-config",
             transform: (raw: string) => JSON.parse(raw),
           },
         },
         onRequest: async (args: any) => {
-          capturedParams = args.params;
+          capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
         },
       } as unknown as HttpHandler<undefined, undefined, any, any>;
@@ -136,10 +136,10 @@ describe("params runtime injection", () => {
       const wrapped = wrapHttp(handler);
       await wrapped(makeHttpEvent());
 
-      expect(capturedParams.config).toEqual({ feature: true });
+      expect(capturedConfig.appConfig).toEqual({ feature: true });
     });
 
-    it("should pass params to context factory", async () => {
+    it("should pass params to setup factory", async () => {
       process.env = {
         ...originalEnv,
         EFF_PARAM_dbUrl: "/myapp/prod/database-url",
@@ -151,11 +151,11 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/test" },
-        params: {
+        __spec: { method: "GET", path: "/test" },
+        config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        context: ({ params }: any) => ({ poolUrl: params.dbUrl }),
+        setup: ({ config }: any) => ({ poolUrl: config.dbUrl }),
         onRequest: async (args: any) => {
           capturedCtx = args.ctx;
           return { status: 200, body: { ok: true } };
@@ -181,8 +181,8 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/test" },
-        params: {
+        __spec: { method: "GET", path: "/test" },
+        config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         deps: { orders: { __brand: "effortless-table", config: {} } },
@@ -195,7 +195,7 @@ describe("params runtime injection", () => {
       const wrapped = wrapHttp(handler);
       await wrapped(makeHttpEvent());
 
-      expect(capturedArgs.params.dbUrl).toBe("postgres://localhost/db");
+      expect(capturedArgs.config.dbUrl).toBe("postgres://localhost/db");
       expect(capturedArgs.deps.orders.tableName).toBe("myapp-prod-orders");
     });
 
@@ -205,8 +205,8 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/test" },
-        params: {
+        __spec: { method: "GET", path: "/test" },
+        config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         onRequest: async (args: any) => {
@@ -226,7 +226,7 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/hello" },
+        __spec: { method: "GET", path: "/hello" },
         onRequest: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { hello: "world" } };
@@ -236,7 +236,7 @@ describe("params runtime injection", () => {
       const wrapped = wrapHttp(handler);
       await wrapped(makeHttpEvent());
 
-      expect(capturedArgs.params).toBeUndefined();
+      expect(capturedArgs.config).toBeUndefined();
       expect(mockGetParameters).not.toHaveBeenCalled();
     });
 
@@ -250,12 +250,12 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/test" },
-        params: {
+        __spec: { method: "GET", path: "/test" },
+        config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         onRequest: async (args: any) => {
-          return { status: 200, body: { url: args.params.dbUrl } };
+          return { status: 200, body: { url: args.config.dbUrl } };
         },
       } as unknown as HttpHandler<undefined, undefined, any, any>;
 
@@ -279,16 +279,16 @@ describe("params runtime injection", () => {
 
       setupSsmMock({ "/myapp/prod/webhook-url": "https://hooks.example.com" });
 
-      let capturedParams: any = null;
+      let capturedConfig: any = null;
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
-        params: {
+        __spec: {},
+        config: {
           webhookUrl: { __brand: "effortless-param", key: "webhook-url" },
         },
         onRecord: async (args: any) => {
-          capturedParams = args.params;
+          capturedConfig = args.config;
         },
       } as unknown as TableHandler<any, any, any, any, any>;
 
@@ -302,8 +302,8 @@ describe("params runtime injection", () => {
         },
       ]));
 
-      expect(capturedParams).not.toBeNull();
-      expect(capturedParams.webhookUrl).toBe("https://hooks.example.com");
+      expect(capturedConfig).not.toBeNull();
+      expect(capturedConfig.webhookUrl).toBe("https://hooks.example.com");
     });
 
     it("should inject params into onBatch", async () => {
@@ -318,8 +318,8 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
-        params: {
+        __spec: {},
+        config: {
           apiKey: { __brand: "effortless-param", key: "api-key" },
         },
         onBatch: async (args: any) => {
@@ -337,11 +337,11 @@ describe("params runtime injection", () => {
         },
       ]));
 
-      expect(capturedArgs.params.apiKey).toBe("sk_test_123");
+      expect(capturedArgs.config.apiKey).toBe("sk_test_123");
       expect(capturedArgs.records).toHaveLength(1);
     });
 
-    it("should pass params to context in table handler", async () => {
+    it("should pass params to setup in table handler", async () => {
       process.env = {
         ...originalEnv,
         EFF_PARAM_dbUrl: "/myapp/prod/database-url",
@@ -353,11 +353,11 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
-        params: {
+        __spec: {},
+        config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        context: ({ params }: any) => ({ poolUrl: params.dbUrl }),
+        setup: ({ config }: any) => ({ poolUrl: config.dbUrl }),
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
@@ -374,7 +374,7 @@ describe("params runtime injection", () => {
       ]));
 
       expect(capturedArgs.ctx).toEqual({ poolUrl: "postgres://localhost/db" });
-      expect(capturedArgs.params.dbUrl).toBe("postgres://localhost/db");
+      expect(capturedArgs.config.dbUrl).toBe("postgres://localhost/db");
     });
 
     it("should not inject params when table handler has no params", async () => {
@@ -382,7 +382,7 @@ describe("params runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
+        __spec: {},
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
@@ -398,7 +398,7 @@ describe("params runtime injection", () => {
         },
       ]));
 
-      expect(capturedArgs.params).toBeUndefined();
+      expect(capturedArgs.config).toBeUndefined();
       expect(mockGetParameters).not.toHaveBeenCalled();
     });
 

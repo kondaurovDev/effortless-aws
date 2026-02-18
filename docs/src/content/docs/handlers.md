@@ -18,7 +18,7 @@ description: All handler types — defineHttp, defineTable, defineApp, defineSta
 
 ## Type inference
 
-Every handler function (`defineHttp`, `defineTable`, `defineFifoQueue`) uses TypeScript generics internally to connect types across `schema`, `context`, `deps`, `params`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
+Every handler function (`defineHttp`, `defineTable`, `defineFifoQueue`) uses TypeScript generics internally to connect types across `schema`, `setup`, `deps`, `config`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
 
 Use `schema` to provide the data type. For type-only schemas (no runtime validation), use the `typed<T>()` helper:
 
@@ -30,25 +30,25 @@ type Order = { id: string; amount: number; status: string };
 export const orders = defineTable({
   pk: { name: "id", type: "string" },
   schema: typed<Order>(),          // T = Order — inferred from schema
-  params: {
+  config: {
     threshold: param("threshold", Number),
   },
-  context: async ({ params }) => ({  // C = { db: Pool } — inferred from return type
-    db: createPool(params.threshold),
+  setup: async ({ config }) => ({    // C = { db: Pool } — inferred from return type
+    db: createPool(config.threshold),
   }),
   deps: { users },                   // D — inferred from deps object
-  onRecord: async ({ record, ctx, deps, params }) => {
+  onRecord: async ({ record, ctx, deps, config }) => {
     // record.new is Order | undefined
     // ctx is { db: Pool }
     // deps.users is TableClient<User>
-    // params.threshold is number
+    // config.threshold is number
     // Everything is typed — no manual generics needed
   },
 });
 ```
 
 :::caution[Avoid explicit generics]
-Don't write `defineTable<Order>(...)` or `defineFifoQueue<Event>(...)`. When you specify even one generic parameter explicitly, TypeScript stops inferring the rest — `context`, `deps`, and `params` lose their types. Always use `schema` instead.
+Don't write `defineTable<Order>(...)` or `defineFifoQueue<Event>(...)`. When you specify even one generic parameter explicitly, TypeScript stops inferring the rest — `setup`, `deps`, and `config` lose their types. Always use `schema` instead.
 :::
 
 For runtime validation (e.g., stream records or message bodies), pass a real validation function:
@@ -70,6 +70,93 @@ export const payments = defineFifoQueue({
 
 ---
 
+## Shared options
+
+These options are available on all Lambda-backed handlers (`defineHttp`, `defineTable`, `defineFifoQueue`).
+
+### `schema`
+
+Decode/validate function for incoming data (request body, stream record, or queue message). When provided, the handler receives a typed `data` / `record` / `message.body`. If the function throws, the framework returns an error automatically (400 for HTTP, batch item failure for streams/queues).
+
+```typescript
+schema: (input: unknown) => {
+  const obj = input as any;
+  if (!obj?.name) throw new Error("name required");
+  return { name: obj.name as string };
+},
+```
+
+For type-only inference (no runtime validation), use the `typed<T>()` helper:
+
+```typescript
+schema: typed<Order>(),
+```
+
+### `setup`
+
+Factory function called once on cold start. The return value is cached and passed as `ctx` to every invocation. Supports async. When `deps` or `config` are declared, receives them as argument.
+
+```typescript
+// No deps/config — zero-arg
+setup: () => ({ pool: createPool() }),
+
+// With deps and/or config
+setup: async ({ deps, config }) => ({
+  pool: createPool(config.dbUrl),
+}),
+```
+
+### `deps`
+
+Dependencies on other table handlers. The framework auto-wires environment variables, IAM permissions, and injects typed `TableClient<T>` instances at runtime.
+
+```typescript
+import { orders } from "./orders.js";
+
+deps: { orders },
+// → deps.orders is TableClient<Order>
+```
+
+### `config`
+
+SSM Parameter Store values. Declare with `param()` for transforms, or plain strings for simple keys. Values are fetched once on cold start and cached.
+
+```typescript
+import { param } from "effortless-aws";
+
+config: {
+  dbUrl: "database-url",                    // plain string → string value
+  appConfig: param("app-config", JSON.parse), // param() with transform → parsed type
+},
+// → config.dbUrl is string
+// → config.appConfig is ReturnType<typeof JSON.parse>
+```
+
+SSM path is built automatically: `/${project}/${stage}/${key}`.
+
+### `static`
+
+Glob patterns for files to bundle into the Lambda ZIP. At runtime, read them via the `readStatic` callback argument.
+
+```typescript
+static: ["src/templates/*.ejs"],
+// → readStatic("src/templates/invoice.ejs") returns file contents as string
+```
+
+### `permissions`
+
+Additional IAM permissions for the Lambda execution role. Format: `"service:Action"`.
+
+```typescript
+permissions: ["s3:PutObject", "ses:SendEmail"],
+```
+
+### `logLevel`
+
+Logging verbosity: `"error"` (errors only), `"info"` (+ execution summary), `"debug"` (+ truncated input/output). Default: `"info"`.
+
+---
+
 ## defineHttp
 
 Creates: API Gateway HTTP API + Lambda + Route
@@ -86,14 +173,16 @@ export const api = defineHttp({
   timeout?: DurationInput,
   permissions?: Permission[],         // additional IAM permissions (e.g. ["s3:PutObject"])
   schema?: (input: unknown) => T,     // validate & parse request body
-  context?: () => C,                  // factory for dependencies (cached on cold start)
+  setup?: ({ deps, config }) => C,    // factory for shared state (cached on cold start)
   deps?: { [key]: TableHandler },     // inter-handler dependencies
+  config?: { [key]: param(...) },     // SSM parameters
 
-  onRequest: async ({ req, ctx, data, deps }) => {
+  onRequest: async ({ req, ctx, data, deps, config }) => {
     // req.method, req.path, req.headers, req.query, req.params, req.body
-    // ctx — context if provided
+    // ctx — setup result (when setup is set)
     // data — parsed body (when schema is set)
     // deps — typed table clients (when deps is set)
+    // config — SSM parameter values (when config is set)
     return {
       status: 200,
       body: { data: "response" },
@@ -143,7 +232,7 @@ export const createOrder = defineHttp({
 Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. See [architecture](./architecture#inter-handler-dependencies-deps) for details.
 
 **Built-in best practices**:
-- **Cold start optimization** — the `context` factory runs once on cold start and is cached across invocations. Use it for DB connections, SDK clients, config loading.
+- **Cold start optimization** — the `setup` factory runs once on cold start and is cached across invocations. Use it for DB connections, SDK clients, config loading.
 - **Schema validation** — when `schema` is set, the body is parsed and validated before `onRequest` runs. Invalid requests get a 400 response automatically.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances with auto-wired IAM permissions and environment variables.
 - **Auto-infrastructure** — API Gateway HTTP API, route, Lambda integration, and IAM permissions are created on deploy.
@@ -177,18 +266,18 @@ export const orders = defineTable({
   memory?: number,
   timeout?: DurationInput,
   permissions?: Permission[],         // additional IAM permissions
-  context?: () => C,                  // factory for dependencies (cached on cold start)
+  setup?: ({ deps, config }) => C,    // factory for shared state (cached on cold start)
   deps?: { [key]: TableHandler },     // inter-handler dependencies
-  params?: { [key]: param(...) },     // SSM parameters
+  config?: { [key]: param(...) },     // SSM parameters
 
   // Stream handler — choose one mode:
 
   // Mode 1: per-record processing
-  onRecord: async ({ record, table, ctx, deps, params }) => { ... },
-  onBatchComplete?: async ({ results, failures, table, ctx, deps, params }) => { ... },
+  onRecord: async ({ record, table, ctx, deps, config }) => { ... },
+  onBatchComplete?: async ({ results, failures, table, ctx, deps, config }) => { ... },
 
   // Mode 2: batch processing
-  onBatch: async ({ records, table, ctx, deps, params }) => { ... },
+  onBatch: async ({ records, table, ctx, deps, config }) => { ... },
 });
 ```
 
@@ -220,8 +309,9 @@ All stream callbacks (`onRecord`, `onBatch`, `onBatchComplete`) receive:
 |-----|------|-------------|
 | `record` / `records` | `TableRecord<T>` / `TableRecord<T>[]` | Stream records with typed `new`/`old` values |
 | `table` | `TableClient<T>` | Typed client for **this** table (auto-injected) |
-| `ctx` | `C` | Context from `context()` factory (if provided) |
+| `ctx` | `C` | Result from `setup()` factory (if provided) |
 | `deps` | `{ [key]: TableClient }` | Typed clients for dependent tables (if `deps` is set) |
+| `config` | `ResolveConfig<P>` | SSM parameter values (if `config` is set) |
 
 ### Per-record processing
 
@@ -321,7 +411,7 @@ export const users = defineTable({
 - **Table self-client** — `table` arg provides a typed `TableClient<T>` for the handler's own table, auto-injected with no config.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for other tables with auto-wired IAM and env vars.
 - **Batch accumulation** — `onRecord` return values are collected into `results` for `onBatchComplete`. Use this for bulk writes, aggregations, or reporting.
-- **Cold start optimization** — the `context` factory runs once and is cached across invocations.
+- **Cold start optimization** — the `setup` factory runs once and is cached across invocations.
 - **Progressive complexity** — omit handlers for table-only. Add `onRecord` for stream processing. Add `onBatch` for batch mode. Add `deps` for cross-table access.
 - **Auto-infrastructure** — DynamoDB table, stream, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
 
@@ -436,17 +526,17 @@ export const orderQueue = defineFifoQueue({
   timeout?: number,
   permissions?: Permission[],           // additional IAM permissions
   schema?: (input: unknown) => T,       // validate & parse message body
-  context?: () => C,                    // factory for dependencies (cached on cold start)
+  setup?: ({ deps, config }) => C,      // factory for shared state (cached on cold start)
   deps?: { [key]: TableHandler },       // inter-handler dependencies
-  params?: { [key]: param(...) },       // SSM parameters
+  config?: { [key]: param(...) },       // SSM parameters
 
   // Handler — choose one mode:
 
   // Mode 1: per-message processing
-  onMessage: async ({ message, ctx, deps, params }) => { ... },
+  onMessage: async ({ message, ctx, deps, config }) => { ... },
 
   // Mode 2: batch processing
-  onBatch: async ({ messages, ctx, deps, params }) => { ... },
+  onBatch: async ({ messages, ctx, deps, config }) => { ... },
 });
 ```
 
@@ -457,9 +547,9 @@ All queue callbacks (`onMessage`, `onBatch`) receive:
 | Arg | Type | Description |
 |-----|------|-------------|
 | `message` / `messages` | `FifoQueueMessage<T>` / `FifoQueueMessage<T>[]` | Parsed messages with typed `body` |
-| `ctx` | `C` | Context from `context()` factory (if provided) |
+| `ctx` | `C` | Result from `setup()` factory (if provided) |
 | `deps` | `{ [key]: TableClient }` | Typed clients for dependent tables (if `deps` is set) |
-| `params` | `ResolveParams<P>` | SSM parameter values (if `params` is set) |
+| `config` | `ResolveConfig<P>` | SSM parameter values (if `config` is set) |
 
 The `FifoQueueMessage<T>` object:
 
@@ -544,7 +634,7 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 - **Typed messages** — use `schema: typed<OrderEvent>()` or a validation function for typed `message.body` with automatic JSON parsing.
 - **Schema validation** — when `schema` is set, each message body is validated before your handler runs. Invalid messages are automatically reported as failures.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for DynamoDB tables with auto-wired IAM and env vars.
-- **Cold start optimization** — the `context` factory runs once and is cached across invocations.
+- **Cold start optimization** — the `setup` factory runs once and is cached across invocations.
 - **Auto-infrastructure** — SQS FIFO queue, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
 
 ---

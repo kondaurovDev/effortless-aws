@@ -42,9 +42,9 @@ With these tools in hand, I set out to build **effortless-aws**.
 
 Finding the right API took time. **Firebase** inspired the direction, but I didn't love everything about it. I wanted something where every handler is a single function call that takes one options object — path, method, handler logic, dependencies, parameters, everything in one place. No curried functions, no builder chains. Just one object that's easy to read and extend.
 
-**Effect-TS** inspired me here too — specifically its approach to context and built-in *dependency injection*. In **Effect**, you can verify at the type level that all dependencies are satisfied before running anything. I wanted the same for my handlers: you declare a context factory at the Lambda level, and it's injected into every request handler with full type safety. No runtime surprises where something is undefined because you forgot to wire it up.
+**Effect-TS** inspired me here too — specifically its approach to context and built-in *dependency injection*. In **Effect**, you can verify at the type level that all dependencies are satisfied before running anything. I wanted the same for my handlers: you declare a `setup` factory at the Lambda level, and it's injected into every request handler with full type safety. No runtime surprises where something is undefined because you forgot to wire it up.
 
-This matters because some handlers need references to other resources — a Lambda that writes to a DynamoDB table, for example. A single config object makes that natural: you just add a `deps` field. Everything — context, deps, params — is *type-checked* and injected automatically.
+This matters because some handlers need references to other resources — a Lambda that writes to a DynamoDB table, for example. A single config object makes that natural: you just add a `deps` field. Everything — setup, deps, params — is *type-checked* and injected automatically.
 
 Here's what the simplest handler looks like:
 

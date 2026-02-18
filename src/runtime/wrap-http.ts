@@ -34,7 +34,7 @@ type LambdaEvent = {
 };
 
 export const wrapHttp = <T, C>(handler: HttpHandler<T, C>) => {
-  const rt = createHandlerRuntime(handler, "http", handler.config.logLevel ?? "info");
+  const rt = createHandlerRuntime(handler, "http", handler.__spec.logLevel ?? "info");
 
   const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string> }) => {
     const resolved = r.contentType ? CONTENT_TYPE_MAP[r.contentType] : undefined;

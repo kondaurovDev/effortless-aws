@@ -48,14 +48,14 @@ describe("defineHttp", () => {
     expect(JSON.parse(response.body).message).toBe("Hello /hello");
   });
 
-  it("should pass context to handler", async () => {
+  it("should pass setup to handler", async () => {
     const handlerCode = `
       import { defineHttp } from "./src/handlers/define-http";
 
       export default defineHttp({
         method: "GET",
         path: "/test",
-        context: () => ({ db: "mock-client", initialized: true }),
+        setup: () => ({ db: "mock-client", initialized: true }),
         onRequest: async ({ req, ctx }) => ({
           status: 200,
           body: { client: ctx.db, ready: ctx.initialized }
@@ -261,7 +261,7 @@ describe("defineHttp", () => {
       expect(body.details).toContain("name is required");
     });
 
-    it("should work together with context", async () => {
+    it("should work together with setup", async () => {
       const handlerCode = `
         import { defineHttp } from "./src/handlers/define-http";
 
@@ -275,7 +275,7 @@ describe("defineHttp", () => {
             }
             return { item: obj.item };
           },
-          context: () => ({ store: "mock-store" }),
+          setup: () => ({ store: "mock-store" }),
           onRequest: async ({ data, ctx }) => ({
             status: 201,
             body: { item: data.item, store: ctx.store }

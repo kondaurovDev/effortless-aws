@@ -58,8 +58,8 @@ type LambdaEvent = {
 };
 
 export const wrapApp = (handler: AppHandler) => {
-  const { dir, index: indexFile = "index.html", spa = false } = handler.config;
-  const rt = createHandlerRuntime({}, "app", handler.config.logLevel ?? "error");
+  const { dir, index: indexFile = "index.html", spa = false } = handler.__spec;
+  const rt = createHandlerRuntime({}, "app", handler.__spec.logLevel ?? "error");
   const baseDir = join(process.cwd(), dir);
 
   return async (event: LambdaEvent) => {

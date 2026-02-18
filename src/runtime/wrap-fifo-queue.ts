@@ -63,7 +63,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
     throw new Error("wrapFifoQueue requires a handler with onMessage or onBatch defined");
   }
 
-  const rt = createHandlerRuntime(handler, "fifo-queue", handler.config.logLevel ?? "info");
+  const rt = createHandlerRuntime(handler, "fifo-queue", handler.__spec.logLevel ?? "info");
   const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
 
   return async (event: SQSEvent) => {

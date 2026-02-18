@@ -200,5 +200,5 @@ export type {
   LambdaWithPermissions,
   AnyParamRef,
   ParamRef,
-  ResolveParams
+  ResolveConfig
 } from "../helpers";

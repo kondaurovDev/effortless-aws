@@ -67,7 +67,7 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
     throw new Error("wrapTableStream requires a handler with onRecord or onBatch defined");
   }
 
-  const rt = createHandlerRuntime(handler, "table", handler.config.logLevel ?? "info");
+  const rt = createHandlerRuntime(handler, "table", handler.__spec.logLevel ?? "info");
   const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
 
   let selfClient: ReturnType<typeof createTableClient> | null = null;

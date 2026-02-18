@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../helpers";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
 import type { TableHandler } from "./define-table";
 import type { TableClient } from "../runtime/table-client";
 
@@ -74,7 +74,7 @@ export type HttpConfig = LambdaWithPermissions & {
  * Handler function type for HTTP endpoints
  *
  * @typeParam T - Type of the validated request body (from schema function)
- * @typeParam C - Type of the context/dependencies (from context function)
+ * @typeParam C - Type of the setup result (from setup function)
  * @typeParam D - Type of the deps (from deps declaration)
  * @typeParam P - Type of the params (from params declaration)
  */
@@ -83,24 +83,27 @@ export type HttpHandlerFn<T = undefined, C = undefined, D = undefined, P = undef
     & ([T] extends [undefined] ? {} : { data: T })
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
   ) => Promise<HttpResponse>;
 
 /**
- * Context factory type — conditional on whether params are declared.
- * Without params: `() => C | Promise<C>`
- * With params: `(args: { params: ResolveParams<P> }) => C | Promise<C>`
+ * Setup factory type — conditional on whether deps/config are declared.
+ * No deps/config: `() => C | Promise<C>`
+ * With deps/config: `(args: { deps?, config? }) => C | Promise<C>`
  */
-type ContextFactory<C, P> = [P] extends [undefined]
+type SetupFactory<C, D, P> = [D | P] extends [undefined]
   ? () => C | Promise<C>
-  : (args: { params: ResolveParams<P & {}> }) => C | Promise<C>;
+  : (args:
+      & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+      & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+    ) => C | Promise<C>;
 
 /**
  * Options for defining an HTTP endpoint
  *
  * @typeParam T - Type of the validated request body (inferred from schema function)
- * @typeParam C - Type of the context/dependencies returned by context function
+ * @typeParam C - Type of the setup result returned by setup function
  * @typeParam D - Type of the deps (from deps declaration)
  * @typeParam P - Type of the params (from params declaration)
  */
@@ -128,12 +131,12 @@ export type DefineHttpOptions<
    */
   onError?: (error: unknown, req: HttpRequest) => HttpResponse;
   /**
-   * Factory function to create context/dependencies for the request handler.
+   * Factory function to initialize shared state for the request handler.
    * Called once on cold start, result is cached and reused across invocations.
-   * When params are declared, receives resolved params as argument.
+   * When deps/params are declared, receives them as argument.
    * Supports both sync and async return values.
    */
-  context?: ContextFactory<C, P>;
+  setup?: SetupFactory<C, D, P>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -142,9 +145,9 @@ export type DefineHttpOptions<
   /**
    * SSM Parameter Store parameters.
    * Declare with `param()` helper. Values are fetched and cached at cold start.
-   * Typed values are injected into the handler via the `params` argument.
+   * Typed values are injected into the handler via the `config` argument.
    */
-  params?: P;
+  config?: P;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
    * Files are accessible at runtime via the `readStatic` callback argument.
@@ -160,13 +163,13 @@ export type DefineHttpOptions<
  */
 export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
   readonly __brand: "effortless-http";
-  readonly config: HttpConfig;
+  readonly __spec: HttpConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (error: unknown, req: HttpRequest) => HttpResponse;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly context?: (...args: any[]) => C | Promise<C>;
+  readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: D;
-  readonly params?: P;
+  readonly config?: P;
   readonly static?: string[];
   readonly onRequest: HttpHandlerFn<T, C, D, P, S>;
 };
@@ -175,10 +178,10 @@ export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefin
  * Define an HTTP endpoint that creates an API Gateway route + Lambda function
  *
  * @typeParam T - Type of the validated request body (inferred from schema function)
- * @typeParam C - Type of the context/dependencies (inferred from context function)
+ * @typeParam C - Type of the setup result (inferred from setup function)
  * @typeParam D - Type of the deps (from deps declaration)
  * @typeParam P - Type of the params (from params declaration)
- * @param options - Configuration, optional schema, optional context factory, and request handler
+ * @param options - Configuration, optional schema, optional setup factory, and request handler
  * @returns Handler object used by the deployment system
  *
  * @example Basic GET endpoint
@@ -200,15 +203,15 @@ export type HttpHandler<T = undefined, C = undefined, D = undefined, P = undefin
  * export const api = defineHttp({
  *   method: "GET",
  *   path: "/orders",
- *   params: {
+ *   config: {
  *     dbUrl: param("database-url"),
  *   },
- *   context: async ({ params }) => ({
- *     pool: createPool(params.dbUrl),
+ *   setup: async ({ config }) => ({
+ *     pool: createPool(config.dbUrl),
  *   }),
- *   onRequest: async ({ req, ctx, params }) => ({
+ *   onRequest: async ({ req, ctx, config }) => ({
  *     status: 200,
- *     body: { dbUrl: params.dbUrl }
+ *     body: { dbUrl: config.dbUrl }
  *   })
  * });
  * ```
@@ -222,15 +225,15 @@ export const defineHttp = <
 >(
   options: DefineHttpOptions<T, C, D, P, S>
 ): HttpHandler<T, C, D, P, S> => {
-  const { onRequest, onError, context, schema, deps, params, static: staticFiles, ...config } = options;
+  const { onRequest, onError, setup, schema, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-http",
-    config,
+    __spec,
     ...(schema ? { schema } : {}),
     ...(onError ? { onError } : {}),
-    ...(context ? { context } : {}),
+    ...(setup ? { setup } : {}),
     ...(deps ? { deps } : {}),
-    ...(params ? { params } : {}),
+    ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
     onRequest
   } as HttpHandler<T, C, D, P, S>;

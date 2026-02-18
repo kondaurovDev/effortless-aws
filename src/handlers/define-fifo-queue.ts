@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveParams } from "../helpers";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
 import type { TableHandler } from "./define-table";
 import type { TableClient } from "~/runtime/table-client";
 
@@ -55,13 +55,16 @@ export type FifoQueueConfig = LambdaWithPermissions & {
 };
 
 /**
- * Context factory type — conditional on whether params are declared.
- * Without params: `() => C | Promise<C>`
- * With params: `(args: { params: ResolveParams<P> }) => C | Promise<C>`
+ * Setup factory type — conditional on whether deps/config are declared.
+ * No deps/config: `() => C | Promise<C>`
+ * With deps/config: `(args: { deps?, config? }) => C | Promise<C>`
  */
-type ContextFactory<C, P> = [P] extends [undefined]
+type SetupFactory<C, D, P> = [D | P] extends [undefined]
   ? () => C | Promise<C>
-  : (args: { params: ResolveParams<P & {}> }) => C | Promise<C>;
+  : (args:
+      & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+      & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+    ) => C | Promise<C>;
 
 /**
  * Per-message handler function.
@@ -71,7 +74,7 @@ export type FifoQueueMessageFn<T = unknown, C = undefined, D = undefined, P = un
   (args: { message: FifoQueueMessage<T> }
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
   ) => Promise<void>;
 
@@ -83,7 +86,7 @@ export type FifoQueueBatchFn<T = unknown, C = undefined, D = undefined, P = unde
   (args: { messages: FifoQueueMessage<T>[] }
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { params: ResolveParams<P> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
   ) => Promise<void>;
 
@@ -100,11 +103,11 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
    */
   onError?: (error: unknown) => void;
   /**
-   * Factory function to create context/dependencies for the handler.
+   * Factory function to initialize shared state for the handler.
    * Called once on cold start, result is cached and reused across invocations.
-   * When params are declared, receives resolved params as argument.
+   * When deps/params are declared, receives them as argument.
    */
-  context?: ContextFactory<C, P>;
+  setup?: SetupFactory<C, D, P>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -114,7 +117,7 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
    * SSM Parameter Store parameters.
    * Declare with `param()` helper. Values are fetched and cached at cold start.
    */
-  params?: P;
+  config?: P;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
    * Files are accessible at runtime via the `readStatic` callback argument.
@@ -150,13 +153,13 @@ export type DefineFifoQueueOptions<
  */
 export type FifoQueueHandler<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
   readonly __brand: "effortless-fifo-queue";
-  readonly config: FifoQueueConfig;
+  readonly __spec: FifoQueueConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (error: unknown) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly context?: (...args: any[]) => C | Promise<C>;
+  readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: D;
-  readonly params?: P;
+  readonly config?: P;
   readonly static?: string[];
   readonly onMessage?: FifoQueueMessageFn<T, C, D, P, S>;
   readonly onBatch?: FifoQueueBatchFn<T, C, D, P, S>;
@@ -201,15 +204,15 @@ export const defineFifoQueue = <
 >(
   options: DefineFifoQueueOptions<T, C, D, P, S>
 ): FifoQueueHandler<T, C, D, P, S> => {
-  const { onMessage, onBatch, onError, schema, context, deps, params, static: staticFiles, ...config } = options;
+  const { onMessage, onBatch, onError, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-fifo-queue",
-    config,
+    __spec,
     ...(schema ? { schema } : {}),
     ...(onError ? { onError } : {}),
-    ...(context ? { context } : {}),
+    ...(setup ? { setup } : {}),
     ...(deps ? { deps } : {}),
-    ...(params ? { params } : {}),
+    ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
     ...(onMessage ? { onMessage } : {}),
     ...(onBatch ? { onBatch } : {})

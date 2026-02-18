@@ -138,7 +138,7 @@ export const createUser = defineHttp({
   memory: 512,              // ← static config
   schema: S.decodeUnknownSync(UserSchema),  // ← runtime (bundled by esbuild)
   onError: (err, req) => ({ ... }),         // ← runtime
-  context: () => ({ db }),                  // ← runtime
+  setup: () => ({ db }),                    // ← runtime
   onRequest: async ({ data, ctx }) => ...,  // ← runtime
 });
 ```
@@ -149,7 +149,7 @@ export const createUser = defineHttp({
 
 ```
 RUNTIME_PROPS = ["onRequest", "onRecord", "onBatch", "onBatchComplete",
-                 "onMessage", "context", "schema", "onError", "deps", "params", "static"]
+                 "onMessage", "setup", "schema", "onError", "deps", "params", "static"]
 ```
 
 This static config is used by the **deploy phase** to configure AWS resources (API Gateway routes, Lambda memory/timeout, etc.) without needing to execute user code.
@@ -175,7 +175,7 @@ Source code  →  ts-morph AST  →  { method: "POST", path: "/users", memory: 5
          ▼                              ▼
    User's handler code           Framework runtime wrapper
    (defineHttp + onRequest       (wrapHttp: parses Lambda event,
-    + schema + context)           validates schema, calls handler,
+    + schema + setup)             validates schema, calls handler,
                                   formats response)
          │                              │
          └──────────┬───────────────────┘
@@ -269,7 +269,7 @@ Use `defineFifoQueue` as a template — it's the most recently added handler typ
 - Define config type with all static properties (name, memory, timeout, etc.)
 - Define callback function types
 - Export `define<Type>()` factory function
-- Thread generics: `<T, C, D, P, S>` for schema, context, deps, params, static
+- Thread generics: `<T, C, D, P, S>` for schema, setup, deps, params, static
 
 ### Step 2: Handler registry (`build/handler-registry.ts`)
 
@@ -288,7 +288,7 @@ Use `defineFifoQueue` as a template — it's the most recently added handler typ
 
 - Export `wrap<Type>(handler)` function
 - Parse the incoming Lambda event into your handler's format
-- Call `createHandlerRuntime()` from `handler-utils.ts` to get shared functionality (context, deps, params, platform logging)
+- Call `createHandlerRuntime()` from `handler-utils.ts` to get shared functionality (setup, deps, params, platform logging)
 - Call the user's callback with `rt.commonArgs()` + type-specific args
 - Format and return the Lambda response
 

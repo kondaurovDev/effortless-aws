@@ -47,14 +47,14 @@ export const orders = defineTable({
 
   schema: (input): Order => input as Order,
   deps: { customers },
-  params: {
+  config: {
     highValueThreshold: param("high-value-threshold", Number),
   },
-  context: ({ params }) => ({
-    highValueThreshold: params.highValueThreshold,
+  setup: ({ config }) => ({
+    highValueThreshold: config.highValueThreshold,
   }),
 
-  onRecord: async ({ record, deps, params, ctx }): Promise<OrderEvent | null> => {
+  onRecord: async ({ record, deps, config, ctx }): Promise<OrderEvent | null> => {
     const { eventName, old: oldOrder, new: newOrder } = record;
 
     if (eventName === "INSERT" && newOrder) {

@@ -70,7 +70,7 @@ describe("extractFifoQueueConfigs", () => {
         batchSize: 10,
         schema: (input) => input,
         onMessage: async ({ message }) => {},
-        context: () => ({ db: "pool" }),
+        setup: () => ({ db: "pool" }),
       });
     `;
     const configs = extractFifoQueueConfigs(source);
@@ -78,7 +78,7 @@ describe("extractFifoQueueConfigs", () => {
     expect(configs[0]!.config.batchSize).toBe(10);
     expect(configs[0]!.config).not.toHaveProperty("onMessage");
     expect(configs[0]!.config).not.toHaveProperty("schema");
-    expect(configs[0]!.config).not.toHaveProperty("context");
+    expect(configs[0]!.config).not.toHaveProperty("setup");
   });
 
   it("extracts deps keys", () => {
@@ -98,8 +98,8 @@ describe("extractFifoQueueConfigs", () => {
     const source = `
       import { defineFifoQueue, param } from "effortless-aws";
       export const q = defineFifoQueue({
-        params: { apiKey: param("api-key") },
-        onMessage: async ({ message, params }) => {}
+        config: { apiKey: param("api-key") },
+        onMessage: async ({ message, config }) => {}
       });
     `;
     const configs = extractFifoQueueConfigs(source);

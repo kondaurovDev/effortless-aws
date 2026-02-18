@@ -22,7 +22,7 @@ export type AppConfig = LambdaConfig & {
  */
 export type AppHandler = {
   readonly __brand: "effortless-app";
-  readonly config: AppConfig;
+  readonly __spec: AppConfig;
 };
 
 /**
@@ -44,5 +44,5 @@ export type AppHandler = {
  */
 export const defineApp = (options: AppConfig): AppHandler => ({
   __brand: "effortless-app",
-  config: options,
+  __spec: options,
 });

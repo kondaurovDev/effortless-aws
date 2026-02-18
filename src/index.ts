@@ -18,7 +18,7 @@ export type { AppConfig, AppHandler } from "./handlers/define-app"
 export type { StaticSiteConfig, StaticSiteHandler } from "./handlers/define-static-site"
 export type { FifoQueueConfig, FifoQueueMessage, FifoQueueHandler, FifoQueueMessageFn, FifoQueueBatchFn, DefineFifoQueueOptions } from "./handlers/define-fifo-queue"
 export type { TableClient, QueryParams } from "./runtime/table-client"
-export type { ParamRef, ResolveParams } from "./helpers"
+export type { ParamRef, ResolveConfig } from "./helpers"
 
 // Shared types
 export type { LambdaConfig, LambdaWithPermissions, LogLevel } from "./helpers"

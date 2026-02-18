@@ -168,7 +168,7 @@ describe("defineTable", () => {
       expect((globalThis as any).__test_onRecord).toEqual(["Alice", "Bob"]);
     });
 
-    it("should pass context to handler", async () => {
+    it("should pass setup to handler", async () => {
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";
 
@@ -177,7 +177,7 @@ describe("defineTable", () => {
         export default defineTable({
           name: "orders",
           pk: { name: "id", type: "string" },
-          context: () => ({ runtime: "mock-runtime" }),
+          setup: () => ({ runtime: "mock-runtime" }),
           onRecord: async ({ record, ctx }) => {
             globalThis.__test_ctx.push(ctx.runtime);
           }

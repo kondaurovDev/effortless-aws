@@ -66,7 +66,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "POST", path: "/orders" },
+        __spec: { method: "POST", path: "/orders" },
         deps: { orders: { __brand: "effortless-table", config: {} } },
         onRequest: async (args: any) => {
           capturedDeps = args.deps;
@@ -87,15 +87,15 @@ describe("deps runtime injection", () => {
       expect(typeof capturedDeps.orders.query).toBe("function");
     });
 
-    it("should work with deps + context together", async () => {
+    it("should work with deps + setup together", async () => {
       process.env = { ...originalEnv, EFF_TABLE_orders: "my-orders-table" };
 
       let capturedArgs: any = null;
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "POST", path: "/orders" },
-        context: () => ({ env: "test" }),
+        __spec: { method: "POST", path: "/orders" },
+        setup: () => ({ env: "test" }),
         deps: { orders: { __brand: "effortless-table", config: {} } },
         onRequest: async (args: any) => {
           capturedArgs = args;
@@ -117,7 +117,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "POST", path: "/orders" },
+        __spec: { method: "POST", path: "/orders" },
         schema: (input: unknown) => {
           const obj = input as any;
           if (!obj?.item) throw new Error("item required");
@@ -143,7 +143,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "POST", path: "/orders" },
+        __spec: { method: "POST", path: "/orders" },
         deps: { orders: { __brand: "effortless-table", config: {} } },
         onRequest: async (args: any) => {
           return { status: 200, body: { table: args.deps.orders.tableName } };
@@ -162,7 +162,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-http",
-        config: { method: "GET", path: "/hello" },
+        __spec: { method: "GET", path: "/hello" },
         onRequest: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { hello: "world" } };
@@ -186,7 +186,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
+        __spec: {},
         deps: { users: { __brand: "effortless-table", config: {} } },
         onRecord: async (args: any) => {
           capturedDeps.push({
@@ -219,7 +219,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
+        __spec: {},
         deps: { users: { __brand: "effortless-table", config: {} } },
         onBatch: async (args: any) => {
           capturedArgs = args;
@@ -248,15 +248,15 @@ describe("deps runtime injection", () => {
       expect(capturedArgs.records).toHaveLength(2);
     });
 
-    it("should inject deps + context into onRecord", async () => {
+    it("should inject deps + setup into onRecord", async () => {
       process.env = { ...originalEnv, EFF_TABLE_users: "test-project-dev-users" };
 
       let capturedArgs: any = null;
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
-        context: () => ({ runtime: "test-runtime" }),
+        __spec: {},
+        setup: () => ({ runtime: "test-runtime" }),
         deps: { users: { __brand: "effortless-table", config: {} } },
         onRecord: async (args: any) => {
           capturedArgs = args;
@@ -282,7 +282,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
+        __spec: {},
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
@@ -312,7 +312,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
+        __spec: {},
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
@@ -343,7 +343,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
+        __spec: {},
         onBatch: async (args: any) => {
           capturedArgs = args;
         },
@@ -364,7 +364,7 @@ describe("deps runtime injection", () => {
       expect(capturedArgs.records).toHaveLength(1);
     });
 
-    it("should inject table + deps + context together", async () => {
+    it("should inject table + deps + setup together", async () => {
       process.env = {
         ...originalEnv,
         EFF_TABLE_SELF: "my-project-dev-orders",
@@ -375,8 +375,8 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
-        context: () => ({ env: "test" }),
+        __spec: {},
+        setup: () => ({ env: "test" }),
         deps: { users: { __brand: "effortless-table", config: {} } },
         onRecord: async (args: any) => {
           capturedArgs = args;
@@ -406,7 +406,7 @@ describe("deps runtime injection", () => {
 
       const handler = {
         __brand: "effortless-table",
-        config: {},
+        __spec: {},
         onRecord: async (args: any) => {
           capturedArgs = args;
         },

@@ -32,12 +32,12 @@ describe("defineHttp type inference", () => {
         type _req = Expect<Equal<typeof args.req, HttpRequest>>;
         // @ts-expect-error — no data without schema
         args.data;
-        // @ts-expect-error — no ctx without context
+        // @ts-expect-error — no ctx without setup
         args.ctx;
         // @ts-expect-error — no deps without deps
         args.deps;
-        // @ts-expect-error — no params without params
-        args.params;
+        // @ts-expect-error — no config without config
+        args.config;
         // @ts-expect-error — no readStatic without static
         args.readStatic;
         return { status: 200 };
@@ -57,11 +57,11 @@ describe("defineHttp type inference", () => {
     });
   });
 
-  it("context → ctx is inferred from return type", () => {
+  it("setup → ctx is inferred from return type", () => {
     defineHttp({
       method: "GET",
       path: "/test",
-      context: () => ({ db: "pg-pool" as const, ready: true }),
+      setup: () => ({ db: "pg-pool" as const, ready: true }),
       onRequest: async (args) => {
         type _ctx = Expect<Equal<typeof args.ctx, { db: "pg-pool"; ready: boolean }>>;
         return { status: 200 };
@@ -69,11 +69,11 @@ describe("defineHttp type inference", () => {
     });
   });
 
-  it("async context → ctx is inferred (unwraps Promise)", () => {
+  it("async setup → ctx is inferred (unwraps Promise)", () => {
     defineHttp({
       method: "GET",
       path: "/test",
-      context: async () => ({ pool: 42 }),
+      setup: async () => ({ pool: 42 }),
       onRequest: async (args) => {
         type _ctx = Expect<Equal<typeof args.ctx, { pool: number }>>;
         return { status: 200 };
@@ -93,36 +93,36 @@ describe("defineHttp type inference", () => {
     });
   });
 
-  it("params → params values are inferred", () => {
+  it("config → config values are inferred", () => {
     defineHttp({
       method: "GET",
       path: "/config",
-      params: {
+      config: {
         dbUrl: param("database-url"),
         maxRetries: param("max-retries", Number),
       },
       onRequest: async (args) => {
-        type _dbUrl = Expect<Equal<typeof args.params.dbUrl, string>>;
-        type _retries = Expect<Equal<typeof args.params.maxRetries, number>>;
+        type _dbUrl = Expect<Equal<typeof args.config.dbUrl, string>>;
+        type _retries = Expect<Equal<typeof args.config.maxRetries, number>>;
         return { status: 200 };
       },
     });
   });
 
-  it("params + context → context factory receives params", () => {
+  it("config + setup → setup factory receives config", () => {
     defineHttp({
       method: "GET",
       path: "/test",
-      params: {
+      config: {
         dbUrl: param("database-url"),
       },
-      context: ({ params }) => {
-        type _p = Expect<Equal<typeof params.dbUrl, string>>;
-        return { pool: params.dbUrl };
+      setup: ({ config }) => {
+        type _p = Expect<Equal<typeof config.dbUrl, string>>;
+        return { pool: config.dbUrl };
       },
       onRequest: async (args) => {
         type _ctx = Expect<Equal<typeof args.ctx.pool, string>>;
-        type _param = Expect<Equal<typeof args.params.dbUrl, string>>;
+        type _cfg = Expect<Equal<typeof args.config.dbUrl, string>>;
         return { status: 200 };
       },
     });
@@ -145,16 +145,16 @@ describe("defineHttp type inference", () => {
       method: "POST",
       path: "/users",
       schema: (input): User => input as User,
-      context: () => ({ db: "pool" }),
+      setup: () => ({ db: "pool" }),
       deps: { usersTable },
-      params: { secret: param("api-secret") },
+      config: { secret: param("api-secret") },
       static: ["templates/*.html"],
       onRequest: async (args) => {
         type _req = Expect<Equal<typeof args.req, HttpRequest>>;
         type _data = Expect<Equal<typeof args.data, User>>;
         type _ctx = Expect<Equal<typeof args.ctx, { db: string }>>;
         type _deps = Expect<Equal<typeof args.deps.usersTable, TableClient<User>>>;
-        type _param = Expect<Equal<typeof args.params.secret, string>>;
+        type _cfg = Expect<Equal<typeof args.config.secret, string>>;
         type _rs = Expect<Equal<typeof args.readStatic, (path: string) => string>>;
         return { status: 201 };
       },
@@ -205,17 +205,17 @@ describe("defineTable type inference", () => {
     });
   });
 
-  it("onRecord with context + deps + params (via schema)", () => {
+  it("onRecord with setup + deps + config (via schema)", () => {
     defineTable({
       pk: { name: "email", type: "string" },
       schema: (input): User => input as User,
-      context: () => ({ notifier: "sns" as const }),
+      setup: () => ({ notifier: "sns" as const }),
       deps: { usersTable },
-      params: { webhookUrl: param("webhook-url") },
+      config: { webhookUrl: param("webhook-url") },
       onRecord: async (args) => {
         type _ctx = Expect<Equal<typeof args.ctx, { notifier: "sns" }>>;
         type _deps = Expect<Equal<typeof args.deps.usersTable, TableClient<User>>>;
-        type _param = Expect<Equal<typeof args.params.webhookUrl, string>>;
+        type _cfg = Expect<Equal<typeof args.config.webhookUrl, string>>;
       },
     });
   });
@@ -245,16 +245,16 @@ describe("defineTable type inference", () => {
     });
   });
 
-  it("minimal onRecord — no ctx/deps/params/readStatic", () => {
+  it("minimal onRecord — no ctx/deps/config/readStatic", () => {
     defineTable<User>({
       pk: { name: "email", type: "string" },
       onRecord: async (args) => {
-        // @ts-expect-error — no ctx without context
+        // @ts-expect-error — no ctx without setup
         args.ctx;
         // @ts-expect-error — no deps without deps
         args.deps;
-        // @ts-expect-error — no params without params
-        args.params;
+        // @ts-expect-error — no config without config
+        args.config;
         // @ts-expect-error — no readStatic without static
         args.readStatic;
       },
