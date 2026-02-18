@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.7.2
+
+### Patch Changes
+
+- [`f0c7690`](https://github.com/kondaurovDev/effortless/commit/f0c769052af04fafc23a83a04e79c134a7563ea5) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix "Cannot find package 'effect'" error in consuming projects by removing effect imports from the public library entry point
+
 ## 0.7.1
 
 ### Patch Changes
