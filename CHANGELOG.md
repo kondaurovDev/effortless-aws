@@ -1,5 +1,22 @@
 # effortless-aws
 
+## 0.8.0
+
+### Minor Changes
+
+- [`f70b605`](https://github.com/kondaurovDev/effortless-aws/commit/f70b605c2cea0d2185d6220f80428086685311f3) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Rename handler options for clarity: `context` → `setup`, `params` → `config`
+
+  **Breaking changes:**
+
+  - Handler config property `context` is now `setup` (callback arg `ctx` unchanged)
+  - Handler config property `params` is now `config` (SSM parameter declarations)
+  - Type `ResolveParams<P>` is now `ResolveConfig<P>`
+
+  **New:**
+
+  - `setup` factory now receives `deps` and `config` as arguments (previously only received `params`)
+  - `config` accepts plain strings as SSM keys: `config: { dbUrl: "database-url" }` — no `param()` import needed for simple cases
+
 ## 0.7.2
 
 ### Patch Changes
