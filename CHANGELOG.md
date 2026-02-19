@@ -1,5 +1,16 @@
 # effortless-aws
 
+## 0.9.0
+
+### Minor Changes
+
+- [`d2f9784`](https://github.com/kondaurovDev/effortless-aws/commit/d2f97842a07d3d9f30437c0e6f9d24216194732f) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add custom domain support for `defineStaticSite`
+
+  - New `domain` option: automatically finds ACM certificate in us-east-1 and configures CloudFront aliases + SSL
+  - Automatic www→non-www 301 redirect when ACM certificate covers `www` (via CloudFront Function)
+  - Idempotent CloudFront Function updates: skips update when code hasn't changed
+  - Automatic cleanup of orphaned CloudFront Functions after deploy
+
 ## 0.8.1
 
 ### Patch Changes
