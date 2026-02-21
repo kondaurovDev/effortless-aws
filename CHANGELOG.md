@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.10.1
+
+### Patch Changes
+
+- [`aa16dd9`](https://github.com/kondaurovDev/effortless-aws/commit/aa16dd9ba22430d3a21ef4294e34c61f40b0ac4a) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix buildDeps not forwarding tagField from dep handler config to table client
+
 ## 0.10.0
 
 ### Minor Changes
