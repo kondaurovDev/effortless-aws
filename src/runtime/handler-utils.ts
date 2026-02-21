@@ -30,7 +30,9 @@ export const buildDeps = (deps: Record<string, unknown> | undefined): Record<str
     if (!tableName) {
       throw new Error(`Missing environment variable ${ENV_TABLE_PREFIX}${key} for dep "${key}"`);
     }
-    result[key] = createTableClient(tableName);
+    const depHandler = deps[key] as { __spec?: { tagField?: string } } | undefined;
+    const tagField = depHandler?.__spec?.tagField;
+    result[key] = createTableClient(tableName, tagField ? { tagField } : undefined);
   }
   return result;
 };

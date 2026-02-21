@@ -137,6 +137,56 @@ describe("deps runtime injection", () => {
       expect(capturedArgs.deps.orders.tableName).toBe("my-orders-table");
     });
 
+    it("should forward tagField from dep handler __spec to table client", async () => {
+      process.env = { ...originalEnv, EFF_TABLE_orders: "test-project-dev-orders" };
+      mockPutItem.mockResolvedValue({});
+
+      let capturedDeps: any = null;
+
+      const handler = {
+        __brand: "effortless-http",
+        __spec: { method: "POST", path: "/orders" },
+        deps: { orders: { __brand: "effortless-table", __spec: { tagField: "__tag" }, config: {} } },
+        onRequest: async (args: any) => {
+          capturedDeps = args.deps;
+          await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { __tag: "Order", amount: 42 } });
+          return { status: 200, body: { ok: true } };
+        },
+      } as unknown as HttpHandler<undefined, undefined, any>;
+
+      const wrapped = wrapHttp(handler);
+      await wrapped(makeHttpEvent());
+
+      expect(capturedDeps.orders.tableName).toBe("test-project-dev-orders");
+      // put() should extract tag from data["__tag"], not data["tag"]
+      expect(mockPutItem).toHaveBeenCalledOnce();
+      const putArgs = mockPutItem.mock.calls[0]![0];
+      expect(putArgs.TableName).toBe("test-project-dev-orders");
+      // The marshalled item should have tag = "Order" (extracted from data.__tag)
+      expect(putArgs.Item.tag).toEqual({ S: "Order" });
+    });
+
+    it("should use default tagField when dep handler has no tagField in __spec", async () => {
+      process.env = { ...originalEnv, EFF_TABLE_orders: "test-project-dev-orders" };
+      mockPutItem.mockResolvedValue({});
+
+      const handler = {
+        __brand: "effortless-http",
+        __spec: { method: "POST", path: "/orders" },
+        deps: { orders: { __brand: "effortless-table", __spec: {}, config: {} } },
+        onRequest: async (args: any) => {
+          await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { tag: "Order", amount: 42 } });
+          return { status: 200, body: { ok: true } };
+        },
+      } as unknown as HttpHandler<undefined, undefined, any>;
+
+      const wrapped = wrapHttp(handler);
+      await wrapped(makeHttpEvent());
+
+      const putArgs = mockPutItem.mock.calls[0]![0];
+      expect(putArgs.Item.tag).toEqual({ S: "Order" });
+    });
+
     it("should throw when env var is missing for a dep", async () => {
       process.env = { ...originalEnv };
       delete process.env.EFF_TABLE_orders;
