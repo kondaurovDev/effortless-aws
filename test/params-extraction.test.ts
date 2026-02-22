@@ -191,7 +191,6 @@ describe("params extraction", () => {
       const configs = extractTableConfigs(source);
 
       expect(configs[0]!.config).not.toHaveProperty("config");
-      expect(configs[0]!.name).toBe("orders");
     });
 
   });

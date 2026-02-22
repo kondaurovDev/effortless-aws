@@ -7,7 +7,19 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["name", "onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "setup", "schema", "onError", "deps", "config", "static", "middleware"];
+const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware"];
+
+const evalConfig = <T>(configText: string, exportName: string): T => {
+  try {
+    return new Function(`return ${configText}`)() as T;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to extract config for "${exportName}": ${msg}.\n` +
+      `Handler config must use only literal values (no variables, imports, or expressions).`
+    );
+  }
+};
 
 const buildConfigWithoutRuntime = (obj: ObjectLiteralExpression): string => {
   const props = obj.getProperties()
@@ -189,6 +201,12 @@ export const handlerRegistry = {
     wrapperFn: "wrapFifoQueue",
     wrapperPath: "~/runtime/wrap-fifo-queue",
   },
+  bucket: {
+    defineFn: "defineBucket",
+    handlerProps: ["onObjectCreated", "onObjectRemoved"],
+    wrapperFn: "wrapBucket",
+    wrapperPath: "~/runtime/wrap-bucket",
+  },
 } as const;
 
 export type HandlerType = keyof typeof handlerRegistry;
@@ -197,7 +215,6 @@ export type HandlerType = keyof typeof handlerRegistry;
 
 export type ExtractedConfig<T = unknown> = {
   exportName: string;
-  name: string;
   config: T;
   hasHandler: boolean;
   depsKeys: string[];
@@ -221,12 +238,12 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
         if (firstArg && firstArg.getKind() === SyntaxKind.ObjectLiteralExpression) {
           const objLiteral = firstArg as ObjectLiteralExpression;
           const configText = buildConfigWithoutRuntime(objLiteral);
-          const config = new Function(`return ${configText}`)() as T;
+          const config = evalConfig<T>(configText, "default");
           const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
           const depsKeys = extractDepsKeys(objLiteral);
           const paramEntries = extractParamEntries(objLiteral);
           const staticGlobs = extractStaticGlobs(objLiteral);
-          results.push({ exportName: "default", name: "default", config, hasHandler, depsKeys, paramEntries, staticGlobs });
+          results.push({ exportName: "default", config, hasHandler, depsKeys, paramEntries, staticGlobs });
         }
       }
     }
@@ -248,12 +265,12 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
         const objLiteral = firstArg as ObjectLiteralExpression;
         const configText = buildConfigWithoutRuntime(objLiteral);
         const exportName = decl.getName();
-        const config = new Function(`return ${configText}`)() as T;
+        const config = evalConfig<T>(configText, exportName);
         const hasHandler = handlerProps.some(p => extractPropertyFromObject(objLiteral, p) !== undefined);
         const depsKeys = extractDepsKeys(objLiteral);
         const paramEntries = extractParamEntries(objLiteral);
         const staticGlobs = extractStaticGlobs(objLiteral);
-        results.push({ exportName, name: exportName, config, hasHandler, depsKeys, paramEntries, staticGlobs });
+        results.push({ exportName, config, hasHandler, depsKeys, paramEntries, staticGlobs });
       }
     });
   });

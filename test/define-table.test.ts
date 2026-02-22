@@ -46,7 +46,6 @@ describe("defineTable", () => {
       expect(configs).toHaveLength(1);
       const first = configs[0]!;
       expect(first.exportName).toBe("orders");
-      expect(first.name).toBe("orders");
       expect(first.config.streamView).toBe("NEW_AND_OLD_IMAGES");
       expect(first.config.batchSize).toBe(50);
       expect(first.config.memory).toBe(512);
@@ -70,7 +69,6 @@ describe("defineTable", () => {
       expect(configs).toHaveLength(1);
       const first = configs[0]!;
       expect(first.exportName).toBe("default");
-      expect(first.name).toBe("default");
       expect(first.hasHandler).toBe(true);
     });
 
@@ -364,7 +362,7 @@ describe("defineTable", () => {
     });
 
     it("should pass table client to setup", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_SELF: "test-project-dev-orders" };
+      process.env = { ...originalEnv, EFF_DEP_SELF: "table:test-project-dev-orders" };
 
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";
@@ -395,7 +393,7 @@ describe("defineTable", () => {
     });
 
     it("should pass table client to onRecord", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_SELF: "test-project-dev-orders" };
+      process.env = { ...originalEnv, EFF_DEP_SELF: "table:test-project-dev-orders" };
 
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";
@@ -425,7 +423,7 @@ describe("defineTable", () => {
     });
 
     it("should pass table client to onBatch", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_SELF: "test-project-dev-events" };
+      process.env = { ...originalEnv, EFF_DEP_SELF: "table:test-project-dev-events" };
 
       const handlerCode = `
         import { defineTable } from "./src/handlers/define-table";

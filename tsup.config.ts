@@ -45,6 +45,7 @@ export default defineConfig([
       "runtime/wrap-table-stream": "src/runtime/wrap-table-stream.ts",
       "runtime/wrap-app": "src/runtime/wrap-app.ts",
       "runtime/wrap-fifo-queue": "src/runtime/wrap-fifo-queue.ts",
+      "runtime/wrap-bucket": "src/runtime/wrap-bucket.ts",
       "runtime/wrap-middleware": "src/runtime/wrap-middleware.ts",
     },
     format: ["esm"],

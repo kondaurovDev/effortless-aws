@@ -70,7 +70,7 @@ const collectFailures = (records: TableRecord<any>[], sequenceNumbers: Map<Table
   return failures;
 };
 
-const ENV_TABLE_SELF = "EFF_TABLE_SELF";
+const ENV_DEP_SELF = "EFF_DEP_SELF";
 
 export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
   if (!handler.onRecord && !handler.onBatch) {
@@ -82,8 +82,9 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
   let selfClient: ReturnType<typeof createTableClient> | null = null;
   const getSelfClient = () => {
     if (selfClient) return selfClient;
-    const tableName = process.env[ENV_TABLE_SELF];
-    if (!tableName) return undefined;
+    const raw = process.env[ENV_DEP_SELF];
+    if (!raw) return undefined;
+    const tableName = raw.startsWith("table:") ? raw.slice(6) : raw;
     selfClient = createTableClient(tableName, { tagField });
     return selfClient;
   };

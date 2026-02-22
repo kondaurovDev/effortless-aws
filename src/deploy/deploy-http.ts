@@ -33,7 +33,8 @@ type DeployLambdaInput = {
 /** @internal */
 export const deployLambda = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployLambdaInput) =>
   Effect.gen(function* () {
-    const { exportName, name: handlerName, config } = fn;
+    const { exportName, config } = fn;
+    const handlerName = exportName;
 
     const { functionArn, status } = yield* deployCoreLambda({
       input,
@@ -66,7 +67,7 @@ export const deploy = (input: DeployInput) =>
     const targetExport = input.exportName ?? "default";
     const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
     const config = fn.config;
-    const handlerName = fn.name;
+    const handlerName = fn.exportName;
 
     const tagCtx: TagContext = {
       project: input.project,
@@ -187,7 +188,7 @@ export const deployAll = (input: DeployInput) =>
 
       results.push({ exportName, url: handlerUrl, functionArn });
 
-      yield* Effect.logDebug(`  ${config.method} ${config.path} → ${fnName}`);
+      yield* Effect.logDebug(`  ${config.method} ${config.path} → ${fn.exportName}`);
     }
 
     // Remove routes that no longer have corresponding handlers

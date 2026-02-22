@@ -20,7 +20,8 @@ type DeployAppLambdaInput = {
 /** @internal */
 export const deployAppLambda = ({ input, fn, layerArn, external, depsEnv, depsPermissions }: DeployAppLambdaInput) =>
   Effect.gen(function* () {
-    const { exportName, name: handlerName, config } = fn;
+    const { exportName, config } = fn;
+    const handlerName = exportName;
 
     // Run build command if specified
     if (config.build) {

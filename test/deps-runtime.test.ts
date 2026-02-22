@@ -60,7 +60,7 @@ describe("deps runtime injection", () => {
   describe("HTTP handler (wrapHttp)", () => {
 
     it("should inject deps with table client into handler", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_orders: "test-project-dev-orders" };
+      process.env = { ...originalEnv, EFF_DEP_orders: "table:test-project-dev-orders" };
 
       let capturedDeps: any = null;
 
@@ -88,7 +88,7 @@ describe("deps runtime injection", () => {
     });
 
     it("should work with deps + setup together", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_orders: "my-orders-table" };
+      process.env = { ...originalEnv, EFF_DEP_orders: "table:my-orders-table" };
 
       let capturedArgs: any = null;
 
@@ -111,7 +111,7 @@ describe("deps runtime injection", () => {
     });
 
     it("should work with deps + schema together", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_orders: "my-orders-table" };
+      process.env = { ...originalEnv, EFF_DEP_orders: "table:my-orders-table" };
 
       let capturedArgs: any = null;
 
@@ -138,7 +138,7 @@ describe("deps runtime injection", () => {
     });
 
     it("should forward tagField from dep handler __spec to table client", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_orders: "test-project-dev-orders" };
+      process.env = { ...originalEnv, EFF_DEP_orders: "table:test-project-dev-orders" };
       mockPutItem.mockResolvedValue({});
 
       let capturedDeps: any = null;
@@ -167,7 +167,7 @@ describe("deps runtime injection", () => {
     });
 
     it("should use default tagField when dep handler has no tagField in __spec", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_orders: "test-project-dev-orders" };
+      process.env = { ...originalEnv, EFF_DEP_orders: "table:test-project-dev-orders" };
       mockPutItem.mockResolvedValue({});
 
       const handler = {
@@ -189,7 +189,7 @@ describe("deps runtime injection", () => {
 
     it("should throw when env var is missing for a dep", async () => {
       process.env = { ...originalEnv };
-      delete process.env.EFF_TABLE_orders;
+      delete process.env.EFF_DEP_orders;
 
       const handler = {
         __brand: "effortless-http",
@@ -203,7 +203,7 @@ describe("deps runtime injection", () => {
       const wrapped = wrapHttp(handler);
 
       await expect(wrapped(makeHttpEvent())).rejects.toThrow(
-        'Missing environment variable EFF_TABLE_orders for dep "orders"'
+        'Missing environment variable EFF_DEP_orders for dep "orders"'
       );
     });
 
@@ -230,7 +230,7 @@ describe("deps runtime injection", () => {
   describe("Table stream handler (wrapTableStream)", () => {
 
     it("should inject deps into onRecord", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_users: "test-project-dev-users" };
+      process.env = { ...originalEnv, EFF_DEP_users: "table:test-project-dev-users" };
 
       const capturedDeps: any[] = [];
 
@@ -263,7 +263,7 @@ describe("deps runtime injection", () => {
     });
 
     it("should inject deps into onBatch", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_users: "test-project-dev-users" };
+      process.env = { ...originalEnv, EFF_DEP_users: "table:test-project-dev-users" };
 
       let capturedArgs: any = null;
 
@@ -299,7 +299,7 @@ describe("deps runtime injection", () => {
     });
 
     it("should inject deps + setup into onRecord", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_users: "test-project-dev-users" };
+      process.env = { ...originalEnv, EFF_DEP_users: "table:test-project-dev-users" };
 
       let capturedArgs: any = null;
 
@@ -356,7 +356,7 @@ describe("deps runtime injection", () => {
   describe("Table self-client (table arg)", () => {
 
     it("should inject table client into onRecord", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_SELF: "my-project-dev-orders" };
+      process.env = { ...originalEnv, EFF_DEP_SELF: "table:my-project-dev-orders" };
 
       let capturedArgs: any = null;
 
@@ -387,7 +387,7 @@ describe("deps runtime injection", () => {
     });
 
     it("should inject table client into onBatch", async () => {
-      process.env = { ...originalEnv, EFF_TABLE_SELF: "my-project-dev-events" };
+      process.env = { ...originalEnv, EFF_DEP_SELF: "table:my-project-dev-events" };
 
       let capturedArgs: any = null;
 
@@ -417,8 +417,8 @@ describe("deps runtime injection", () => {
     it("should inject table + deps + setup together", async () => {
       process.env = {
         ...originalEnv,
-        EFF_TABLE_SELF: "my-project-dev-orders",
-        EFF_TABLE_users: "my-project-dev-users",
+        EFF_DEP_SELF: "table:my-project-dev-orders",
+        EFF_DEP_users: "table:my-project-dev-users",
       };
 
       let capturedArgs: any = null;
@@ -448,9 +448,9 @@ describe("deps runtime injection", () => {
       expect(capturedArgs.ctx).toEqual({ env: "test" });
     });
 
-    it("should not inject table when EFF_TABLE_SELF is absent", async () => {
+    it("should not inject table when EFF_DEP_SELF is absent", async () => {
       process.env = { ...originalEnv };
-      delete process.env.EFF_TABLE_SELF;
+      delete process.env.EFF_DEP_SELF;
 
       let capturedArgs: any = null;
 

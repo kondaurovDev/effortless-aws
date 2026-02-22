@@ -110,10 +110,10 @@ export const logsCommand = Command.make(
         const discovered = discoverHandlers(files);
 
         const allHandlerNames = [
-          ...discovered.httpHandlers.flatMap(h => h.exports.map(e => e.name)),
-          ...discovered.tableHandlers.flatMap(h => h.exports.map(e => e.name)),
-          ...discovered.appHandlers.flatMap(h => h.exports.map(e => e.name)),
-          ...discovered.fifoQueueHandlers.flatMap(h => h.exports.map(e => e.name)),
+          ...discovered.httpHandlers.flatMap(h => h.exports.map(e => e.exportName)),
+          ...discovered.tableHandlers.flatMap(h => h.exports.map(e => e.exportName)),
+          ...discovered.appHandlers.flatMap(h => h.exports.map(e => e.exportName)),
+          ...discovered.fifoQueueHandlers.flatMap(h => h.exports.map(e => e.exportName)),
         ];
 
         if (!allHandlerNames.includes(handlerName)) {

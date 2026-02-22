@@ -1,13 +1,6 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableKey, TableItem } from "../helpers";
+import type { AnyDepHandler, ResolveDeps } from "./shared";
 import type { TableClient } from "../runtime/table-client";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
-
-/** Maps a deps declaration to resolved runtime client types */
-type ResolveDeps<D> = {
-  [K in keyof D]: D[K] extends TableHandler<infer T, any, any, any, any> ? TableClient<T> : never;
-};
 
 /** DynamoDB Streams view type - determines what data is captured in stream records */
 export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY";
@@ -189,7 +182,7 @@ export type DefineTableOptions<
   T = Record<string, unknown>,
   C = undefined,
   R = void,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 > =
@@ -247,7 +240,7 @@ export const defineTable = <
   T = Record<string, unknown>,
   C = undefined,
   R = void,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 >(

@@ -102,7 +102,7 @@ const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandl
   for (const { exports } of discovered.httpHandlers) {
     for (const fn of exports) {
       handlers.push({
-        name: fn.name,
+        name: fn.exportName,
         type: "http",
         method: fn.config.method,
         path: fn.config.path,
@@ -113,7 +113,7 @@ const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandl
   for (const { exports } of discovered.tableHandlers) {
     for (const fn of exports) {
       handlers.push({
-        name: fn.name,
+        name: fn.exportName,
         type: "table",
       });
     }
@@ -122,7 +122,7 @@ const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandl
   for (const { exports } of discovered.appHandlers) {
     for (const fn of exports) {
       handlers.push({
-        name: fn.name,
+        name: fn.exportName,
         type: "app",
         path: fn.config.path,
       });
@@ -132,7 +132,7 @@ const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandl
   for (const { exports } of discovered.staticSiteHandlers) {
     for (const fn of exports) {
       handlers.push({
-        name: fn.name,
+        name: fn.exportName,
         type: "site",
       });
     }
@@ -141,7 +141,7 @@ const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandl
   for (const { exports } of discovered.fifoQueueHandlers) {
     for (const fn of exports) {
       handlers.push({
-        name: fn.name,
+        name: fn.exportName,
         type: "queue",
       });
     }

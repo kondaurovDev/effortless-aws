@@ -38,6 +38,7 @@ import { deployTableFunction } from "./deploy-table";
 import { deployAppLambda } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
 import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fifo-queue";
+import { deployBucketFunction, type DeployBucketResult } from "./deploy-bucket";
 
 // ============ Progress tracking ============
 
@@ -174,6 +175,13 @@ const TABLE_CLIENT_PERMISSIONS = [
   "dynamodb:BatchWriteItem",
 ] as const;
 
+const BUCKET_CLIENT_PERMISSIONS = [
+  "s3:GetObject",
+  "s3:PutObject",
+  "s3:DeleteObject",
+  "s3:ListBucket",
+] as const;
+
 /**
  * Build a map of all table handler export names to their resolved DynamoDB table names.
  * Table names are deterministic: ${project}-${stage}-${handlerName}
@@ -186,7 +194,27 @@ const buildTableNameMap = (
   const map = new Map<string, string>();
   for (const { exports } of tableHandlers) {
     for (const fn of exports) {
-      map.set(fn.exportName, `${project}-${stage}-${fn.name}`);
+      const handlerName = fn.exportName;
+      map.set(fn.exportName, `${project}-${stage}-${handlerName}`);
+    }
+  }
+  return map;
+};
+
+/**
+ * Build a map of all bucket handler export names to their resolved S3 bucket names.
+ * Bucket names are deterministic: ${project}-${stage}-${handlerName}
+ */
+const buildBucketNameMap = (
+  bucketHandlers: DiscoveredHandlers["bucketHandlers"],
+  project: string,
+  stage: string,
+): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const { exports } of bucketHandlers) {
+    for (const fn of exports) {
+      const handlerName = fn.exportName;
+      map.set(fn.exportName, `${project}-${stage}-${handlerName}`);
     }
   }
   return map;
@@ -194,24 +222,40 @@ const buildTableNameMap = (
 
 /**
  * Resolve deps keys to environment variables and IAM permissions.
+ * Checks both table and bucket name maps.
  */
 const resolveDeps = (
   depsKeys: string[],
-  tableNameMap: Map<string, string>
+  tableNameMap: Map<string, string>,
+  bucketNameMap: Map<string, string>,
 ): { depsEnv: Record<string, string>; depsPermissions: readonly string[] } | undefined => {
   if (depsKeys.length === 0) return undefined;
 
   const depsEnv: Record<string, string> = {};
+  let hasTable = false;
+  let hasBucket = false;
+
   for (const key of depsKeys) {
     const tableName = tableNameMap.get(key);
     if (tableName) {
-      depsEnv[`EFF_TABLE_${key}`] = tableName;
+      depsEnv[`EFF_DEP_${key}`] = `table:${tableName}`;
+      hasTable = true;
+      continue;
+    }
+    const bucketName = bucketNameMap.get(key);
+    if (bucketName) {
+      depsEnv[`EFF_DEP_${key}`] = `bucket:${bucketName}`;
+      hasBucket = true;
     }
   }
 
   if (Object.keys(depsEnv).length === 0) return undefined;
 
-  return { depsEnv, depsPermissions: TABLE_CLIENT_PERMISSIONS };
+  const permissions: string[] = [];
+  if (hasTable) permissions.push(...TABLE_CLIENT_PERMISSIONS);
+  if (hasBucket) permissions.push(...BUCKET_CLIENT_PERMISSIONS);
+
+  return { depsEnv, depsPermissions: permissions };
 };
 
 // ============ Params resolution ============
@@ -265,6 +309,7 @@ type DeployTaskCtx = {
   external: string[];
   stage: string;
   tableNameMap: Map<string, string>;
+  bucketNameMap: Map<string, string>;
   logComplete: (name: string, type: string, status: StepStatus) => Effect.Effect<void>;
 };
 
@@ -282,7 +327,7 @@ const resolveHandlerEnv = (
   ctx: DeployTaskCtx,
 ) => {
   const resolved = mergeResolved(
-    resolveDeps(depsKeys, ctx.tableNameMap),
+    resolveDeps(depsKeys, ctx.tableNameMap, ctx.bucketNameMap),
     resolveParams(paramEntries, ctx.input.project, ctx.stage)
   );
   return {
@@ -317,7 +362,7 @@ const buildHttpTasks = (
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
 
           results.push({ exportName, url: handlerUrl, functionArn });
-          yield* ctx.logComplete( handlerName, "http", status);
+          yield* ctx.logComplete( exportName, "http", status);
         })
       );
     }
@@ -345,7 +390,7 @@ const buildTableTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, dynamodb: { region } })));
           results.push(result);
-          yield* ctx.logComplete( fn.name, "table", result.status);
+          yield* ctx.logComplete( fn.exportName, "table", result.status);
         })
       );
     }
@@ -415,7 +460,7 @@ const buildStaticSiteTasks = (
             acm: { region: "us-east-1" },
           })));
           results.push(result);
-          yield* ctx.logComplete( fn.name, "site", "updated");
+          yield* ctx.logComplete( fn.exportName, "site", "updated");
         })
       );
     }
@@ -443,7 +488,36 @@ const buildFifoQueueTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, sqs: { region } })));
           results.push(result);
-          yield* ctx.logComplete( fn.name, "queue", result.status);
+          yield* ctx.logComplete( fn.exportName, "queue", result.status);
+        })
+      );
+    }
+  }
+  return tasks;
+};
+
+const buildBucketTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["bucketHandlers"],
+  results: DeployBucketResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
+          const result = yield* deployBucketFunction({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, s3: { region } })));
+          results.push(result);
+          const status = result.status === "resource-only" ? "created" : result.status;
+          yield* ctx.logComplete(fn.exportName, "bucket", status);
         })
       );
     }
@@ -469,10 +543,13 @@ export type DeployProjectResult = {
   appResults: DeployResult[];
   staticSiteResults: DeployStaticSiteResult[];
   fifoQueueResults: DeployFifoQueueResult[];
+  bucketResults: DeployBucketResult[];
 };
 
 export const deployProject = (input: DeployProjectInput) =>
   Effect.gen(function* () {
+    const stage = resolveStage(input.stage);
+
     // Discover handlers from file patterns
     const files = findHandlerFiles(input.patterns, input.projectDir);
 
@@ -482,14 +559,15 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers } = discoverHandlers(files);
+    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers } = discoverHandlers(files);
 
     const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalStaticSiteHandlers = staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalFifoQueueHandlers = fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers;
+    const totalBucketHandlers = bucketHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers;
 
     if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
@@ -501,32 +579,33 @@ export const deployProject = (input: DeployProjectInput) =>
     if (totalAppHandlers > 0) parts.push(`${totalAppHandlers} app`);
     if (totalStaticSiteHandlers > 0) parts.push(`${totalStaticSiteHandlers} site`);
     if (totalFifoQueueHandlers > 0) parts.push(`${totalFifoQueueHandlers} queue`);
+    if (totalBucketHandlers > 0) parts.push(`${totalBucketHandlers} bucket`);
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
     // Check for missing SSM parameters
-    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers };
-    const requiredParams = collectRequiredParams(discovered, input.project, resolveStage(input.stage));
+    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers };
+    const requiredParams = collectRequiredParams(discovered, input.project, stage);
     if (requiredParams.length > 0) {
       const { missing } = yield* checkMissingParams(requiredParams).pipe(
         Effect.provide(Aws.makeClients({ ssm: { region: input.region } }))
       );
       if (missing.length > 0) {
-        const stageLabel = resolveStage(input.stage);
         yield* Console.log(`\n  ${c.yellow("⚠")} Missing ${missing.length} SSM parameter(s):\n`);
         for (const p of missing) {
           yield* Console.log(`    ${c.dim(p.handlerName)} → ${c.yellow(p.ssmPath)}`);
         }
-        yield* Console.log(`\n  Run: ${c.cyan(`npx eff config --stage ${stageLabel}`)}`);
+        yield* Console.log(`\n  Run: ${c.cyan(`npx eff config --stage ${stage}`)}`);
       }
     }
 
-    // Build table name map for deps resolution
-    const tableNameMap = buildTableNameMap(tableHandlers, input.project, resolveStage(input.stage));
+    // Build name maps for deps resolution
+    const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
+    const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
 
     // Prepare layer
     const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
       project: input.project,
-      stage: resolveStage(input.stage),
+      stage: stage,
       region: input.region,
       projectDir: input.projectDir
     });
@@ -536,8 +615,6 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Console.log(`  ${c.dim("Layer:")} ${status} ${c.dim(`v${layerVersion}`)} (${external.length} packages)`);
     }
 
-    const stage = resolveStage(input.stage);
-
     // Setup API Gateway for HTTP/app handlers
     let apiId: string | undefined;
     let apiUrl: string | undefined;
@@ -545,7 +622,7 @@ export const deployProject = (input: DeployProjectInput) =>
     if (totalHttpHandlers > 0 || totalAppHandlers > 0) {
       const tagCtx: TagContext = {
         project: input.project,
-        stage: resolveStage(input.stage),
+        stage: stage,
         handler: "api"
       };
 
@@ -572,20 +649,22 @@ export const deployProject = (input: DeployProjectInput) =>
     // Build handler manifest and live progress tracker
     const manifest: HandlerManifest = [];
     for (const { exports } of httpHandlers)
-      for (const fn of exports) manifest.push({ name: fn.name, type: "http" });
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "http" });
     for (const { exports } of tableHandlers)
-      for (const fn of exports) manifest.push({ name: fn.name, type: "table" });
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "table" });
     for (const { exports } of appHandlers)
-      for (const fn of exports) manifest.push({ name: fn.name, type: "app" });
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "app" });
     for (const { exports } of staticSiteHandlers)
-      for (const fn of exports) manifest.push({ name: fn.name, type: "site" });
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "site" });
     for (const { exports } of fifoQueueHandlers)
-      for (const fn of exports) manifest.push({ name: fn.name, type: "queue" });
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "queue" });
+    for (const { exports } of bucketHandlers)
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "bucket" });
 
     manifest.sort((a, b) => a.name.localeCompare(b.name));
     const logComplete = createLiveProgress(manifest);
     const ctx: DeployTaskCtx = {
-      input, layerArn, external, stage, tableNameMap, logComplete,
+      input, layerArn, external, stage, tableNameMap, bucketNameMap, logComplete,
     };
 
     const httpResults: DeployResult[] = [];
@@ -593,6 +672,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const appResults: DeployResult[] = [];
     const staticSiteResults: DeployStaticSiteResult[] = [];
     const fifoQueueResults: DeployFifoQueueResult[] = [];
+    const bucketResults: DeployBucketResult[] = [];
 
     const tasks = [
       ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
@@ -600,6 +680,7 @@ export const deployProject = (input: DeployProjectInput) =>
       ...(apiId ? buildAppTasks(ctx, appHandlers, apiId, appResults) : []),
       ...buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults),
       ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+      ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
     ];
 
     yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -647,5 +728,5 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Effect.logDebug(`Deployment complete! API: ${apiUrl}`);
     }
 
-    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults };
+    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults };
   });

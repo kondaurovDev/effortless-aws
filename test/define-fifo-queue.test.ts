@@ -73,7 +73,6 @@ describe("extractFifoQueueConfigs", () => {
       });
     `;
     const configs = extractFifoQueueConfigs(source);
-    expect(configs[0]!.name).toBe("q");
     expect(configs[0]!.config.batchSize).toBe(10);
     expect(configs[0]!.config).not.toHaveProperty("onMessage");
     expect(configs[0]!.config).not.toHaveProperty("schema");

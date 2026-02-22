@@ -1,14 +1,5 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
-import type { TableHandler } from "./define-table";
-import type { TableClient } from "~/runtime/table-client";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
-
-/** Maps a deps declaration to resolved runtime client types */
-type ResolveDeps<D> = {
-  [K in keyof D]: D[K] extends TableHandler<infer T, any, any, any, any> ? TableClient<T> : never;
-};
+import type { AnyDepHandler, ResolveDeps } from "./shared";
 
 /**
  * Parsed SQS FIFO message passed to the handler callbacks.
@@ -55,16 +46,14 @@ export type FifoQueueConfig = LambdaWithPermissions & {
 };
 
 /**
- * Setup factory type — conditional on whether deps/config are declared.
- * No deps/config: `() => C | Promise<C>`
- * With deps/config: `(args: { deps?, config? }) => C | Promise<C>`
+ * Setup factory type — always receives an args object.
+ * Args include `deps` and/or `config` when declared (empty `{}` otherwise).
  */
-type SetupFactory<C, D, P> = [D | P] extends [undefined]
-  ? () => C | Promise<C>
-  : (args:
-      & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-      & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
-    ) => C | Promise<C>;
+type SetupFactory<C, D, P> =
+  (args:
+    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+  ) => C | Promise<C>;
 
 /**
  * Per-message handler function.
@@ -140,7 +129,7 @@ type DefineFifoQueueWithOnBatch<T = unknown, C = undefined, D = undefined, P = u
 export type DefineFifoQueueOptions<
   T = unknown,
   C = undefined,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 > =
@@ -198,7 +187,7 @@ export type FifoQueueHandler<T = unknown, C = undefined, D = undefined, P = unde
 export const defineFifoQueue = <
   T = unknown,
   C = undefined,
-  D extends Record<string, AnyTableHandler> | undefined = undefined,
+  D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 >(

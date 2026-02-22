@@ -172,7 +172,6 @@ describe("deps extraction", () => {
       const configs = extractTableConfigs(source);
 
       expect(configs[0]!.config).not.toHaveProperty("deps");
-      expect(configs[0]!.name).toBe("orders");
     });
 
   });

@@ -172,7 +172,7 @@ describe("params runtime injection", () => {
       process.env = {
         ...originalEnv,
         EFF_PARAM_dbUrl: "/myapp/prod/database-url",
-        EFF_TABLE_orders: "myapp-prod-orders",
+        EFF_DEP_orders: "table:myapp-prod-orders",
       };
 
       setupSsmMock({ "/myapp/prod/database-url": "postgres://localhost/db" });

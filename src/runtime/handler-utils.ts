@@ -2,11 +2,12 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import type { AnyParamRef, LogLevel } from "~/helpers";
 import { createTableClient } from "./table-client";
+import { createBucketClient } from "./bucket-client";
 import { getParameters } from "./ssm-client";
 
 export type { LogLevel };
 
-export const ENV_TABLE_PREFIX = "EFF_TABLE_";
+export const ENV_DEP_PREFIX = "EFF_DEP_";
 export const ENV_PARAM_PREFIX = "EFF_PARAM_";
 
 const LOG_RANK: Record<LogLevel, number> = { error: 0, info: 1, debug: 2 };
@@ -19,20 +20,39 @@ const truncate = (value: unknown, maxLength = 4096): unknown => {
 };
 
 /**
- * Build resolved deps object from handler.deps and EFF_TABLE_* env vars.
- * Shared by wrap-http and wrap-table-stream.
+ * Registry of dep type → client factory.
+ * To add a new dep type, add a single entry here.
+ */
+const DEP_FACTORIES: Record<string, (name: string, depHandler: unknown) => unknown> = {
+  table: (name, depHandler) => {
+    const tagField = (depHandler as { __spec?: { tagField?: string } } | undefined)?.__spec?.tagField;
+    return createTableClient(name, tagField ? { tagField } : undefined);
+  },
+  bucket: (name) => createBucketClient(name),
+};
+
+/**
+ * Parse "type:resourceName" from an EFF_DEP_ env var value.
+ */
+export const parseDepValue = (raw: string): { type: string; name: string } => {
+  const idx = raw.indexOf(":");
+  return { type: raw.slice(0, idx), name: raw.slice(idx + 1) };
+};
+
+/**
+ * Build resolved deps object from handler.deps and EFF_DEP_* env vars.
+ * Shared by all runtime wrappers.
  */
 export const buildDeps = (deps: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
   if (!deps) return undefined;
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(deps)) {
-    const tableName = process.env[`${ENV_TABLE_PREFIX}${key}`];
-    if (!tableName) {
-      throw new Error(`Missing environment variable ${ENV_TABLE_PREFIX}${key} for dep "${key}"`);
-    }
-    const depHandler = deps[key] as { __spec?: { tagField?: string } } | undefined;
-    const tagField = depHandler?.__spec?.tagField;
-    result[key] = createTableClient(tableName, tagField ? { tagField } : undefined);
+    const raw = process.env[`${ENV_DEP_PREFIX}${key}`];
+    if (!raw) throw new Error(`Missing environment variable ${ENV_DEP_PREFIX}${key} for dep "${key}"`);
+    const { type, name } = parseDepValue(raw);
+    const factory = DEP_FACTORIES[type];
+    if (!factory) throw new Error(`Unknown dep type "${type}" for dep "${key}"`);
+    result[key] = factory(name, deps[key]);
   }
   return result;
 };
@@ -90,7 +110,7 @@ export const readStatic = (filePath: string): string =>
 
 export const createHandlerRuntime = (
   handler: { setup?: (...args: any[]) => any; deps?: any; config?: any; static?: string[] },
-  handlerType: "http" | "table" | "app" | "fifo-queue",
+  handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket",
   logLevel: LogLevel = "info",
   extraSetupArgs?: () => Record<string, unknown>
 ): HandlerRuntime => {
@@ -118,9 +138,7 @@ export const createHandlerRuntime = (
       if (params) args.config = params;
       if (deps) args.deps = deps;
       if (extraSetupArgs) Object.assign(args, extraSetupArgs());
-      ctx = (Object.keys(args).length > 0 || extraSetupArgs)
-        ? await handler.setup(args)
-        : await handler.setup();
+      ctx = await handler.setup(args);
     }
     return ctx;
   };
@@ -161,7 +179,7 @@ export const createHandlerRuntime = (
 
   // Console interception: suppress developer logs below configured logLevel
   const noop = () => {};
-  const saved = { log: console.log, info: console.info, debug: console.debug, warn: console.warn, error: console.error };
+  const saved = { log: console.log, info: console.info, debug: console.debug };
 
   const patchConsole = () => {
     if (rank < LOG_RANK.debug) console.debug = noop;

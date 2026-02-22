@@ -35,7 +35,8 @@ const FIFO_QUEUE_DEFAULT_PERMISSIONS = ["sqs:*", "logs:*"] as const;
 /** @internal */
 export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployFifoQueueFunctionInput) =>
   Effect.gen(function* () {
-    const { exportName, name: handlerName, config } = fn;
+    const { exportName, config } = fn;
+    const handlerName = exportName;
 
     const tagCtx: TagContext = {
       project: input.project,

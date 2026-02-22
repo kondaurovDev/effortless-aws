@@ -22,7 +22,7 @@ export const collectRequiredParams = (
   const seen = new Map<string, RequiredParam>();
 
   const collect = (
-    handlerGroups: { exports: { name: string; paramEntries: ParamEntry[] }[] }[],
+    handlerGroups: { exports: { exportName: string; paramEntries: ParamEntry[] }[] }[],
   ) => {
     for (const { exports } of handlerGroups) {
       for (const fn of exports) {
@@ -33,7 +33,7 @@ export const collectRequiredParams = (
               ssmPath,
               propName,
               ssmKey,
-              handlerName: fn.name,
+              handlerName: fn.exportName,
             });
           }
         }
@@ -44,6 +44,7 @@ export const collectRequiredParams = (
   collect(handlers.httpHandlers);
   collect(handlers.tableHandlers);
   collect(handlers.fifoQueueHandlers);
+  collect(handlers.bucketHandlers);
 
   return Array.from(seen.values());
 };

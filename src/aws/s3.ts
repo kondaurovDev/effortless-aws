@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { s3 } from "./clients";
+import { s3, lambda } from "./clients";
 import { toAwsTagList } from "./tags";
 
 // Reuse the same content-type map as wrap-app.ts
@@ -260,6 +260,68 @@ export const deleteBucket = (bucketName: string) =>
       Effect.catchIf(
         e => e._tag === "S3Error" && e.is("NoSuchBucket"),
         () => Effect.logDebug(`Bucket ${bucketName} not found, skipping`)
+      )
+    );
+  });
+
+// ============ Bucket event notifications ============
+
+export type EnsureBucketNotificationInput = {
+  bucketName: string;
+  functionArn: string;
+  events: string[];
+  prefix?: string;
+  suffix?: string;
+};
+
+export const ensureBucketNotification = (input: EnsureBucketNotificationInput) =>
+  Effect.gen(function* () {
+    const { bucketName, functionArn, events, prefix, suffix } = input;
+
+    const filterRules: { Name: "prefix" | "suffix"; Value: string }[] = [];
+    if (prefix) filterRules.push({ Name: "prefix", Value: prefix });
+    if (suffix) filterRules.push({ Name: "suffix", Value: suffix });
+
+    yield* s3.make("put_bucket_notification_configuration", {
+      Bucket: bucketName,
+      NotificationConfiguration: {
+        LambdaFunctionConfigurations: [
+          {
+            LambdaFunctionArn: functionArn,
+            Events: events as any[],
+            ...(filterRules.length > 0 ? {
+              Filter: {
+                Key: { FilterRules: filterRules },
+              },
+            } : {}),
+          },
+        ],
+      },
+    });
+
+    yield* Effect.logDebug(`S3 bucket notification configured for ${bucketName}`);
+  });
+
+export const addS3LambdaPermission = (
+  functionArn: string,
+  bucketName: string,
+) =>
+  Effect.gen(function* () {
+    const accountId = functionArn.split(":")[4];
+    const bucketArn = `arn:aws:s3:::${bucketName}`;
+    const statementId = `s3-${bucketName}`;
+
+    yield* lambda.make("add_permission", {
+      FunctionName: functionArn,
+      StatementId: statementId,
+      Action: "lambda:InvokeFunction",
+      Principal: "s3.amazonaws.com",
+      SourceArn: bucketArn,
+      SourceAccount: accountId,
+    }).pipe(
+      Effect.catchIf(
+        e => e._tag === "LambdaError" && e.is("ResourceConflictException"),
+        () => Effect.logDebug("S3 Lambda permission already exists"),
       )
     );
   });

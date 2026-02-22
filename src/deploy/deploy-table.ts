@@ -33,7 +33,8 @@ const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*"] as const;
 /** @internal */
 export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployTableFunctionInput) =>
   Effect.gen(function* () {
-    const { exportName, name: handlerName, config } = fn;
+    const { exportName, config } = fn;
+    const handlerName = exportName;
 
     const tagCtx: TagContext = {
       project: input.project,
@@ -50,8 +51,8 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       tags: makeTags(tagCtx, "dynamodb")
     });
 
-    // Merge EFF_TABLE_SELF (own table name) into deps env vars
-    const selfEnv: Record<string, string> = { EFF_TABLE_SELF: tableName, ...depsEnv };
+    // Merge EFF_DEP_SELF (own table name) into deps env vars
+    const selfEnv: Record<string, string> = { EFF_DEP_SELF: `table:${tableName}`, ...depsEnv };
 
     const { functionArn, status } = yield* deployCoreLambda({
       input,
