@@ -1,5 +1,25 @@
 # effortless-aws
 
+## 0.11.0
+
+### Minor Changes
+
+- [`8170d24`](https://github.com/kondaurovDev/effortless-aws/commit/8170d2462b1f1a18af03afaf1dbfa6842db3fe12) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Remove `name` from handler config API. Handler name is now always derived from the export name. This eliminates the `name` field from `LambdaConfig` and all `define*` option types.
+
+  **Breaking:** If you used `name` in `defineHttp`, `defineTable`, etc., remove it. The export variable name is now the handler name.
+
+  Before:
+
+  ```ts
+  export const api = defineHttp({ name: "api", method: "GET", path: "/hello", ... });
+  ```
+
+  After:
+
+  ```ts
+  export const api = defineHttp({ method: "GET", path: "/hello", ... });
+  ```
+
 ## 0.10.1
 
 ### Patch Changes
