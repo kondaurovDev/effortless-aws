@@ -1,6 +1,6 @@
 ---
 title: Definitions
-description: All definition types — defineHttp, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineSchedule, defineEvent, defineS3.
+description: All definition types — defineHttp, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineBucket, defineSchedule, defineEvent.
 ---
 
 ## Overview
@@ -18,9 +18,9 @@ Some definitions include a Lambda handler (a callback like `onRequest`, `onRecor
 | [defineFifoQueue](#definefifoqueue) | SQS FIFO + Lambda | Yes (`onMessage`/`onBatch`) |
 | [defineSchedule](#defineschedule) | EventBridge + Lambda | Yes — Planned |
 | [defineEvent](#defineevent) | EventBridge + Lambda | Yes — Planned |
-| [defineS3](#defines3) | S3 + event notifications | Yes — Planned |
+| [defineBucket](#definebucket) | S3 bucket + optional event Lambda | No — resource-only when no `onObjectCreated`/`onObjectRemoved` |
 
-Resource-only definitions are useful when you need the infrastructure but handle it from elsewhere. For example, a `defineTable` without stream callbacks creates a DynamoDB table that other definitions can reference via `deps`:
+Resource-only definitions are useful when you need the infrastructure but handle it from elsewhere. For example, a `defineTable` without stream callbacks creates a DynamoDB table, and a `defineBucket` without event callbacks creates an S3 bucket — both referenceable via `deps`:
 
 ```typescript
 // Just a table — no Lambda, no stream
@@ -28,16 +28,20 @@ export const users = defineTable({
   schema: typed<User>(),
 });
 
-// HTTP endpoint that writes to the table
+// Just a bucket — no Lambda, no event notifications
+export const uploads = defineBucket({});
+
+// HTTP endpoint that writes to the table and bucket
 export const createUser = defineHttp({
   method: "POST",
   path: "/users",
-  deps: { users },
+  deps: { users, uploads },
   onRequest: async ({ req, deps }) => {
     await deps.users.put({
       pk: "USER#1", sk: "PROFILE",
       data: { tag: "user", name: "Alice", email: "alice@example.com" },
     });
+    await deps.uploads.put("avatars/user-1.png", avatarBuffer);
     return { status: 201 };
   },
 });
@@ -136,13 +140,15 @@ setup: async ({ deps, config }) => ({
 
 ### `deps`
 
-Dependencies on other table handlers. The framework auto-wires environment variables, IAM permissions, and injects typed `TableClient<T>` instances at runtime.
+Dependencies on other handlers (tables and buckets). The framework auto-wires environment variables, IAM permissions, and injects typed clients at runtime — `TableClient<T>` for tables, `BucketClient` for buckets.
 
 ```typescript
 import { orders } from "./orders.js";
+import { uploads } from "./uploads.js";
 
-deps: { orders },
+deps: { orders, uploads },
 // → deps.orders is TableClient<Order>
+// → deps.uploads is BucketClient
 ```
 
 ### `config`
@@ -873,7 +879,6 @@ export const daily = defineSchedule({
   schedule: string,  // "rate(1 hour)" or "cron(0 12 * * ? *)"
 
   // Optional
-  name?: string,
   memory?: number,
   timeout?: DurationInput,
   enabled?: boolean,  // default true
@@ -904,7 +909,6 @@ export const orderCreated = defineEvent({
   },
 
   // Optional
-  name?: string,
   eventSchema?: Schema.Schema<T>,
 
   handler: async (event: T, ctx: EventContext) => {
@@ -919,31 +923,164 @@ export const orderCreated = defineEvent({
 
 ---
 
-## defineS3
+## defineBucket
 
-> **Status: Planned** — not yet implemented.
+Creates: S3 Bucket + (optional) Lambda + S3 Event Notifications
 
-Creates: S3 Event Notification + Lambda
+Like `defineTable`, `defineBucket` supports **resource-only** mode — omit event callbacks to create just the bucket, referenceable via `deps` from other handlers.
 
 ```typescript
-export const upload = defineS3({
-  // Required
-  bucket: string,  // bucket name or reference
-  events: ["s3:ObjectCreated:*"],
+export const uploads = defineBucket({
+  // Optional — event filters
+  prefix?: string,                     // S3 key prefix filter (e.g. "images/")
+  suffix?: string,                     // S3 key suffix filter (e.g. ".jpg")
 
-  // Optional
-  name?: string,
-  prefix?: string,
-  suffix?: string,
+  // Optional — lambda
+  memory?: number,
+  timeout?: DurationInput,
+  permissions?: Permission[],           // additional IAM permissions
+  setup?: ({ bucket, deps, config }) => C,  // factory for shared state (cached on cold start)
+  deps?: { [key]: Handler },            // inter-handler dependencies
+  config?: { [key]: param(...) },       // SSM parameters
 
-  handler: async (records: S3Record[], ctx: S3Context) => {
-    for (const record of records) {
-      console.log(`New file: ${record.s3.object.key}`);
-    }
-  }
+  // Event handlers — both optional
+  onObjectCreated?: async ({ event, bucket, ctx, deps, config }) => { ... },
+  onObjectRemoved?: async ({ event, bucket, ctx, deps, config }) => { ... },
 });
 ```
 
-**Planned best practices**:
-- **Filtered triggers** — use `prefix` and `suffix` to only invoke the Lambda for relevant objects, reducing unnecessary invocations.
-- **Auto-infrastructure** — S3 event notification, Lambda, and IAM permissions are created on deploy.
+When at least one event handler is provided, a Lambda is created with S3 event notifications for `ObjectCreated:*` and `ObjectRemoved:*` events, filtered by `prefix`/`suffix` if specified.
+
+### BucketEvent
+
+Both `onObjectCreated` and `onObjectRemoved` receive a `BucketEvent`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `eventName` | `string` | S3 event name (e.g. `"ObjectCreated:Put"`, `"ObjectRemoved:Delete"`) |
+| `key` | `string` | Object key (path within the bucket) |
+| `size` | `number?` | Object size in bytes (present for created events) |
+| `eTag` | `string?` | Object ETag (present for created events) |
+| `eventTime` | `string?` | ISO 8601 timestamp of the event |
+| `bucketName` | `string` | S3 bucket name |
+
+### Callback arguments
+
+All event callbacks (`onObjectCreated`, `onObjectRemoved`) receive:
+
+| Arg | Type | Description |
+|-----|------|-------------|
+| `event` | `BucketEvent` | S3 event record |
+| `bucket` | `BucketClient` | Typed client for **this** bucket (auto-injected) |
+| `ctx` | `C` | Result from `setup()` factory (if provided) |
+| `deps` | `{ [key]: TableClient \| BucketClient }` | Typed clients for dependent handlers (if `deps` is set) |
+| `config` | `ResolveConfig<P>` | SSM parameter values (if `config` is set) |
+
+### BucketClient
+
+Every bucket handler receives a `bucket: BucketClient` — a typed client for its own S3 bucket. Other handlers get it via `deps`.
+
+```typescript
+BucketClient
+  put(key: string, body: Buffer | string, options?: { contentType?: string }): Promise<void>
+  get(key: string): Promise<{ body: Buffer; contentType?: string } | undefined>
+  delete(key: string): Promise<void>
+  list(prefix?: string): Promise<{ key: string; size: number; lastModified?: Date }[]>
+  bucketName: string
+```
+
+**put** — upload an object:
+
+```typescript
+await bucket.put("images/photo.jpg", imageBuffer, { contentType: "image/jpeg" });
+await bucket.put("data/config.json", JSON.stringify(config));
+```
+
+**get** — download an object. Returns `undefined` if not found:
+
+```typescript
+const file = await bucket.get("images/photo.jpg");
+if (file) {
+  console.log(file.body.length, file.contentType);
+}
+```
+
+**delete** — remove an object:
+
+```typescript
+await bucket.delete("images/old-photo.jpg");
+```
+
+**list** — list objects, optionally filtered by prefix:
+
+```typescript
+const all = await bucket.list();
+const images = await bucket.list("images/");
+// [{ key: "images/a.jpg", size: 1024, lastModified: Date }, ...]
+```
+
+### Event handlers
+
+```typescript
+export const uploads = defineBucket({
+  prefix: "images/",
+  suffix: ".jpg",
+  onObjectCreated: async ({ event, bucket }) => {
+    const file = await bucket.get(event.key);
+    console.log(`New image: ${event.key}, size: ${file?.body.length}`);
+  },
+  onObjectRemoved: async ({ event }) => {
+    console.log(`Deleted: ${event.key}`);
+  },
+});
+```
+
+### Dependencies
+
+```typescript
+import { orders } from "./orders.js";
+
+export const invoices = defineBucket({
+  deps: { orders },
+  onObjectCreated: async ({ event, deps }) => {
+    // deps.orders is TableClient<Order>
+    await deps.orders.put({
+      pk: "INVOICE#1", sk: "FILE",
+      data: { tag: "invoice", key: event.key, size: event.size ?? 0 },
+    });
+  },
+});
+```
+
+### Resource-only (no Lambda)
+
+```typescript
+// Just creates the S3 bucket — no event notifications, no Lambda
+export const assets = defineBucket({});
+```
+
+Use it as a dependency from other handlers:
+
+```typescript
+import { assets } from "./assets.js";
+
+export const upload = defineHttp({
+  method: "POST",
+  path: "/upload",
+  deps: { assets },
+  onRequest: async ({ req, deps }) => {
+    // deps.assets is BucketClient
+    await deps.assets.put("uploads/file.txt", req.body);
+    return { status: 201 };
+  },
+});
+```
+
+**Built-in best practices**:
+- **Filtered triggers** — use `prefix` and `suffix` to limit which S3 events invoke the Lambda, reducing unnecessary invocations.
+- **Self-client** — `bucket` arg provides a typed `BucketClient` for the handler's own bucket, auto-injected with no config.
+- **Typed dependencies** — `deps` provides typed `TableClient<T>` and `BucketClient` instances with auto-wired IAM and env vars.
+- **Resource-only mode** — omit event handlers to create just the bucket. Reference it via `deps` from other handlers.
+- **Cold start optimization** — the `setup` factory runs once and is cached across invocations. Receives `bucket` (self-client) alongside `deps` and `config`.
+- **Error isolation** — each S3 event record is processed individually. If one fails, the error is logged and the remaining records continue processing.
+- **Auto-infrastructure** — S3 bucket, Lambda, S3 event notifications, and IAM permissions are all created on deploy from this single definition.

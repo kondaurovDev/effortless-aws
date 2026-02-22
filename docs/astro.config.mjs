@@ -81,6 +81,7 @@ export default defineConfig({
             { label: "Database", slug: "use-cases/database" },
             { label: "Website", slug: "use-cases/web-app" },
             { label: "Queue", slug: "use-cases/queue" },
+            { label: "Storage", slug: "use-cases/storage" },
           ],
         },
         {
