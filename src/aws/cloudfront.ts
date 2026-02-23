@@ -1,4 +1,5 @@
 import { Effect, Schedule } from "effect";
+import type { DistributionConfig } from "@aws-sdk/client-cloudfront";
 import { cloudfront } from "./clients";
 import { toAwsTagList, getResourcesByTags } from "./tags";
 
@@ -312,46 +313,70 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
     // Create new distribution
     yield* Effect.logDebug("Creating CloudFront distribution (first deploy may take 5-15 minutes)...");
 
+    const distConfig: DistributionConfig = {
+      CallerReference: `${project}-${stage}-${handlerName}-${Date.now()}`,
+      Comment: comment,
+      Origins: {
+        Quantity: 1,
+        Items: [
+          {
+            Id: originId,
+            DomainName: originDomain,
+            OriginAccessControlId: oacId,
+            S3OriginConfig: { OriginAccessIdentity: "" },
+          },
+        ],
+      },
+      DefaultCacheBehavior: {
+        TargetOriginId: originId,
+        ViewerProtocolPolicy: "redirect-to-https",
+        AllowedMethods: {
+          Quantity: 2,
+          Items: ["GET", "HEAD"],
+          CachedMethods: { Quantity: 2, Items: ["GET", "HEAD"] },
+        },
+        Compress: true,
+        CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
+        FunctionAssociations: functionAssociations,
+        LambdaFunctionAssociations: lambdaFunctionAssociations,
+      },
+      Aliases: aliasesConfig,
+      ...(viewerCertificate ? { ViewerCertificate: viewerCertificate } : {}),
+      DefaultRootObject: index,
+      Enabled: true,
+      CustomErrorResponses: customErrorResponses,
+      PriceClass: "PriceClass_All",
+      HttpVersion: "http2and3",
+    };
+
     const createResult = yield* cloudfront.make("create_distribution_with_tags", {
       DistributionConfigWithTags: {
-        DistributionConfig: {
-          CallerReference: `${project}-${stage}-${handlerName}-${Date.now()}`,
-          Comment: comment,
-          Origins: {
-            Quantity: 1,
-            Items: [
-              {
-                Id: originId,
-                DomainName: originDomain,
-                OriginAccessControlId: oacId,
-                S3OriginConfig: { OriginAccessIdentity: "" },
-              },
-            ],
-          },
-          DefaultCacheBehavior: {
-            TargetOriginId: originId,
-            ViewerProtocolPolicy: "redirect-to-https",
-            AllowedMethods: {
-              Quantity: 2,
-              Items: ["GET", "HEAD"],
-              CachedMethods: { Quantity: 2, Items: ["GET", "HEAD"] },
-            },
-            Compress: true,
-            CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
-            FunctionAssociations: functionAssociations,
-            LambdaFunctionAssociations: lambdaFunctionAssociations,
-          },
-          Aliases: aliasesConfig,
-          ...(viewerCertificate ? { ViewerCertificate: viewerCertificate } : {}),
-          DefaultRootObject: index,
-          Enabled: true,
-          CustomErrorResponses: customErrorResponses,
-          PriceClass: "PriceClass_All",
-          HttpVersion: "http2and3",
-        },
+        DistributionConfig: distConfig,
         Tags: { Items: toAwsTagList(tags) },
       },
-    });
+    }).pipe(
+      // If CNAME is claimed by another distribution (e.g. DNS still points elsewhere),
+      // retry without aliases so the deploy doesn't fail
+      Effect.catchIf(
+        e => e._tag === "CloudFrontError" && e.is("CNAMEAlreadyExists"),
+        () => Effect.gen(function* () {
+          const cnameList = aliases?.join(", ") ?? "";
+          yield* Effect.logWarning(
+            `Domain ${cnameList} is still associated with another CloudFront distribution (DNS points elsewhere). ` +
+            `Creating distribution without custom domain. Update your DNS records and redeploy to attach the domain.`
+          );
+          return yield* cloudfront.make("create_distribution_with_tags", {
+            DistributionConfigWithTags: {
+              DistributionConfig: {
+                ...distConfig,
+                Aliases: { Quantity: 0, Items: [] as string[] },
+              },
+              Tags: { Items: toAwsTagList(tags) },
+            },
+          });
+        })
+      )
+    );
 
     const dist = createResult.Distribution!;
     return {
@@ -364,26 +389,33 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
 const findDistributionByTags = (project: string, stage: string, handlerName: string) =>
   Effect.gen(function* () {
     const resources = yield* getResourcesByTags(project, stage);
-    const dist = resources.find(r => {
+    const candidates = resources.filter(r => {
       const isDistribution = r.ResourceARN?.includes(":distribution/");
       const handlerTag = r.Tags?.find(t => t.Key === "effortless:handler");
       return isDistribution && handlerTag?.Value === handlerName;
     });
 
-    if (!dist?.ResourceARN) return undefined;
+    // Try each candidate — stale tag entries may reference deleted distributions
+    for (const dist of candidates) {
+      const distributionId = dist.ResourceARN!.split("/").pop()!;
+      const result = yield* cloudfront.make("get_distribution", { Id: distributionId }).pipe(
+        Effect.catchIf(
+          e => e._tag === "CloudFrontError" && e.is("NoSuchDistribution"),
+          () => {
+            Effect.logDebug(`Distribution ${distributionId} no longer exists (stale tag), skipping`);
+            return Effect.succeed(undefined);
+          }
+        )
+      );
+      if (result) {
+        return {
+          Id: distributionId,
+          DomainName: result.Distribution!.DomainName!,
+        };
+      }
+    }
 
-    const distributionId = dist.ResourceARN.split("/").pop()!;
-    const result = yield* cloudfront.make("get_distribution", { Id: distributionId }).pipe(
-      Effect.catchIf(
-        e => e._tag === "CloudFrontError" && e.is("NoSuchDistribution"),
-        () => Effect.succeed(undefined)
-      )
-    );
-    if (!result) return undefined;
-    return {
-      Id: distributionId,
-      DomainName: result.Distribution!.DomainName!,
-    };
+    return undefined;
   });
 
 export const invalidateDistribution = (distributionId: string) =>
