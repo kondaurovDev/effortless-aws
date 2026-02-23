@@ -1,5 +1,5 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
-import type { AnyDepHandler, ResolveDeps } from "./shared";
+import type { AnyDepHandler, ResolveDeps, StaticFiles } from "./shared";
 
 /**
  * Parsed SQS FIFO message passed to the handler callbacks.
@@ -49,10 +49,11 @@ export type FifoQueueConfig = LambdaWithPermissions & {
  * Setup factory type — always receives an args object.
  * Args include `deps` and/or `config` when declared (empty `{}` otherwise).
  */
-type SetupFactory<C, D, P> =
+type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
   (args:
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => C | Promise<C>;
 
 /**
@@ -64,7 +65,7 @@ export type FifoQueueMessageFn<T = unknown, C = undefined, D = undefined, P = un
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<void>;
 
 /**
@@ -76,7 +77,7 @@ export type FifoQueueBatchFn<T = unknown, C = undefined, D = undefined, P = unde
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<void>;
 
 /** Base options shared by all defineFifoQueue variants */
@@ -96,7 +97,7 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
    * Called once on cold start, result is cached and reused across invocations.
    * When deps/params are declared, receives them as argument.
    */
-  setup?: SetupFactory<C, D, P>;
+  setup?: SetupFactory<C, D, P, S>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -109,7 +110,7 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
   config?: P;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
-   * Files are accessible at runtime via the `readStatic` callback argument.
+   * Files are accessible at runtime via the `files` callback argument.
    */
   static?: S;
 };

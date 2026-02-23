@@ -1,5 +1,5 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableKey, TableItem } from "../helpers";
-import type { AnyDepHandler, ResolveDeps } from "./shared";
+import type { AnyDepHandler, ResolveDeps, StaticFiles } from "./shared";
 import type { TableClient } from "../runtime/table-client";
 
 /** DynamoDB Streams view type - determines what data is captured in stream records */
@@ -78,10 +78,11 @@ export type FailedRecord<T = Record<string, unknown>> = {
  * Always receives `table: TableClient<T>` (self-client for the handler's own table).
  * Also receives `deps` and/or `config` when declared.
  */
-type SetupFactory<C, T, D, P> = (args:
+type SetupFactory<C, T, D, P, S extends string[] | undefined = undefined> = (args:
     & { table: TableClient<T> }
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => C | Promise<C>;
 
 /**
@@ -92,7 +93,7 @@ export type TableRecordFn<T = Record<string, unknown>, C = undefined, R = void, 
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<R>;
 
 /**
@@ -103,7 +104,7 @@ export type TableBatchCompleteFn<T = Record<string, unknown>, C = undefined, R =
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<void>;
 
 /**
@@ -114,7 +115,7 @@ export type TableBatchFn<T = Record<string, unknown>, C = undefined, D = undefin
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<void>;
 
 /** Base options shared by all defineTable variants */
@@ -138,7 +139,7 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
    * When deps/params are declared, receives them as argument.
    * Supports both sync and async return values.
    */
-  setup?: SetupFactory<C, T, D, P>;
+  setup?: SetupFactory<C, T, D, P, S>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -152,7 +153,7 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
   config?: P;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
-   * Files are accessible at runtime via the `readStatic` callback argument.
+   * Files are accessible at runtime via the `files` callback argument.
    */
   static?: S;
 };

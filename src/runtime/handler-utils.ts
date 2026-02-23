@@ -102,11 +102,17 @@ export type HandlerRuntime = {
 };
 
 /**
- * Read a static file bundled into the Lambda ZIP.
- * Path is relative to project root (matches the glob pattern used in `static`).
+ * Static file helpers — paths are relative to project root
+ * (matching the glob patterns declared in `static`).
  */
-export const readStatic = (filePath: string): string =>
-  readFileSync(join(process.cwd(), filePath), "utf-8");
+const resolvePath = (filePath: string): string => join(process.cwd(), filePath);
+
+/** Singleton files service — stateless, safe to reuse */
+const staticFiles = {
+  read: (filePath: string): string => readFileSync(resolvePath(filePath), "utf-8"),
+  readBuffer: (filePath: string): Buffer => readFileSync(resolvePath(filePath)),
+  path: resolvePath,
+};
 
 export const createHandlerRuntime = (
   handler: { setup?: (...args: any[]) => any; deps?: any; config?: any; static?: string[] },
@@ -137,6 +143,7 @@ export const createHandlerRuntime = (
       const args: Record<string, unknown> = {};
       if (params) args.config = params;
       if (deps) args.deps = deps;
+      if (handler.static) args.files = staticFiles;
       if (extraSetupArgs) Object.assign(args, extraSetupArgs());
       ctx = await handler.setup(args);
     }
@@ -150,7 +157,7 @@ export const createHandlerRuntime = (
     if (deps) args.deps = deps;
     const params = await getParams();
     if (params) args.config = params;
-    if (handler.static) args.readStatic = readStatic;
+    if (handler.static) args.files = staticFiles;
     return args;
   };
 

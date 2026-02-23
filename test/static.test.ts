@@ -23,7 +23,7 @@ describe("static extraction", () => {
           method: "GET",
           path: "/widget",
           static: ["src/templates/*.ejs"],
-          onRequest: async ({ req, readStatic }) => ({ status: 200 })
+          onRequest: async ({ req, files }) => ({ status: 200 })
         });
       `;
 
@@ -226,7 +226,7 @@ describe("zip with static files", () => {
 
 describe("static files runtime", () => {
 
-  it("should inject readStatic and read bundled file", async () => {
+  it("should inject files service and read bundled file", async () => {
     const handlerCode = `
       import { defineHttp } from "./src/handlers/define-http";
 
@@ -234,9 +234,9 @@ describe("static files runtime", () => {
         method: "GET",
         path: "/widget",
         static: ["test/fixtures/hello.txt"],
-        onRequest: async ({ req, readStatic }) => ({
+        onRequest: async ({ req, files }) => ({
           status: 200,
-          body: { content: readStatic("test/fixtures/hello.txt") }
+          body: { content: files.read("test/fixtures/hello.txt") }
         })
       });
     `;

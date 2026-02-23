@@ -22,6 +22,7 @@ export type { BucketConfig, BucketEvent, BucketHandler, BucketObjectCreatedFn, B
 export type { TableClient, QueryParams, QueryByTagParams, SkCondition, UpdateActions, PutOptions } from "./runtime/table-client"
 export type { BucketClient } from "./runtime/bucket-client"
 export type { ParamRef, ResolveConfig, TableKey, TableItem, PutInput } from "./helpers"
+export type { StaticFiles } from "./handlers/shared"
 
 // Shared types
 export type { LambdaConfig, LambdaWithPermissions, LogLevel } from "./helpers"

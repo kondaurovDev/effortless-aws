@@ -170,11 +170,11 @@ SSM path is built automatically: `/${project}/${stage}/${key}`.
 
 ### `static`
 
-Glob patterns for files to bundle into the Lambda ZIP. At runtime, read them via the `readStatic` callback argument.
+Glob patterns for files to bundle into the Lambda ZIP. At runtime, read them via the `files` callback argument.
 
 ```typescript
 static: ["src/templates/*.ejs"],
-// → readStatic("src/templates/invoice.ejs") returns file contents as string
+// → files.read("src/templates/invoice.ejs") returns file contents as string
 ```
 
 ### `permissions`

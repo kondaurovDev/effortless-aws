@@ -1,5 +1,5 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
-import type { AnyDepHandler, ResolveDeps } from "./shared";
+import type { AnyDepHandler, ResolveDeps, StaticFiles } from "./shared";
 import type { BucketClient } from "../runtime/bucket-client";
 
 /**
@@ -38,7 +38,7 @@ export type BucketObjectCreatedFn<C = undefined, D = undefined, P = undefined, S
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<void>;
 
 /**
@@ -49,7 +49,7 @@ export type BucketObjectRemovedFn<C = undefined, D = undefined, P = undefined, S
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<void>;
 
 /**
@@ -57,10 +57,11 @@ export type BucketObjectRemovedFn<C = undefined, D = undefined, P = undefined, S
  * Always receives `bucket: BucketClient` (self-client for the handler's own bucket).
  * Also receives `deps` and/or `config` when declared.
  */
-type SetupFactory<C, D, P> = (args:
+type SetupFactory<C, D, P, S extends string[] | undefined = undefined> = (args:
     & { bucket: BucketClient }
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => C | Promise<C>;
 
 /** Base options shared by all defineBucket variants */
@@ -76,7 +77,7 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
    * Always receives `bucket: BucketClient` (self-client). When deps/config
    * are declared, receives them as well.
    */
-  setup?: SetupFactory<C, D, P>;
+  setup?: SetupFactory<C, D, P, S>;
   /**
    * Dependencies on other handlers (tables, buckets, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -89,7 +90,7 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
   config?: P;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
-   * Files are accessible at runtime via the `readStatic` callback argument.
+   * Files are accessible at runtime via the `files` callback argument.
    */
   static?: S;
 };

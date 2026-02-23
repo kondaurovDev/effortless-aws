@@ -1,5 +1,5 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
-import type { AnyDepHandler, ResolveDeps } from "./shared";
+import type { AnyDepHandler, ResolveDeps, StaticFiles } from "./shared";
 export type { ResolveDeps } from "./shared";
 
 /** HTTP methods supported by API Gateway */
@@ -76,17 +76,18 @@ export type HttpHandlerFn<T = undefined, C = undefined, D = undefined, P = undef
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { readStatic: (path: string) => string })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => Promise<HttpResponse>;
 
 /**
  * Setup factory type — always receives an args object.
  * Args include `deps` and/or `config` when declared (empty `{}` otherwise).
  */
-type SetupFactory<C, D, P> =
+type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
   (args:
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+    & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => C | Promise<C>;
 
 /**
@@ -126,7 +127,7 @@ export type DefineHttpOptions<
    * When deps/params are declared, receives them as argument.
    * Supports both sync and async return values.
    */
-  setup?: SetupFactory<C, D, P>;
+  setup?: SetupFactory<C, D, P, S>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -140,7 +141,7 @@ export type DefineHttpOptions<
   config?: P;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
-   * Files are accessible at runtime via the `readStatic` callback argument.
+   * Files are accessible at runtime via the `files` callback argument.
    */
   static?: S;
   /** HTTP request handler function */

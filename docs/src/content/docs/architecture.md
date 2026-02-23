@@ -253,7 +253,7 @@ reads config from AST       generates EFF_* env vars     reads env vars,
 |---------|---------------|----------------|-----------------|-----------------|------------------|
 | **deps** | `extractDepsKeys()` | `["orders", "users"]` | `resolveDeps()` | `EFF_TABLE_<key>=<tableName>` | `buildDeps()` → `TableClient` per key |
 | **config** | `extractParamEntries()` | `[{propName, ssmKey}]` | `resolveParams()` | `EFF_PARAM_<prop>=/<project>/<stage>/<ssmKey>` | `buildParams()` → batch SSM fetch + transform |
-| **static** | `extractStaticGlobs()` | `["src/templates/*.ejs"]` | `resolveStaticFiles()` | _(files bundled in ZIP)_ | `readStatic()` → `readFileSync` from cwd |
+| **static** | `extractStaticGlobs()` | `["src/templates/*.ejs"]` | `resolveStaticFiles()` | _(files bundled in ZIP)_ | `files.read()` → `readFileSync` from cwd |
 
 All `resolve*` results are combined via `mergeResolved()` into a single `{ env, permissions }` payload before being passed to `deployCoreLambda()`.
 

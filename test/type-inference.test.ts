@@ -6,6 +6,7 @@ import type { HttpRequest } from "~/handlers/define-http";
 import type { TableRecord } from "~/handlers/define-table";
 import type { TableClient } from "~/runtime/table-client";
 import type { TableItem } from "~/helpers";
+import type { StaticFiles } from "~/handlers/shared";
 
 // ── Type-level equality assertion (works with tsc --noEmit) ──
 
@@ -37,8 +38,8 @@ describe("defineHttp type inference", () => {
         args.deps;
         // @ts-expect-error — no config without config
         args.config;
-        // @ts-expect-error — no readStatic without static
-        args.readStatic;
+        // @ts-expect-error — no files without static
+        args.files;
         return { status: 200 };
       },
     });
@@ -127,13 +128,13 @@ describe("defineHttp type inference", () => {
     });
   });
 
-  it("static → readStatic is present", () => {
+  it("static → files is present", () => {
     defineHttp({
       method: "GET",
       path: "/page",
       static: ["src/templates/*.ejs"],
       onRequest: async (args) => {
-        type _rs = Expect<Equal<typeof args.readStatic, (path: string) => string>>;
+        type _rs = Expect<Equal<typeof args.files, StaticFiles>>;
         return { status: 200 };
       },
     });
@@ -154,7 +155,7 @@ describe("defineHttp type inference", () => {
         type _ctx = Expect<Equal<typeof args.ctx, { db: string }>>;
         type _deps = Expect<Equal<typeof args.deps.usersTable, TableClient<User>>>;
         type _cfg = Expect<Equal<typeof args.config.secret, string>>;
-        type _rs = Expect<Equal<typeof args.readStatic, (path: string) => string>>;
+        type _rs = Expect<Equal<typeof args.files, StaticFiles>>;
         return { status: 201 };
       },
     });
@@ -237,7 +238,7 @@ describe("defineTable type inference", () => {
     });
   });
 
-  it("minimal onRecord — no ctx/deps/config/readStatic", () => {
+  it("minimal onRecord — no ctx/deps/config/files", () => {
     defineTable<User>({
       onRecord: async (args) => {
         // @ts-expect-error — no ctx without setup
@@ -246,18 +247,18 @@ describe("defineTable type inference", () => {
         args.deps;
         // @ts-expect-error — no config without config
         args.config;
-        // @ts-expect-error — no readStatic without static
-        args.readStatic;
+        // @ts-expect-error — no files without static
+        args.files;
       },
     });
   });
 
-  it("static → readStatic is present on onRecord", () => {
+  it("static → files is present on onRecord", () => {
     defineTable({
       schema: (input): User => input as User,
       static: ["templates/*.html"],
       onRecord: async (args) => {
-        type _rs = Expect<Equal<typeof args.readStatic, (path: string) => string>>;
+        type _rs = Expect<Equal<typeof args.files, StaticFiles>>;
       },
     });
   });
