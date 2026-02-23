@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.14.1
+
+### Patch Changes
+
+- [`0b1b4c2`](https://github.com/kondaurovDev/effortless-aws/commit/0b1b4c243f2507df86c0a0e83a9acb62c58439dd) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Handle stale CloudFront distribution references in Resource Groups Tagging API
+
 ## 0.14.0
 
 ### Minor Changes
