@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.14.2
+
+### Patch Changes
+
+- [`b53af0c`](https://github.com/kondaurovDev/effortless-aws/commit/b53af0cbf5814ddb113995af888cb5970236aacc) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix resource tag lookup pagination and skip www redirect for subdomains
+
 ## 0.14.1
 
 ### Patch Changes
