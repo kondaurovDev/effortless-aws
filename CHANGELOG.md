@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.14.0
+
+### Minor Changes
+
+- [`9317bfa`](https://github.com/kondaurovDev/effortless-aws/commit/9317bfa360536efd7c4c187df71ff7187fa6777e) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Support per-stage domains for static sites via Record mapping (e.g., `domain: { prod: "example.com", dev: "dev.example.com" }`)
+
 ## 0.13.0
 
 ### Minor Changes
