@@ -1,6 +1,6 @@
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { TableHandler, TableRecord, FailedRecord } from "~/handlers/define-table";
-import type { TableItem, TableKey } from "~/handlers/handler-options";
+import type { TableItem } from "~/handlers/handler-options";
 import { createTableClient } from "./table-client";
 import { createHandlerRuntime } from "./handler-utils";
 
@@ -41,7 +41,7 @@ const parseRecords = <T>(rawRecords: DynamoDBStreamRecord[], schema?: (input: un
 
     const newImage = rawRecord.dynamodb?.NewImage ? unmarshall(rawRecord.dynamodb.NewImage) : undefined;
     const oldImage = rawRecord.dynamodb?.OldImage ? unmarshall(rawRecord.dynamodb.OldImage) : undefined;
-    const keys = unmarshall(rawRecord.dynamodb.Keys) as TableKey;
+    const keys = unmarshall(rawRecord.dynamodb.Keys) as { pk: string; sk: string };
 
     const record = {
       eventName: rawRecord.eventName,

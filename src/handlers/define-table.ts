@@ -68,7 +68,7 @@ export type TableRecord<T = Record<string, unknown>> = {
   /** Old item value (present for MODIFY and REMOVE) */
   old?: TableItem<T>;
   /** Primary key of the affected item */
-  keys: TableKey;
+  keys: { pk: string; sk: string };
   /** Sequence number for ordering */
   sequenceNumber?: string;
   /** Approximate timestamp when the modification occurred */
