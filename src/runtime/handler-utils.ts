@@ -1,8 +1,9 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import type { AnyParamRef, LogLevel } from "~/helpers";
+import type { AnyParamRef, LogLevel } from "~/handlers/handler-options";
 import { createTableClient } from "./table-client";
 import { createBucketClient } from "./bucket-client";
+import { createEmailClient } from "./email-client";
 import { getParameters } from "./ssm-client";
 
 export type { LogLevel };
@@ -29,6 +30,7 @@ const DEP_FACTORIES: Record<string, (name: string, depHandler: unknown) => unkno
     return createTableClient(name, tagField ? { tagField } : undefined);
   },
   bucket: (name) => createBucketClient(name),
+  mailer: () => createEmailClient(),
 };
 
 /**

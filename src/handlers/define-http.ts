@@ -1,6 +1,7 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
-import type { AnyDepHandler, ResolveDeps, StaticFiles } from "./shared";
-export type { ResolveDeps } from "./shared";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
+import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
+import type { StaticFiles } from "./shared";
+export type { ResolveDeps } from "./handler-deps";
 
 /** HTTP methods supported by API Gateway */
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";

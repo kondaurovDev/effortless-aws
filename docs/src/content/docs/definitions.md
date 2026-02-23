@@ -19,8 +19,9 @@ Some definitions include a Lambda handler (a callback like `onRequest`, `onRecor
 | [defineSchedule](#defineschedule) | EventBridge + Lambda | Yes — Planned |
 | [defineEvent](#defineevent) | EventBridge + Lambda | Yes — Planned |
 | [defineBucket](#definebucket) | S3 bucket + optional event Lambda | No — resource-only when no `onObjectCreated`/`onObjectRemoved` |
+| [defineMailer](#definemailer) | SES email identity | No — resource-only, used via `deps` |
 
-Resource-only definitions are useful when you need the infrastructure but handle it from elsewhere. For example, a `defineTable` without stream callbacks creates a DynamoDB table, and a `defineBucket` without event callbacks creates an S3 bucket — both referenceable via `deps`:
+Resource-only definitions are useful when you need the infrastructure but handle it from elsewhere. For example, a `defineTable` without stream callbacks creates a DynamoDB table, a `defineBucket` without event callbacks creates an S3 bucket, and a `defineMailer` creates an SES email identity — all referenceable via `deps`:
 
 ```typescript
 // Just a table — no Lambda, no stream
@@ -140,15 +141,17 @@ setup: async ({ deps, config }) => ({
 
 ### `deps`
 
-Dependencies on other handlers (tables and buckets). The framework auto-wires environment variables, IAM permissions, and injects typed clients at runtime — `TableClient<T>` for tables, `BucketClient` for buckets.
+Dependencies on other handlers (tables, buckets, and mailers). The framework auto-wires environment variables, IAM permissions, and injects typed clients at runtime — `TableClient<T>` for tables, `BucketClient` for buckets, `EmailClient` for mailers.
 
 ```typescript
 import { orders } from "./orders.js";
 import { uploads } from "./uploads.js";
+import { mailer } from "./mailer.js";
 
-deps: { orders, uploads },
+deps: { orders, uploads, mailer },
 // → deps.orders is TableClient<Order>
 // → deps.uploads is BucketClient
+// → deps.mailer is EmailClient
 ```
 
 ### `config`
@@ -1084,3 +1087,83 @@ export const upload = defineHttp({
 - **Cold start optimization** — the `setup` factory runs once and is cached across invocations. Receives `bucket` (self-client) alongside `deps` and `config`.
 - **Error isolation** — each S3 event record is processed individually. If one fails, the error is logged and the remaining records continue processing.
 - **Auto-infrastructure** — S3 bucket, Lambda, S3 event notifications, and IAM permissions are all created on deploy from this single definition.
+
+---
+
+## defineMailer
+
+Creates: SES Email Identity (domain verification + DKIM)
+
+`defineMailer` is a **resource-only** definition — it doesn't create a Lambda function. It sets up an SES email identity for a domain and provides a typed `EmailClient` to other handlers via `deps`.
+
+```typescript
+export const mailer = defineMailer({
+  domain: "myapp.com",
+});
+```
+
+On first deploy, DKIM DNS records are printed to the console. Add them to your DNS provider to verify the domain. Subsequent deploys check verification status and skip if already verified.
+
+### Using from other handlers
+
+Import the mailer and add it to `deps`. The framework injects a typed `EmailClient` with SES send permissions auto-wired.
+
+```typescript
+import { defineHttp } from "effortless-aws";
+import { mailer } from "./mailer.js";
+
+export const sendWelcome = defineHttp({
+  method: "POST",
+  path: "/welcome",
+  deps: { mailer },
+  onRequest: async ({ req, deps }) => {
+    await deps.mailer.send({
+      from: "hello@myapp.com",
+      to: req.body.email,
+      subject: "Welcome!",
+      html: "<h1>Welcome aboard!</h1>",
+    });
+    return { status: 200, body: { sent: true } };
+  },
+});
+```
+
+### EmailClient
+
+The `EmailClient` injected via `deps` has a single method:
+
+```typescript
+EmailClient
+  send(opts: SendEmailOptions): Promise<void>
+```
+
+**send** — send an email via SES. At least one of `html` or `text` is required.
+
+```typescript
+await deps.mailer.send({
+  from: "hello@myapp.com",       // must be on a verified domain
+  to: "user@example.com",        // string or string[]
+  subject: "Hello!",
+  html: "<h1>Hi!</h1>",          // HTML body
+  text: "Hi!",                   // plain text fallback (optional when html is set)
+});
+```
+
+Multiple recipients:
+
+```typescript
+await deps.mailer.send({
+  from: "team@myapp.com",
+  to: ["alice@example.com", "bob@example.com"],
+  subject: "Team update",
+  text: "New release is out!",
+});
+```
+
+**Built-in best practices**:
+- **Resource-only** — no Lambda is created. The mailer is purely an SES identity + typed client for `deps`.
+- **DKIM verification** — on first deploy, RSA 2048-bit DKIM signing is configured automatically. DNS records are printed to the console.
+- **Typed client** — `deps.mailer` is an `EmailClient` with a typed `send()` method. At least one of `html` or `text` is required at compile time.
+- **Lazy SDK init** — the SES client is created on first `send()` call, not on cold start. Zero overhead if the email path is not hit.
+- **Auto-IAM** — the dependent Lambda gets `ses:SendEmail` and `ses:SendRawEmail` permissions automatically.
+- **Cleanup** — `eff cleanup` removes SES identities along with all other resources.

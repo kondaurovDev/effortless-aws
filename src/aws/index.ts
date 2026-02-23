@@ -34,6 +34,10 @@ export type { EnsureOACInput, EnsureDistributionInput, DistributionResult, Viewe
 export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue } from "./sqs";
 export type { EnsureFifoQueueInput, EnsureFifoQueueResult, EnsureSqsEventSourceMappingInput } from "./sqs";
 
+// SES
+export { ensureSesIdentity, deleteSesIdentity } from "./ses";
+export type { EnsureSesIdentityInput, EnsureSesIdentityResult, DkimRecord } from "./ses";
+
 // Tags
 export { makeTags, toAwsTagList, resolveStage, getResourcesByTags, getAllResourcesByTags, findOrphanedResources, groupResourcesByHandler } from "./tags";
 export type { ResourceType, TagContext } from "./tags";

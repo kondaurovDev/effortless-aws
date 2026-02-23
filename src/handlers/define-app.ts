@@ -1,4 +1,4 @@
-import type { LambdaConfig } from "../helpers";
+import type { LambdaConfig } from "./handler-options";
 
 /**
  * Configuration for a Lambda-served static site (API Gateway + Lambda)

@@ -207,6 +207,12 @@ export const handlerRegistry = {
     wrapperFn: "wrapBucket",
     wrapperPath: "~/runtime/wrap-bucket",
   },
+  mailer: {
+    defineFn: "defineMailer",
+    handlerProps: [],
+    wrapperFn: "",
+    wrapperPath: "",
+  },
 } as const;
 
 export type HandlerType = keyof typeof handlerRegistry;

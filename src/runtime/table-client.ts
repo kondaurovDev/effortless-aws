@@ -1,6 +1,6 @@
 import { DynamoDB } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
-import type { TableKey, TableItem, PutInput } from "~/helpers";
+import type { TableKey, TableItem, PutInput } from "~/handlers/handler-options";
 
 /** Built-in GSI name: tag (PK) + pk (SK) */
 const GSI_TAG_PK = "tag-pk-index";

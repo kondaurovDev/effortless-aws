@@ -5,7 +5,7 @@ import { param } from "~/deploy/shared";
 import type { HttpRequest } from "~/handlers/define-http";
 import type { TableRecord } from "~/handlers/define-table";
 import type { TableClient } from "~/runtime/table-client";
-import type { TableItem } from "~/helpers";
+import type { TableItem } from "~/handlers/handler-options";
 import type { StaticFiles } from "~/handlers/shared";
 
 // ── Type-level equality assertion (works with tsc --noEmit) ──

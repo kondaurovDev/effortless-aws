@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { ResourceTagMapping } from "@aws-sdk/client-resource-groups-tagging-api";
 import { resource_groups_tagging_api as tagging } from "./clients";
 
-export type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway" | "lambda-layer" | "s3-bucket" | "cloudfront-distribution" | "sqs";
+export type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway" | "lambda-layer" | "s3-bucket" | "cloudfront-distribution" | "sqs" | "ses";
 
 export type TagContext = {
   project: string;

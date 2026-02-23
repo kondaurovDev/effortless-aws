@@ -1,5 +1,6 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "../helpers";
-import type { AnyDepHandler, ResolveDeps, StaticFiles } from "./shared";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
+import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
+import type { StaticFiles } from "./shared";
 
 /**
  * Parsed SQS FIFO message passed to the handler callbacks.

@@ -192,7 +192,7 @@ export const deployCoreLambda = ({
 
 // Re-export public helpers from the standalone module (no heavy deps).
 // Internal deploy code can keep importing from this file.
-export { param, typed } from "../helpers";
+export { param, typed } from "../handlers/handler-options";
 export type {
   Permission,
   LogLevel,
@@ -201,4 +201,4 @@ export type {
   AnyParamRef,
   ParamRef,
   ResolveConfig
-} from "../helpers";
+} from "../handlers/handler-options";

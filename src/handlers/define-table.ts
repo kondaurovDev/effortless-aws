@@ -1,6 +1,20 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableKey, TableItem } from "../helpers";
-import type { AnyDepHandler, ResolveDeps, StaticFiles } from "./shared";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableItem } from "./handler-options";
 import type { TableClient } from "../runtime/table-client";
+import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
+import type { StaticFiles } from "./shared";
+
+/** DynamoDB attribute types for keys */
+export type KeyType = "string" | "number" | "binary";
+
+/**
+ * DynamoDB table key definition
+ */
+export type TableKey = {
+  /** Attribute name */
+  name: string;
+  /** Attribute type */
+  type: KeyType;
+};
 
 /** DynamoDB Streams view type - determines what data is captured in stream records */
 export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY";

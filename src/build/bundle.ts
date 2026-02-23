@@ -12,6 +12,7 @@ import type { AppConfig } from "~/handlers/define-app";
 import type { StaticSiteConfig } from "~/handlers/define-static-site";
 import type { FifoQueueConfig } from "~/handlers/define-fifo-queue";
 import type { BucketConfig } from "~/handlers/define-bucket";
+import type { MailerConfig } from "~/handlers/define-mailer";
 
 export type BundleInput = {
   projectDir: string;
@@ -47,6 +48,11 @@ export type ExtractedBucketFunction = ExtractedConfig<BucketConfig>;
 
 export const extractBucketConfigs = (source: string): ExtractedBucketFunction[] =>
   extractHandlerConfigs<BucketConfig>(source, "bucket");
+
+export type ExtractedMailerFunction = ExtractedConfig<MailerConfig>;
+
+export const extractMailerConfigs = (source: string): ExtractedMailerFunction[] =>
+  extractHandlerConfigs<MailerConfig>(source, "mailer");
 
 export const extractConfig = (source: string): HttpConfig | null => {
   const configs = extractConfigs(source);
@@ -165,6 +171,7 @@ export type DiscoveredHandlers = {
   staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[];
   fifoQueueHandlers: { file: string; exports: ExtractedFifoQueueFunction[] }[];
   bucketHandlers: { file: string; exports: ExtractedBucketFunction[] }[];
+  mailerHandlers: { file: string; exports: ExtractedMailerFunction[] }[];
 };
 
 export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
@@ -174,6 +181,7 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
   const staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[] = [];
   const fifoQueueHandlers: { file: string; exports: ExtractedFifoQueueFunction[] }[] = [];
   const bucketHandlers: { file: string; exports: ExtractedBucketFunction[] }[] = [];
+  const mailerHandlers: { file: string; exports: ExtractedMailerFunction[] }[] = [];
 
   for (const file of files) {
     // Skip directories
@@ -186,6 +194,7 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     const staticSite = extractStaticSiteConfigs(source);
     const fifoQueue = extractFifoQueueConfigs(source);
     const bucket = extractBucketConfigs(source);
+    const mailer = extractMailerConfigs(source);
 
     if (http.length > 0) httpHandlers.push({ file, exports: http });
     if (table.length > 0) tableHandlers.push({ file, exports: table });
@@ -193,7 +202,8 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     if (staticSite.length > 0) staticSiteHandlers.push({ file, exports: staticSite });
     if (fifoQueue.length > 0) fifoQueueHandlers.push({ file, exports: fifoQueue });
     if (bucket.length > 0) bucketHandlers.push({ file, exports: bucket });
+    if (mailer.length > 0) mailerHandlers.push({ file, exports: mailer });
   }
 
-  return { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers };
+  return { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers };
 };

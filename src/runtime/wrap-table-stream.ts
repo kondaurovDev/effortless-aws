@@ -1,6 +1,6 @@
 import { unmarshall } from "@aws-sdk/util-dynamodb";
 import type { TableHandler, TableRecord, FailedRecord } from "~/handlers/define-table";
-import type { TableItem, TableKey } from "~/helpers";
+import type { TableItem, TableKey } from "~/handlers/handler-options";
 import { createTableClient } from "./table-client";
 import { createHandlerRuntime } from "./handler-utils";
 

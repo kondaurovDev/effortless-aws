@@ -8,6 +8,7 @@ import {
   deleteBucket,
   disableAndDeleteDistribution,
   deleteFifoQueue,
+  deleteSesIdentity,
 } from "../aws";
 
 export type ResourceInfo = {
@@ -50,6 +51,10 @@ const extractResourceName = (arn: string, type: string): string => {
     }
     case "cloudfront-distribution": {
       // arn:aws:cloudfront::account:distribution/DISTRIBUTION_ID
+      return arn.split("/").pop() ?? arn;
+    }
+    case "ses": {
+      // arn:aws:ses:region:account:identity/domain.com
       return arn.split("/").pop() ?? arn;
     }
     default:
@@ -97,6 +102,9 @@ export const deleteResource = (resource: ResourceInfo) =>
       case "sqs":
         yield* deleteFifoQueue(name);
         break;
+      case "ses":
+        yield* deleteSesIdentity(name);
+        break;
       default:
         yield* Effect.logWarning(`Unknown resource type: ${resource.type}, skipping ${resource.arn}`);
     }
@@ -108,7 +116,7 @@ export const deleteResources = (resources: ResourceInfo[]) =>
     // CloudFront before S3 (distribution references bucket)
     // IAM roles should be deleted last because they might be in use
     // Lambda layers should be deleted after lambdas that use them
-    const orderedTypes = ["lambda", "api-gateway", "cloudfront-distribution", "sqs", "dynamodb", "s3-bucket", "lambda-layer", "iam-role"];
+    const orderedTypes = ["lambda", "api-gateway", "cloudfront-distribution", "sqs", "ses", "dynamodb", "s3-bucket", "lambda-layer", "iam-role"];
 
     // Collect IAM roles to delete (derived from Lambda names)
     const iamRolesToDelete = new Set<string>();
