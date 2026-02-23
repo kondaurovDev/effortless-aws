@@ -373,7 +373,13 @@ const findDistributionByTags = (project: string, stage: string, handlerName: str
     if (!dist?.ResourceARN) return undefined;
 
     const distributionId = dist.ResourceARN.split("/").pop()!;
-    const result = yield* cloudfront.make("get_distribution", { Id: distributionId });
+    const result = yield* cloudfront.make("get_distribution", { Id: distributionId }).pipe(
+      Effect.catchIf(
+        e => e._tag === "CloudFrontError" && e.is("NoSuchDistribution"),
+        () => Effect.succeed(undefined)
+      )
+    );
+    if (!result) return undefined;
     return {
       Id: distributionId,
       DomainName: result.Distribution!.DomainName!,
