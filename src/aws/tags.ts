@@ -38,13 +38,22 @@ export const resolveStage = (input?: string): string =>
  */
 export const getResourcesByTags = (project: string, stage: string) =>
   Effect.gen(function* () {
-    const result = yield* tagging.make("get_resources", {
-      TagFilters: [
-        { Key: "effortless:project", Values: [project] },
-        { Key: "effortless:stage", Values: [stage] },
-      ],
-    });
-    return result.ResourceTagMappingList ?? [];
+    const all: ResourceTagMapping[] = [];
+    let token: string | undefined;
+
+    do {
+      const result = yield* tagging.make("get_resources", {
+        TagFilters: [
+          { Key: "effortless:project", Values: [project] },
+          { Key: "effortless:stage", Values: [stage] },
+        ],
+        ...(token ? { PaginationToken: token } : {}),
+      });
+      all.push(...(result.ResourceTagMappingList ?? []));
+      token = result.PaginationToken;
+    } while (token);
+
+    return all;
   });
 
 /**
@@ -66,13 +75,19 @@ export const getAllResourcesByTags = (project: string, stage: string, region: st
     if (region === "us-east-1") return regional;
 
     // Global resources (CloudFront, IAM) via us-east-1 layer
-    const globalResult = yield* tagging.make("get_resources", {
-      TagFilters: tagFilters,
-    }).pipe(
-      Effect.provide(tagging.ResourceGroupsTaggingAPIClient.Default({ region: "us-east-1" })),
-      Effect.catchAll(() => Effect.succeed({ ResourceTagMappingList: [] as ResourceTagMapping[] })),
-    );
-    const global = globalResult.ResourceTagMappingList ?? [];
+    const global: ResourceTagMapping[] = [];
+    let globalToken: string | undefined;
+    do {
+      const globalResult = yield* tagging.make("get_resources", {
+        TagFilters: tagFilters,
+        ...(globalToken ? { PaginationToken: globalToken } : {}),
+      }).pipe(
+        Effect.provide(tagging.ResourceGroupsTaggingAPIClient.Default({ region: "us-east-1" })),
+        Effect.catchAll(() => Effect.succeed({ ResourceTagMappingList: [] as ResourceTagMapping[], PaginationToken: undefined })),
+      );
+      global.push(...(globalResult.ResourceTagMappingList ?? []));
+      globalToken = globalResult.PaginationToken;
+    } while (globalToken);
 
     // Merge and deduplicate by ARN
     const seen = new Set(regional.map(r => r.ResourceARN));

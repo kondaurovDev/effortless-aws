@@ -146,20 +146,27 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       const certResult = yield* findCertificate(domain);
       acmCertificateArn = certResult.certificateArn;
 
-      const wwwCandidate = `www.${domain}`;
-      const certCoversWww = certResult.coveredDomains.includes(wwwCandidate) ||
-        certResult.coveredDomains.includes(`*.${domain}`);
+      // Only consider www redirect for root domains (e.g. "example.com"), not subdomains (e.g. "a.example.com")
+      const isRootDomain = domain.split(".").length === 2;
 
-      if (certCoversWww) {
-        aliases = [domain, wwwCandidate];
-        wwwDomain = wwwCandidate;
-        yield* Effect.logDebug(`ACM certificate covers ${wwwCandidate}, enabling www → non-www redirect`);
+      if (isRootDomain) {
+        const wwwCandidate = `www.${domain}`;
+        const certCoversWww = certResult.coveredDomains.includes(wwwCandidate) ||
+          certResult.coveredDomains.includes(`*.${domain}`);
+
+        if (certCoversWww) {
+          aliases = [domain, wwwCandidate];
+          wwwDomain = wwwCandidate;
+          yield* Effect.logDebug(`ACM certificate covers ${wwwCandidate}, enabling www → non-www redirect`);
+        } else {
+          aliases = [domain];
+          yield* Effect.logWarning(
+            `ACM certificate does not cover ${wwwCandidate}. ` +
+            `For SEO, add ${wwwCandidate} to your ACM certificate in us-east-1 to enable www → non-www redirect.`
+          );
+        }
       } else {
         aliases = [domain];
-        yield* Effect.logWarning(
-          `ACM certificate does not cover ${wwwCandidate}. ` +
-          `For SEO, add ${wwwCandidate} to your ACM certificate in us-east-1 to enable www → non-www redirect.`
-        );
       }
     }
 
