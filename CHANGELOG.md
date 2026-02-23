@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.14.3
+
+### Patch Changes
+
+- [`95cce5f`](https://github.com/kondaurovDev/effortless-aws/commit/95cce5fe1dfee024ce52d8026295c7dcb93b5934) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Skip stale distribution entries when finding existing CloudFront distributions by tags
+
 ## 0.14.2
 
 ### Patch Changes
