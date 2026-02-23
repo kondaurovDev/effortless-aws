@@ -1,5 +1,17 @@
 # effortless-aws
 
+## 0.13.0
+
+### Minor Changes
+
+- [`cd58ebc`](https://github.com/kondaurovDev/effortless-aws/commit/cd58ebc7a240958c93773e0a62b35e0060913033) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Replace `readStatic` with `files` service for static file access
+
+  - **Breaking:** `readStatic(path)` callback argument replaced with `files` service object (`StaticFiles` type)
+  - `files.read(path)` — read file as UTF-8 string (same as old `readStatic`)
+  - `files.readBuffer(path)` — read file as Buffer for binary content
+  - `files.path(path)` — resolve absolute path to the bundled file
+  - `files` is now injected into `setup()` as well (previously only available in handler callbacks)
+
 ## 0.12.0
 
 ### Minor Changes
