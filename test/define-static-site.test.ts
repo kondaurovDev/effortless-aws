@@ -104,6 +104,41 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.hasHandler).toBe(false);
   });
 
+  it("should extract record-form domain for per-stage configuration", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+
+      export const app = defineStaticSite({
+        dir: "dist",
+        domain: { prod: "example.com", dev: "dev.example.com" },
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.config.domain).toEqual({
+      prod: "example.com",
+      dev: "dev.example.com",
+    });
+  });
+
+  it("should extract string domain", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+
+      export const app = defineStaticSite({
+        dir: "dist",
+        domain: "example.com",
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.config.domain).toBe("example.com");
+  });
+
   it("should not match defineApp or defineHttp calls", () => {
     const source = `
       import { defineApp } from "effortless-aws";

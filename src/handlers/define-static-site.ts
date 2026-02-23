@@ -41,8 +41,8 @@ export type StaticSiteConfig = {
   spa?: boolean;
   /** Shell command to run before deploy to generate site content (e.g., "npx astro build") */
   build?: string;
-  /** Custom domain name (e.g., "effortless-aws.website"). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
-  domain?: string;
+  /** Custom domain name. Accepts a string (same domain for all stages) or a Record mapping stage names to domains (e.g., `{ prod: "example.com", dev: "dev.example.com" }`). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
+  domain?: string | Record<string, string>;
   /** Lambda@Edge middleware that runs before serving pages. Use for auth checks, redirects, etc. */
   middleware?: MiddlewareHandler;
 };

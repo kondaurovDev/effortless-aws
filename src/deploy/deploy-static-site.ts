@@ -135,7 +135,9 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     const { oacId } = yield* ensureOAC({ name: oacName });
 
     // 3b. If domain is set, look up ACM certificate
-    const domain = config.domain;
+    const domain = typeof config.domain === "string"
+      ? config.domain
+      : config.domain?.[stage];
     let aliases: string[] | undefined;
     let acmCertificateArn: string | undefined;
     let wwwDomain: string | undefined;
