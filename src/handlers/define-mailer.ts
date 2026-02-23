@@ -2,8 +2,8 @@
  * Configuration options for defining a mailer (SES email identity)
  */
 export type MailerConfig = {
-  /** Domain to verify and send emails from (e.g., "myapp.com") */
-  domain: string;
+  /** Domain to verify and send emails from. Accepts a string (same domain for all stages) or a Record mapping stage names to domains (e.g., `{ prod: "myapp.com", dev: "dev.myapp.com" }`). */
+  domain: string | Record<string, string>;
 };
 
 /**

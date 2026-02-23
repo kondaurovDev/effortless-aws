@@ -7,6 +7,7 @@ Write all code, comments, commit messages, and documentation in English.
 
 ## Quality
 - Run `pnpm typecheck` before pushing to verify there are no type errors.
+- If `.git/hooks/pre-push` does not exist, create it with `pnpm typecheck` and `chmod +x`.
 
 ## AWS SDK
 - Always use the generated Effect wrappers from `src/aws/clients/` for AWS SDK calls. Never instantiate AWS SDK clients directly.

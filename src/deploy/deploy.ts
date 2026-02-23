@@ -193,11 +193,15 @@ const SES_PERMISSIONS = [
  */
 const buildMailerDomainMap = (
   mailerHandlers: DiscoveredHandlers["mailerHandlers"],
+  stage: string,
 ): Map<string, string> => {
   const map = new Map<string, string>();
   for (const { exports } of mailerHandlers) {
     for (const fn of exports) {
-      map.set(fn.exportName, fn.config.domain);
+      const domain = typeof fn.config.domain === "string"
+        ? fn.config.domain
+        : fn.config.domain[stage];
+      if (domain) map.set(fn.exportName, domain);
     }
   }
   return map;
@@ -661,7 +665,7 @@ export const deployProject = (input: DeployProjectInput) =>
     // Build resource maps for deps resolution
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
     const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
-    const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
+    const mailerDomainMap = buildMailerDomainMap(mailerHandlers, stage);
 
     // Prepare layer
     const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({

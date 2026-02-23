@@ -36,9 +36,18 @@ export const deployMailer = ({ project, stage, region, fn }: DeployMailerInput) 
       handler: handlerName,
     };
 
-    yield* Effect.logDebug(`Ensuring SES identity for ${config.domain}...`);
+    const resolvedDomain = typeof config.domain === "string"
+      ? config.domain
+      : config.domain[resolvedStage];
+
+    if (!resolvedDomain) {
+      yield* Effect.logWarning(`No domain configured for stage "${resolvedStage}" in mailer "${handlerName}", skipping`);
+      return { exportName, domain: "", verified: false, dkimRecords: [] };
+    }
+
+    yield* Effect.logDebug(`Ensuring SES identity for ${resolvedDomain}...`);
     const { domain, verified, dkimRecords } = yield* ensureSesIdentity({
-      domain: config.domain,
+      domain: resolvedDomain,
       tags: makeTags(tagCtx, "ses"),
     });
 
