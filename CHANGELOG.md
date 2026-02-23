@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.15.0
+
+### Minor Changes
+
+- [`4e68e6a`](https://github.com/kondaurovDev/effortless-aws/commit/4e68e6af19da49471689e6aba6efdbd9c8df1260) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add `defineMailer` for sending emails via Amazon SES. Declare a domain, get a typed `EmailClient` injected into any handler via `deps` with automatic IAM wiring and DKIM setup. Also adds SES identity cleanup support to `eff cleanup`.
+
 ## 0.14.3
 
 ### Patch Changes
