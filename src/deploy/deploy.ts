@@ -474,9 +474,13 @@ const buildStaticSiteTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["staticSiteHandlers"],
   results: DeployStaticSiteResult[],
+  apiId?: string,
 ): Effect.Effect<void, unknown>[] => {
   const tasks: Effect.Effect<void, unknown>[] = [];
   const { region } = ctx.input;
+  const apiOriginDomain = apiId
+    ? `${apiId}.execute-api.${region}.amazonaws.com`
+    : undefined;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -485,6 +489,7 @@ const buildStaticSiteTasks = (
             projectDir: ctx.input.projectDir, project: ctx.input.project,
             stage: ctx.input.stage, region, fn,
             ...(fn.hasHandler ? { file } : {}),
+            ...(apiOriginDomain ? { apiOriginDomain } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             s3: { region }, cloudfront: { region: "us-east-1" },
             resource_groups_tagging_api: { region: "us-east-1" },
@@ -680,7 +685,11 @@ export const deployProject = (input: DeployProjectInput) =>
     let apiId: string | undefined;
     let apiUrl: string | undefined;
 
-    if (totalHttpHandlers > 0 || totalAppHandlers > 0) {
+    const staticSitesNeedApi = staticSiteHandlers.some(
+      ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
+    );
+
+    if (totalHttpHandlers > 0 || totalAppHandlers > 0 || staticSitesNeedApi) {
       const tagCtx: TagContext = {
         project: input.project,
         stage: stage,
@@ -742,7 +751,7 @@ export const deployProject = (input: DeployProjectInput) =>
       ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
       ...buildTableTasks(ctx, tableHandlers, tableResults),
       ...(apiId ? buildAppTasks(ctx, appHandlers, apiId, appResults) : []),
-      ...buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults),
+      ...buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiId),
       ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
       ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
       ...buildMailerTasks(ctx, mailerHandlers, mailerResults),

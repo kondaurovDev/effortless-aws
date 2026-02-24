@@ -194,6 +194,23 @@ export const syncFiles = (input: SyncFilesInput) =>
     return { uploaded, deleted, unchanged } satisfies SyncFilesResult;
   });
 
+export type PutObjectInput = {
+  bucketName: string;
+  key: string;
+  body: string | Buffer;
+  contentType: string;
+  cacheControl?: string;
+};
+
+export const putObject = (input: PutObjectInput) =>
+  s3.make("put_object", {
+    Bucket: input.bucketName,
+    Key: input.key,
+    Body: typeof input.body === "string" ? Buffer.from(input.body) : input.body,
+    ContentType: input.contentType,
+    CacheControl: input.cacheControl ?? "public, max-age=0, must-revalidate",
+  });
+
 export const putBucketPolicyForOAC = (bucketName: string, distributionArn: string) =>
   Effect.gen(function* () {
     const policy = JSON.stringify({

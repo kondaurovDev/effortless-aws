@@ -5,6 +5,12 @@ import { toAwsTagList, getResourcesByTags } from "./tags";
 
 // AWS managed CachingOptimized policy
 const CACHING_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6";
+// AWS managed CachingDisabled policy (for API proxying)
+const CACHING_DISABLED_POLICY_ID = "4135ea2d-bfcb-4884-b0c3-f7c1dc6e36b4";
+// AWS managed AllViewerExceptHostHeader origin request policy
+const ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac";
+// AWS managed SecurityHeadersPolicy (X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy)
+const SECURITY_HEADERS_POLICY_ID = "67f7725c-6f97-4210-82d7-5512b31e9d03";
 
 export type EnsureOACInput = {
   name: string;
@@ -157,6 +163,12 @@ export type EnsureDistributionInput = {
   lambdaEdgeArn?: string;
   aliases?: string[];
   acmCertificateArn?: string;
+  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
+  apiOriginDomain?: string;
+  /** CloudFront path patterns to route to API Gateway (e.g. ["/api/*"]) */
+  routePatterns?: string[];
+  /** S3 key path for custom error page (e.g. "/_effortless/404.html") */
+  errorPagePath?: string;
 };
 
 export type DistributionResult = {
@@ -170,7 +182,7 @@ const makeDistComment = (project: string, stage: string, handlerName: string) =>
 
 export const ensureDistribution = (input: EnsureDistributionInput) =>
   Effect.gen(function* () {
-    const { project, stage, handlerName, bucketName, bucketRegion, oacId, spa, index, tags, urlRewriteFunctionArn, lambdaEdgeArn, aliases, acmCertificateArn } = input;
+    const { project, stage, handlerName, bucketName, bucketRegion, oacId, spa, index, tags, urlRewriteFunctionArn, lambdaEdgeArn, aliases, acmCertificateArn, apiOriginDomain, routePatterns } = input;
     const aliasesConfig = aliases && aliases.length > 0
       ? { Quantity: aliases.length, Items: aliases }
       : { Quantity: 0, Items: [] as string[] };
@@ -189,9 +201,60 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
       ? { Quantity: 1, Items: [{ EventType: "viewer-request" as const, LambdaFunctionARN: lambdaEdgeArn, IncludeBody: false }] }
       : { Quantity: 0, Items: [] };
     const comment = makeDistComment(project, stage, handlerName);
-    const originId = `S3-${bucketName}`;
-    const originDomain = `${bucketName}.s3.${bucketRegion}.amazonaws.com`;
+    const s3OriginId = `S3-${bucketName}`;
+    const s3OriginDomain = `${bucketName}.s3.${bucketRegion}.amazonaws.com`;
 
+    // Build origins array: S3 + optional API Gateway
+    const hasApiRoutes = apiOriginDomain && routePatterns && routePatterns.length > 0;
+    const apiOriginId = hasApiRoutes ? `API-${project}-${stage}` : undefined;
+
+    const originsItems = [
+      {
+        Id: s3OriginId,
+        DomainName: s3OriginDomain,
+        OriginPath: "",
+        OriginAccessControlId: oacId,
+        S3OriginConfig: { OriginAccessIdentity: "" },
+        CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
+      },
+      ...(hasApiRoutes ? [{
+        Id: apiOriginId!,
+        DomainName: apiOriginDomain,
+        OriginPath: "",
+        CustomOriginConfig: {
+          HTTPPort: 80,
+          HTTPSPort: 443,
+          OriginProtocolPolicy: "https-only" as const,
+          OriginSslProtocols: { Quantity: 1, Items: ["TLSv1.2" as const] },
+        },
+        CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
+      }] : []),
+    ];
+
+    // Build cache behaviors for API routes
+    const API_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] as const;
+    const CACHED_METHODS = ["GET", "HEAD"] as const;
+
+    const cacheBehaviors = hasApiRoutes
+      ? {
+          Quantity: routePatterns.length,
+          Items: routePatterns.map(pattern => ({
+            PathPattern: pattern,
+            TargetOriginId: apiOriginId!,
+            ViewerProtocolPolicy: "redirect-to-https" as const,
+            AllowedMethods: {
+              Quantity: 7 as const,
+              Items: [...API_METHODS],
+              CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
+            },
+            Compress: true,
+            CachePolicyId: CACHING_DISABLED_POLICY_ID,
+            OriginRequestPolicyId: ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
+          })),
+        }
+      : { Quantity: 0, Items: [] as never[] };
+
+    const { errorPagePath } = input;
     const customErrorResponses = spa
       ? {
           Quantity: 2,
@@ -210,7 +273,25 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
             },
           ],
         }
-      : { Quantity: 0, Items: [] };
+      : errorPagePath
+        ? {
+            Quantity: 2,
+            Items: [
+              {
+                ErrorCode: 403,
+                ResponseCode: "404",
+                ResponsePagePath: errorPagePath,
+                ErrorCachingMinTTL: 0,
+              },
+              {
+                ErrorCode: 404,
+                ResponseCode: "404",
+                ResponsePagePath: errorPagePath,
+                ErrorCachingMinTTL: 0,
+              },
+            ],
+          }
+        : { Quantity: 0, Items: [] };
 
     // Find existing distribution by tags
     const existing = yield* findDistributionByTags(project, stage, handlerName);
@@ -236,18 +317,32 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
 
       const currentLambdaEdgeArn = currentConfig.DefaultCacheBehavior?.LambdaFunctionAssociations?.Items?.[0]?.LambdaFunctionARN;
 
+      // Check origins count and cache behaviors
+      const originsMatch = (currentConfig.Origins?.Quantity ?? 0) === originsItems.length;
+      const currentBehaviorPatterns = (currentConfig.CacheBehaviors?.Items ?? []).map(b => b.PathPattern).sort();
+      const desiredBehaviorPatterns = (routePatterns ?? []).slice().sort();
+      const behaviorsMatch =
+        currentBehaviorPatterns.length === desiredBehaviorPatterns.length &&
+        desiredBehaviorPatterns.every((p, i) => currentBehaviorPatterns[i] === p);
+      // Check API origin domain if routes are configured
+      const apiOriginMatch = !hasApiRoutes || currentConfig.Origins?.Items?.some(o => o.DomainName === apiOriginDomain);
+
       const needsUpdate =
-        currentOrigin?.DomainName !== originDomain ||
+        currentOrigin?.DomainName !== s3OriginDomain ||
         currentOrigin?.OriginAccessControlId !== oacId ||
         currentConfig.DefaultRootObject !== index ||
         currentConfig.DefaultCacheBehavior?.CachePolicyId !== CACHING_OPTIMIZED_POLICY_ID ||
+        currentConfig.DefaultCacheBehavior?.ResponseHeadersPolicyId !== SECURITY_HEADERS_POLICY_ID ||
         (currentConfig.CustomErrorResponses?.Quantity ?? 0) !== customErrorResponses.Quantity ||
         (currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Quantity ?? 0) !== functionAssociations.Quantity ||
         currentConfig.DefaultCacheBehavior?.FunctionAssociations?.Items?.[0]?.FunctionARN !== (urlRewriteFunctionArn ?? undefined) ||
         (currentConfig.DefaultCacheBehavior?.LambdaFunctionAssociations?.Quantity ?? 0) !== lambdaFunctionAssociations.Quantity ||
         currentLambdaEdgeArn !== (lambdaEdgeArn ?? undefined) ||
         !aliasesMatch ||
-        !certMatch;
+        !certMatch ||
+        !originsMatch ||
+        !behaviorsMatch ||
+        !apiOriginMatch;
 
       if (needsUpdate) {
         yield* Effect.logDebug(`CloudFront distribution ${existing.Id} config changed, updating...`);
@@ -260,21 +355,12 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
             ...currentConfig,
             Comment: comment,
             Origins: {
-              Quantity: 1,
-              Items: [
-                {
-                  Id: originId,
-                  DomainName: originDomain,
-                  OriginPath: "",
-                  OriginAccessControlId: oacId,
-                  S3OriginConfig: { OriginAccessIdentity: "" },
-                  CustomHeaders: { Quantity: 0, Items: [] },
-                },
-              ],
+              Quantity: originsItems.length,
+              Items: originsItems,
             },
             DefaultCacheBehavior: {
               ...currentConfig.DefaultCacheBehavior,
-              TargetOriginId: originId,
+              TargetOriginId: s3OriginId,
               ViewerProtocolPolicy: "redirect-to-https",
               AllowedMethods: {
                 Quantity: 2,
@@ -283,10 +369,12 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
               },
               Compress: true,
               CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
+              ResponseHeadersPolicyId: SECURITY_HEADERS_POLICY_ID,
               FunctionAssociations: functionAssociations,
               LambdaFunctionAssociations: lambdaFunctionAssociations,
               ForwardedValues: undefined,
             },
+            CacheBehaviors: cacheBehaviors,
             Aliases: aliasesConfig,
             ...(viewerCertificate ? { ViewerCertificate: viewerCertificate } : {}),
             DefaultRootObject: index,
@@ -317,18 +405,11 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
       CallerReference: `${project}-${stage}-${handlerName}-${Date.now()}`,
       Comment: comment,
       Origins: {
-        Quantity: 1,
-        Items: [
-          {
-            Id: originId,
-            DomainName: originDomain,
-            OriginAccessControlId: oacId,
-            S3OriginConfig: { OriginAccessIdentity: "" },
-          },
-        ],
+        Quantity: originsItems.length,
+        Items: originsItems,
       },
       DefaultCacheBehavior: {
-        TargetOriginId: originId,
+        TargetOriginId: s3OriginId,
         ViewerProtocolPolicy: "redirect-to-https",
         AllowedMethods: {
           Quantity: 2,
@@ -337,9 +418,11 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         },
         Compress: true,
         CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
+        ResponseHeadersPolicyId: SECURITY_HEADERS_POLICY_ID,
         FunctionAssociations: functionAssociations,
         LambdaFunctionAssociations: lambdaFunctionAssociations,
       },
+      CacheBehaviors: cacheBehaviors,
       Aliases: aliasesConfig,
       ...(viewerCertificate ? { ViewerCertificate: viewerCertificate } : {}),
       DefaultRootObject: index,

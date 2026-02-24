@@ -48,7 +48,7 @@ describe("defineStaticSite extraction", () => {
     });
   });
 
-  it("should have empty deps, params, and static globs", () => {
+  it("should have empty deps, params, static globs, and route patterns", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
@@ -62,6 +62,7 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.depsKeys).toEqual([]);
     expect(configs[0]!.paramEntries).toEqual([]);
     expect(configs[0]!.staticGlobs).toEqual([]);
+    expect(configs[0]!.routePatterns).toEqual([]);
   });
 
   it("should detect middleware and set hasHandler to true", () => {
@@ -137,6 +138,96 @@ describe("defineStaticSite extraction", () => {
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.config.domain).toBe("example.com");
+  });
+
+  it("should extract single route pattern", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+      import { api } from "./api";
+
+      export const app = defineStaticSite({
+        dir: "dist",
+        routes: {
+          "/api/*": api,
+        },
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.routePatterns).toEqual(["/api/*"]);
+    // routes should be stripped from config
+    expect(configs[0]!.config).not.toHaveProperty("routes");
+  });
+
+  it("should extract multiple route patterns", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+      import { api } from "./api";
+      import { auth } from "./auth";
+
+      export const app = defineStaticSite({
+        dir: "dist",
+        routes: {
+          "/api/*": api,
+          "/auth/*": auth,
+        },
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs[0]!.routePatterns).toEqual(["/api/*", "/auth/*"]);
+  });
+
+  it("should extract route patterns from default export", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+      import { api } from "./api";
+
+      export default defineStaticSite({
+        dir: "dist",
+        routes: {
+          "/api/*": api,
+        },
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.routePatterns).toEqual(["/api/*"]);
+  });
+
+  it("should preserve errorPage in extracted config", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+
+      export const docs = defineStaticSite({
+        dir: "dist",
+        errorPage: "404.html",
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.config.errorPage).toBe("404.html");
+  });
+
+  it("should not have errorPage in config when not specified", () => {
+    const source = `
+      import { defineStaticSite } from "effortless-aws";
+
+      export const docs = defineStaticSite({
+        dir: "dist",
+      });
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs[0]!.config.errorPage).toBeUndefined();
   });
 
   it("should not match defineApp or defineHttp calls", () => {

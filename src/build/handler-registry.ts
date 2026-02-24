@@ -7,7 +7,7 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware"];
+const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware", "routes"];
 
 const evalConfig = <T>(configText: string, exportName: string): T => {
   try {
@@ -162,6 +162,39 @@ const extractStaticGlobs = (obj: ObjectLiteralExpression): string[] => {
     .map(e => e.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue());
 };
 
+/**
+ * Extract route path patterns from the routes property of a static site config.
+ * Reads: routes: { "/api/*": api, "/auth/*": auth }
+ * Returns: ["/api/*", "/auth/*"]
+ */
+const extractRoutePatterns = (obj: ObjectLiteralExpression): string[] => {
+  const routesProp = obj.getProperties().find(p => {
+    if (p.getKind() === SyntaxKind.PropertyAssignment) {
+      return (p as PropertyAssignment).getName() === "routes";
+    }
+    return false;
+  });
+
+  if (!routesProp || routesProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
+
+  const init = (routesProp as PropertyAssignment).getInitializer();
+  if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
+
+  const routesObj = init as ObjectLiteralExpression;
+  return routesObj.getProperties()
+    .map(p => {
+      if (p.getKind() !== SyntaxKind.PropertyAssignment) return "";
+      const nameNode = (p as PropertyAssignment).getNameNode();
+      // String literal keys like "/api/*"
+      if (nameNode.getKind() === SyntaxKind.StringLiteral) {
+        return nameNode.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralValue();
+      }
+      // Identifier keys (unlikely for path patterns but handle gracefully)
+      return nameNode.getText();
+    })
+    .filter(Boolean);
+};
+
 // ============ Handler Registry ============
 
 export type HandlerDefinition = {
@@ -226,6 +259,7 @@ export type ExtractedConfig<T = unknown> = {
   depsKeys: string[];
   paramEntries: ParamEntry[];
   staticGlobs: string[];
+  routePatterns: string[];
 };
 
 export const extractHandlerConfigs = <T>(source: string, type: HandlerType): ExtractedConfig<T>[] => {
@@ -249,7 +283,8 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
           const depsKeys = extractDepsKeys(objLiteral);
           const paramEntries = extractParamEntries(objLiteral);
           const staticGlobs = extractStaticGlobs(objLiteral);
-          results.push({ exportName: "default", config, hasHandler, depsKeys, paramEntries, staticGlobs });
+          const routePatterns = extractRoutePatterns(objLiteral);
+          results.push({ exportName: "default", config, hasHandler, depsKeys, paramEntries, staticGlobs, routePatterns });
         }
       }
     }
@@ -276,7 +311,8 @@ export const extractHandlerConfigs = <T>(source: string, type: HandlerType): Ext
         const depsKeys = extractDepsKeys(objLiteral);
         const paramEntries = extractParamEntries(objLiteral);
         const staticGlobs = extractStaticGlobs(objLiteral);
-        results.push({ exportName, config, hasHandler, depsKeys, paramEntries, staticGlobs });
+        const routePatterns = extractRoutePatterns(objLiteral);
+        results.push({ exportName, config, hasHandler, depsKeys, paramEntries, staticGlobs, routePatterns });
       }
     });
   });

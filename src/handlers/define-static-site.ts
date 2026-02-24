@@ -1,3 +1,8 @@
+import type { HttpHandler } from "./define-http";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyHttpHandler = HttpHandler<any, any, any, any, any>;
+
 /** Simplified request object passed to middleware */
 export type MiddlewareRequest = {
   uri: string;
@@ -43,6 +48,13 @@ export type StaticSiteConfig = {
   build?: string;
   /** Custom domain name. Accepts a string (same domain for all stages) or a Record mapping stage names to domains (e.g., `{ prod: "example.com", dev: "dev.example.com" }`). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
   domain?: string | Record<string, string>;
+  /** CloudFront route overrides: path patterns forwarded to API Gateway instead of S3.
+   * Keys are CloudFront path patterns (e.g., "/api/*"), values are HTTP handlers.
+   * Example: `routes: { "/api/*": api }` */
+  routes?: Record<string, AnyHttpHandler>;
+  /** Custom 404 error page path relative to `dir` (e.g. "404.html").
+   * For non-SPA sites only. If not set, a default page is generated automatically. */
+  errorPage?: string;
   /** Lambda@Edge middleware that runs before serving pages. Use for auth checks, redirects, etc. */
   middleware?: MiddlewareHandler;
 };

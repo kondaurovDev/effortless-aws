@@ -11,6 +11,7 @@ import {
   type TagContext,
   ensureBucket,
   syncFiles,
+  putObject,
   putBucketPolicyForOAC,
   ensureOAC,
   ensureEdgeRole,
@@ -32,6 +33,8 @@ export type DeployStaticSiteInput = {
   fn: ExtractedStaticSiteFunction;
   /** Source file path (required when middleware is present) */
   file?: string;
+  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
+  apiOriginDomain?: string;
 };
 
 export type DeployStaticSiteResult = {
@@ -102,6 +105,43 @@ const deployMiddlewareLambda = (input: {
     return { versionArn };
   });
 
+const ERROR_PAGE_KEY = "_effortless/404.html";
+
+const generateErrorPageHtml = (): string => `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 — Page not found</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    background: #fff;
+    color: #111;
+  }
+  .c { text-align: center; }
+  h1 { font-size: 4rem; font-weight: 200; letter-spacing: 0.1em; }
+  hr { width: 40px; border: none; border-top: 1px solid #ccc; margin: 1.5rem auto; }
+  p { font-size: 1rem; color: #666; }
+  a { display: inline-block; margin-top: 1.5rem; color: #666; font-size: 0.875rem; text-decoration: none; }
+  a:hover { color: #111; }
+</style>
+</head>
+<body>
+<div class="c">
+  <h1>404</h1>
+  <hr>
+  <p>This page does not exist.</p>
+  <a href="javascript:history.back()">&larr; Back</a>
+</div>
+</body>
+</html>`;
+
 /** @internal */
 export const deployStaticSite = (input: DeployStaticSiteInput) =>
   Effect.gen(function* () {
@@ -112,6 +152,16 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     const hasMiddleware = fn.hasHandler;
 
     const tagCtx: TagContext = { project, stage, handler: handlerName };
+    const routePatterns = fn.routePatterns;
+
+    if (routePatterns.length > 0 && !input.apiOriginDomain) {
+      return yield* Effect.fail(
+        new Error(
+          `Static site "${exportName}" has routes but no API Gateway exists. ` +
+          `Ensure defineHttp() handlers are included in the discovery patterns.`
+        )
+      );
+    }
 
     // 1. Run build command if specified
     if (config.build) {
@@ -201,7 +251,14 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       }
     }
 
-    // 5. Ensure CloudFront distribution
+    // 5. Determine error page path (non-SPA only)
+    const errorPagePath = isSpa
+      ? undefined
+      : config.errorPage
+        ? `/${config.errorPage}`
+        : `/${ERROR_PAGE_KEY}`;
+
+    // 6. Ensure CloudFront distribution
     const index = config.index ?? "index.html";
     const { distributionId, distributionArn, domainName } = yield* ensureDistribution({
       project,
@@ -217,16 +274,30 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       lambdaEdgeArn,
       aliases,
       acmCertificateArn,
+      errorPagePath,
+      ...(input.apiOriginDomain && routePatterns.length > 0
+        ? { apiOriginDomain: input.apiOriginDomain, routePatterns }
+        : {}),
     });
 
-    // 6. Set bucket policy for CloudFront OAC
+    // 7. Set bucket policy for CloudFront OAC
     yield* putBucketPolicyForOAC(bucketName, distributionArn);
 
-    // 7. Sync files to S3
+    // 8. Sync files to S3
     const sourceDir = path.resolve(projectDir, config.dir);
     yield* syncFiles({ bucketName, sourceDir });
 
-    // 8. Invalidate CloudFront cache
+    // 9. Upload generated error page (non-SPA, no custom errorPage)
+    if (!isSpa && !config.errorPage) {
+      yield* putObject({
+        bucketName,
+        key: ERROR_PAGE_KEY,
+        body: generateErrorPageHtml(),
+        contentType: "text/html; charset=utf-8",
+      });
+    }
+
+    // 10. Invalidate CloudFront cache
     yield* invalidateDistribution(distributionId);
 
     const url = domain ? `https://${domain}` : `https://${domainName}`;

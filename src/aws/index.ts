@@ -19,7 +19,7 @@ export { ensureLayer, readProductionDependencies, computeLockfileHash, collectLa
 export type { LayerConfig, LayerResult, LayerStatus, LayerVersionInfo } from "./layer";
 
 // S3
-export { ensureBucket, syncFiles, putBucketPolicyForOAC, emptyBucket, deleteBucket, ensureBucketNotification, addS3LambdaPermission } from "./s3";
+export { ensureBucket, syncFiles, putObject, putBucketPolicyForOAC, emptyBucket, deleteBucket, ensureBucketNotification, addS3LambdaPermission } from "./s3";
 export type { EnsureBucketInput, SyncFilesInput, SyncFilesResult, EnsureBucketNotificationInput } from "./s3";
 
 // ACM

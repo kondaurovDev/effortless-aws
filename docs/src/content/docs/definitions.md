@@ -612,11 +612,13 @@ export const docs = defineStaticSite({
   spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
   build?: string,                    // shell command to run before deploy
   domain?: string,                   // custom domain (e.g. "example.com")
+  errorPage?: string,                // custom 404 page relative to dir (default: auto-generated)
+  routes?: { [pattern]: handler },   // path patterns proxied to API Gateway
   middleware?: (request) => ...,     // Lambda@Edge middleware for auth, redirects, etc.
 });
 ```
 
-Files are synced to S3 and served via CloudFront globally.
+Files are synced to S3 and served via CloudFront globally. Security headers (HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) are applied automatically via the AWS managed SecurityHeadersPolicy.
 
 ```typescript
 export const docs = defineStaticSite({
@@ -725,9 +727,46 @@ export const admin = defineStaticSite({
 ```
 :::
 
+### API route proxying
+
+Use `routes` to proxy specific URL patterns to your API Gateway instead of S3. This eliminates CORS by serving frontend and API from the same domain.
+
+```typescript
+import { api } from "./api";
+
+export const app = defineStaticSite({
+  dir: "dist",
+  spa: true,
+  domain: "example.com",
+  routes: {
+    "/api/*": api,
+  },
+});
+```
+
+Values are references to `defineHttp` handlers. Effortless resolves the API Gateway domain at deploy time and creates CloudFront cache behaviors for each pattern — with caching disabled, all HTTP methods allowed, and all headers forwarded.
+
+### Error pages
+
+For non-SPA sites, Effortless generates a clean, minimal 404 page automatically. Both 403 (S3 access denied for missing files) and 404 are served with this page and a proper 404 HTTP status.
+
+To use your own error page instead, set `errorPage` to a path relative to `dir`:
+
+```typescript
+export const docs = defineStaticSite({
+  dir: "dist",
+  errorPage: "404.html",
+});
+```
+
+For SPA sites (`spa: true`), error pages are not used — all paths route to `index.html`.
+
 **Built-in best practices**:
 - **URL rewriting** — automatically resolves `/path/` to `/path/index.html` via CloudFront Function.
 - **SPA support** — when `spa: true`, 403/404 errors return `index.html` for client-side routing.
+- **Security headers** — HSTS, X-Frame-Options, X-Content-Type-Options, and Referrer-Policy are applied automatically to all responses.
+- **Error pages** — non-SPA sites get a clean 404 page out of the box (overridable via `errorPage`).
+- **API route proxying** — use `routes` to forward path patterns to API Gateway, eliminating CORS for same-domain frontend + API setups.
 - **Global distribution** — served via CloudFront edge locations worldwide.
 - **Custom domains** — set `domain` for a custom domain with automatic ACM certificate lookup and optional www→non-www redirect.
 - **Edge middleware** — add `middleware` for auth checks, redirects, or access control via Lambda@Edge. Full Node.js runtime at the edge — JWT validation, cookie checks, custom logic.

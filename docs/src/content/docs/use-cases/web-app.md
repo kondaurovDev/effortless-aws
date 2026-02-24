@@ -158,6 +158,44 @@ export const app = defineStaticSite({
 
 Behind the scenes, CloudFront returns `index.html` for any path that doesn't match a real file (via custom error response for 403/404).
 
+### Error pages
+
+For non-SPA sites, Effortless automatically generates a clean 404 error page. When a visitor hits a path that doesn't exist, they see a styled page instead of a raw S3 XML error.
+
+If you want to use your own error page, point to a file inside your `dir`:
+
+```typescript
+export const docs = defineStaticSite({
+  dir: "dist",
+  build: "npm run build",
+  errorPage: "404.html",  // relative to dist/
+});
+```
+
+For SPA sites (`spa: true`), error pages are not used — all paths are routed to `index.html` for client-side routing.
+
+### API route proxying
+
+Your frontend and API can share the same domain — CloudFront proxies specific paths to API Gateway, eliminating CORS entirely.
+
+```typescript
+import { api } from "./api";
+
+export const app = defineStaticSite({
+  dir: "dist",
+  spa: true,
+  build: "npm run build",
+  domain: "example.com",
+  routes: {
+    "/api/*": api,  // proxied to API Gateway
+  },
+});
+```
+
+With `routes`, requests to `/api/*` go directly to your API Gateway. Everything else is served from S3. Same domain, no CORS headers needed.
+
+The `api` value is a reference to a `defineHttp` handler — Effortless resolves the API Gateway domain automatically at deploy time.
+
 ### Middleware — protect pages with auth
 
 Some sections of your site shouldn't be public. An admin panel, internal docs, a paid content area — you need to check authentication before serving the page.
@@ -226,7 +264,9 @@ Each `defineStaticSite` creates its own CloudFront distribution, so there's no p
 | Custom domain | No (uses API Gateway URL) | Yes (`domain` option) |
 | www redirect | No | Automatic (when cert covers www) |
 | Edge auth/middleware | No | Yes (`middleware` option — Lambda@Edge) |
-| Same domain as API | Yes | No (separate CloudFront URL) |
+| API route proxying | Built-in (same API Gateway) | Yes (`routes` option — same domain, no CORS) |
+| Security headers | No | Automatic (HSTS, X-Frame-Options, etc.) |
+| Custom error pages | No | Automatic 404 page (or `errorPage` override) |
 | Extra AWS resources | None | S3 bucket + CloudFront distribution |
 | Best for | Internal tools, fullstack apps | Public sites, docs, protected admin panels |
 
