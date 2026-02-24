@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.16.1
+
+### Patch Changes
+
+- [`52f7722`](https://github.com/kondaurovDev/effortless-aws/commit/52f77220f2574c3f06be3607e4463cedcda24eeb) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix CloudFront distribution update failing with "OriginReadTimeout is required" when API route proxying is configured.
+
 ## 0.16.0
 
 ### Minor Changes
