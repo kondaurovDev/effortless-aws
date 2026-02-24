@@ -226,6 +226,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
           HTTPSPort: 443,
           OriginProtocolPolicy: "https-only" as const,
           OriginSslProtocols: { Quantity: 1, Items: ["TLSv1.2" as const] },
+          OriginReadTimeout: 30,
+          OriginKeepaliveTimeout: 5,
         },
         CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
       }] : []),
