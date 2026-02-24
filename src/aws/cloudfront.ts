@@ -6,7 +6,7 @@ import { toAwsTagList, getResourcesByTags } from "./tags";
 // AWS managed CachingOptimized policy
 const CACHING_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6";
 // AWS managed CachingDisabled policy (for API proxying)
-const CACHING_DISABLED_POLICY_ID = "4135ea2d-bfcb-4884-b0c3-f7c1dc6e36b4";
+const CACHING_DISABLED_POLICY_ID = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
 // AWS managed AllViewerExceptHostHeader origin request policy
 const ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac";
 // AWS managed SecurityHeadersPolicy (X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy)
@@ -221,6 +221,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         Id: apiOriginId!,
         DomainName: apiOriginDomain,
         OriginPath: "",
+        ConnectionAttempts: 3,
+        ConnectionTimeout: 10,
         CustomOriginConfig: {
           HTTPPort: 80,
           HTTPSPort: 443,
@@ -250,8 +252,12 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
               CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
             },
             Compress: true,
+            SmoothStreaming: false,
             CachePolicyId: CACHING_DISABLED_POLICY_ID,
             OriginRequestPolicyId: ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
+            FunctionAssociations: { Quantity: 0, Items: [] },
+            LambdaFunctionAssociations: { Quantity: 0, Items: [] },
+            FieldLevelEncryptionId: "",
           })),
         }
       : { Quantity: 0, Items: [] as never[] };
