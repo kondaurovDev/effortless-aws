@@ -1,5 +1,13 @@
 # effortless-aws
 
+## 0.16.2
+
+### Patch Changes
+
+- [`8851f56`](https://github.com/kondaurovDev/effortless-aws/commit/8851f56e504fb20f76986be42a6cd78cfbc87d85) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add `--no-sites` flag to `deploy` command to skip static site deployments.
+
+- [`a9d2dbc`](https://github.com/kondaurovDev/effortless-aws/commit/a9d2dbcb9ae2b06daabe5de77c1f6a842c7a6ce6) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix CloudFront distribution update failing with "OriginReadTimeout is required" when API route proxying is configured.
+
 ## 0.16.1
 
 ### Patch Changes
