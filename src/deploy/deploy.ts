@@ -595,6 +595,7 @@ export type DeployProjectInput = {
   project: string;
   stage?: string;
   region: string;
+  noSites?: boolean;
 };
 
 export type DeployProjectResult = {
@@ -627,7 +628,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalStaticSiteHandlers = staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalStaticSiteHandlers = input.noSites ? 0 : staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalFifoQueueHandlers = fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalBucketHandlers = bucketHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalMailerHandlers = mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
@@ -685,7 +686,7 @@ export const deployProject = (input: DeployProjectInput) =>
     let apiId: string | undefined;
     let apiUrl: string | undefined;
 
-    const staticSitesNeedApi = staticSiteHandlers.some(
+    const staticSitesNeedApi = !input.noSites && staticSiteHandlers.some(
       ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
     );
 
@@ -724,8 +725,10 @@ export const deployProject = (input: DeployProjectInput) =>
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "table" });
     for (const { exports } of appHandlers)
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "app" });
-    for (const { exports } of staticSiteHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "site" });
+    if (!input.noSites) {
+      for (const { exports } of staticSiteHandlers)
+        for (const fn of exports) manifest.push({ name: fn.exportName, type: "site" });
+    }
     for (const { exports } of fifoQueueHandlers)
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "queue" });
     for (const { exports } of bucketHandlers)
@@ -751,7 +754,7 @@ export const deployProject = (input: DeployProjectInput) =>
       ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
       ...buildTableTasks(ctx, tableHandlers, tableResults),
       ...(apiId ? buildAppTasks(ctx, appHandlers, apiId, appResults) : []),
-      ...buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiId),
+      ...(input.noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiId)),
       ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
       ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
       ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
@@ -760,7 +763,7 @@ export const deployProject = (input: DeployProjectInput) =>
     yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
 
     // Clean up orphaned CloudFront Functions (e.g. after rename or config change)
-    if (staticSiteResults.length > 0) {
+    if (!input.noSites && staticSiteResults.length > 0) {
       yield* cleanupOrphanedFunctions(input.project, stage).pipe(
         Effect.provide(Aws.makeClients({
           cloudfront: { region: "us-east-1" },

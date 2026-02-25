@@ -66,6 +66,10 @@ export const outputOption = Options.text("output").pipe(
   Options.withDefault(".effortless")
 );
 
+export const noSitesOption = Options.boolean("no-sites").pipe(
+  Options.withDescription("Skip static site deployments")
+);
+
 export const dryRunOption = Options.boolean("dry-run").pipe(
   Options.withDescription("Show what would be deleted without deleting")
 );

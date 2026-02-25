@@ -5,7 +5,7 @@ import * as path from "path";
 import { deploy, deployAll, deployTable, deployAllTables, deployProject, type DeployTableResult } from "~/deploy/deploy";
 import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { Aws } from "../../aws";
-import { loadConfig, projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
+import { loadConfig, projectOption, stageOption, regionOption, verboseOption, noSitesOption, getPatternsFromConfig } from "~/cli/config";
 import { c } from "~/cli/colors";
 
 const deployTargetArg = Args.text({ name: "target" }).pipe(
@@ -19,8 +19,8 @@ const isFilePath = (target: string): boolean => {
 
 export const deployCommand = Command.make(
   "deploy",
-  { target: deployTargetArg, project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption },
-  ({ target, project: projectOpt, stage, region, verbose }) =>
+  { target: deployTargetArg, project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption, noSites: noSitesOption },
+  ({ target, project: projectOpt, stage, region, verbose, noSites }) =>
     Effect.gen(function* () {
       const config = yield* Effect.promise(loadConfig);
 
@@ -62,6 +62,7 @@ export const deployCommand = Command.make(
               project,
               stage: finalStage,
               region: finalRegion,
+              noSites,
             });
 
             const total = results.httpResults.length + results.tableResults.length + results.appResults.length + results.staticSiteResults.length;
