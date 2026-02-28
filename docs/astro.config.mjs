@@ -1,7 +1,7 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import sitemap from "@astrojs/sitemap";
-import { rename, unlink } from "node:fs/promises";
+import { mkdir, rename, unlink } from "node:fs/promises";
 
 export default defineConfig({
   site: "https://effortless-aws.website",
@@ -11,10 +11,12 @@ export default defineConfig({
       name: "flatten-sitemap",
       hooks: {
         "astro:build:done": async ({ dir }) => {
+          const sitemapDir = new URL("sitemap/", dir);
+          await mkdir(sitemapDir, { recursive: true });
           await unlink(new URL("sitemap-index.xml", dir));
           await rename(
             new URL("sitemap-0.xml", dir),
-            new URL("sitemap.xml", dir),
+            new URL("sitemap/sitemap.xml", dir),
           );
         },
       },
