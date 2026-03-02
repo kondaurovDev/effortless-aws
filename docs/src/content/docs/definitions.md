@@ -332,16 +332,16 @@ The `schema` + `post` pattern works great with discriminated unions — one POST
 
 ```typescript
 import { defineApi, defineTable, typed } from "effortless-aws";
-import { Schema } from "effect";
+import { z } from "zod";
 
 type User = { tag: string; name: string; email: string };
 
 export const users = defineTable({ schema: typed<User>() });
 
-const Action = Schema.Union(
-  Schema.Struct({ action: Schema.Literal("create"), name: Schema.String, email: Schema.String }),
-  Schema.Struct({ action: Schema.Literal("delete"), id: Schema.String }),
-);
+const Action = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("create"), name: z.string(), email: z.string() }),
+  z.object({ action: z.literal("delete"), id: z.string() }),
+]);
 
 export default defineApi({
   basePath: "/api",
@@ -358,7 +358,7 @@ export default defineApi({
     }),
   },
 
-  schema: Schema.decodeUnknownSync(Action),
+  schema: (input) => Action.parse(input),
   post: async ({ data, deps }) => {
     switch (data.action) {
       case "create": {
@@ -1058,7 +1058,7 @@ export const orderCreated = defineEvent({
   },
 
   // Optional
-  eventSchema?: Schema.Schema<T>,
+  eventSchema?: (input: unknown) => T,
 
   handler: async (event: T, ctx: EventContext) => {
     // typed event

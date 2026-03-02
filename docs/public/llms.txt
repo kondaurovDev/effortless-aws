@@ -5,7 +5,7 @@
 Effortless AWS is a TypeScript framework where you define AWS resources (Lambda, DynamoDB, SQS, S3, SES, CloudFront) by exporting handler objects from `.ts` files. The framework handles all infrastructure — IAM roles, API Gateway routes, event source mappings, Lambda layers — automatically. No YAML, no CloudFormation, no state files.
 
 - Package: `effortless-aws` (npm)
-- CLI: `npx eff deploy`
+- CLI: `eff deploy`
 - Docs: https://effortless-aws.website
 
 ## Project setup
@@ -49,7 +49,7 @@ Reference other handlers via `deps: { orders, uploads, mailer }`. The framework 
 
 ### schema = validation
 
-Pass an Effect Schema or `typed<T>()` for type-only. Validated data arrives as `data` arg in callbacks.
+Pass a validation function or `typed<T>()` for type-only. Validated data arrives as `data` arg in callbacks.
 
 ### static = bundled files
 
@@ -63,7 +63,7 @@ Creates API Gateway route + Lambda.
 
 ```typescript
 import { defineHttp, param } from "effortless-aws";
-import { Schema } from "effect";
+import { z } from "zod";
 
 export const createUser = defineHttp({
   // Required
@@ -81,7 +81,7 @@ export const createUser = defineHttp({
   },
 
   // Optional
-  schema: Schema.Struct({ email: Schema.String, name: Schema.String }),
+  schema: (input: unknown) => z.object({ email: z.string(), name: z.string() }).parse(input),
   deps: { users, uploads },
   config: { stripeKey: param("stripe/secret-key") },
   setup: async ({ deps, config }) => ({ stripe: new Stripe(config.stripeKey) }),
@@ -114,17 +114,17 @@ Use `defineApi` when you need multiple routes under a shared base path with shar
 
 ```typescript
 import { defineApi, defineTable, typed, param } from "effortless-aws";
-import { Schema } from "effect";
+import { z } from "zod";
 
 type User = { tag: string; name: string; email: string };
 
 export const users = defineTable({ schema: typed<User>() });
 
 // Discriminated union for POST commands
-const Action = Schema.Union(
-  Schema.Struct({ action: Schema.Literal("create"), name: Schema.String, email: Schema.String }),
-  Schema.Struct({ action: Schema.Literal("delete"), id: Schema.String }),
-);
+const Action = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("create"), name: z.string(), email: z.string() }),
+  z.object({ action: z.literal("delete"), id: z.string() }),
+]);
 
 export default defineApi({
   basePath: "/api",                          // all routes prefixed with /api
@@ -145,7 +145,7 @@ export default defineApi({
   },
 
   // POST — commands (single handler, discriminated union)
-  schema: Schema.decodeUnknownSync(Action),
+  schema: (input) => Action.parse(input),
   post: async ({ data, deps }) => {
     switch (data.action) {
       case "create": {
@@ -440,27 +440,27 @@ export const docs = defineStaticSite({
 ## CLI commands
 
 ```bash
-npx eff deploy                         # deploy all handlers
-npx eff deploy ./src/api.ts            # deploy specific file
-npx eff deploy createUser              # deploy specific handler
-npx eff deploy --stage prod            # deploy to production
+eff deploy                         # deploy all handlers
+eff deploy ./src/api.ts            # deploy specific file
+eff deploy createUser              # deploy specific handler
+eff deploy --stage prod            # deploy to production
 
-npx eff status                         # compare code vs deployed resources
-npx eff logs processOrder --tail       # stream CloudWatch logs
-npx eff logs processOrder --since 1h   # logs from last hour
+eff status                         # compare code vs deployed resources
+eff logs processOrder --tail       # stream CloudWatch logs
+eff logs processOrder --since 1h   # logs from last hour
 
-npx eff config                         # interactive SSM parameter setup
-npx eff config list                    # show all params and status
-npx eff config set stripe/secret-key   # set specific parameter
+eff config                         # interactive SSM parameter setup
+eff config list                    # show all params and status
+eff config set stripe/secret-key   # set specific parameter
 
-npx eff cleanup                        # preview orphaned resources
-npx eff cleanup --handler oldHandler --all  # delete specific handler
-npx eff cleanup --all                  # delete all resources
-npx eff cleanup --layer --all          # clean up layer versions
-npx eff cleanup --roles --all          # clean up orphaned IAM roles
+eff cleanup                        # preview orphaned resources
+eff cleanup --handler oldHandler --all  # delete specific handler
+eff cleanup --all                  # delete all resources
+eff cleanup --layer --all          # clean up layer versions
+eff cleanup --roles --all          # clean up orphaned IAM roles
 
-npx eff layer                          # show dependency layer info
-npx eff layer --build                  # build layer locally
+eff layer                          # show dependency layer info
+eff layer --build                  # build layer locally
 ```
 
 All commands accept `--project`, `--stage`, `--region`, `--verbose`.
@@ -537,7 +537,7 @@ Type-only schema (no runtime validation):
 schema: typed<MyType>()
 ```
 
-Runtime validation with Effect Schema:
+Runtime validation with any library (e.g. Zod):
 ```typescript
-schema: Schema.decodeUnknownSync(MySchema)
+schema: (input) => MySchema.parse(input)
 ```

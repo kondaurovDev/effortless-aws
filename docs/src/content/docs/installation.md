@@ -3,15 +3,21 @@ title: Installation
 description: Install effortless-aws, set up credentials, and deploy your first handler.
 ---
 
-## Install the package
+## Install
 
 ```bash
+# Runtime library — add to your project
 npm install effortless-aws
+
+# CLI — install globally (recommended)
+npm install -g @effortless-aws/cli
 ```
+
+Or use the CLI without installing globally via `npx eff`.
 
 ## AWS Credentials
 
-Effortless deploys directly to your AWS account using the AWS SDK. You need working credentials before running `npx eff deploy`.
+Effortless deploys directly to your AWS account using the AWS SDK. You need working credentials before running `eff deploy`.
 
 Any standard AWS credential method works:
 
@@ -76,7 +82,7 @@ export const hello = defineHttp({
 ### 3. Deploy
 
 ```bash
-npx eff deploy
+eff deploy
 ```
 
 That's it. Lambda + API Gateway + IAM role created in ~10 seconds.

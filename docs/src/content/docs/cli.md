@@ -3,19 +3,25 @@ title: CLI Commands
 description: Available CLI commands for deploying, managing, and debugging.
 ---
 
+Install globally (recommended):
+
+```bash
+npm install -g @effortless-aws/cli
+```
+
 CLI available as `effortless` or short alias `eff`:
 
 ### Quick start
 
 ```bash
 # Deploy everything defined in your project
-npx eff deploy
+eff deploy
 
 # Check what's deployed
-npx eff status
+eff status
 
 # Remove a specific handler's resources
-npx eff cleanup --handler createUser --all
+eff cleanup --handler createUser --all
 ```
 
 ### Typical workflow
@@ -35,7 +41,7 @@ All commands read project name, stage, and region from `effortless.config.ts` �
 Deploy handlers to AWS.
 
 ```bash
-npx eff deploy [target] [options]
+eff deploy [target] [options]
 ```
 
 Without `target`, deploys all handlers matching patterns from `effortless.config.ts`.
@@ -43,13 +49,13 @@ With `target`, deploys a specific handler by name or file path.
 
 ```bash
 # Deploy all handlers from config
-npx eff deploy
+eff deploy
 
 # Deploy a specific file
-npx eff deploy ./src/api.ts
+eff deploy ./src/api.ts
 
 # Deploy a specific handler by name
-npx eff deploy createUser
+eff deploy createUser
 ```
 
 **Options:**
@@ -81,7 +87,7 @@ If you remove a handler from your code, the API Gateway route will be cleaned up
 Compare handlers in your code with what's deployed in AWS.
 
 ```bash
-npx eff status [options]
+eff status [options]
 ```
 
 Discovers handlers from your code and queries AWS resources by tags, then shows the diff:
@@ -120,20 +126,20 @@ Orphaned handlers can be removed with `eff cleanup --handler <name> --all`.
 Stream CloudWatch logs for a handler.
 
 ```bash
-npx eff logs <handler> [options]
+eff logs <handler> [options]
 ```
 
 Shows recent logs from the handler's Lambda function. Use `--tail` to continuously poll for new logs.
 
 ```bash
 # Show recent logs (last 5 minutes)
-npx eff logs processOrder
+eff logs processOrder
 
 # Tail logs in real time
-npx eff logs processOrder --tail
+eff logs processOrder --tail
 
 # Show logs from last hour
-npx eff logs processOrder --since 1h
+eff logs processOrder --since 1h
 ```
 
 Lambda metadata (request IDs, START/END/REPORT lines) is stripped for readability. Only the actual log output is shown.
@@ -154,28 +160,28 @@ Lambda metadata (request IDs, START/END/REPORT lines) is stripped for readabilit
 Delete deployed resources.
 
 ```bash
-npx eff cleanup [options]
+eff cleanup [options]
 ```
 
 Lists all resources tagged by Effortless and deletes them. Requires either `--all` or `--handler` to actually delete — without them, just shows what would be deleted.
 
 ```bash
 # Preview what would be deleted
-npx eff cleanup --dry-run
+eff cleanup --dry-run
 
 # Delete all resources for the project
-npx eff cleanup --all
+eff cleanup --all
 
 # Delete resources for a specific handler
-npx eff cleanup --handler createUser
+eff cleanup --handler createUser
 
 # Clean up layer versions
-npx eff cleanup --layer --dry-run
-npx eff cleanup --layer --all
+eff cleanup --layer --dry-run
+eff cleanup --layer --all
 
 # Clean up orphaned IAM roles
-npx eff cleanup --roles --dry-run
-npx eff cleanup --roles --all
+eff cleanup --roles --dry-run
+eff cleanup --roles --all
 ```
 
 **Options:**
@@ -200,19 +206,19 @@ Handlers declare config parameters via `config: { stripeKey: param("stripe/secre
 
 ```bash
 # Interactive setup — prompts for each missing parameter
-npx eff config
+eff config
 
 # List all parameters and their status
-npx eff config list
+eff config list
 
 # Set a specific parameter
-npx eff config set stripe/secret-key
+eff config set stripe/secret-key
 ```
 
 ### Default (interactive setup)
 
 ```bash
-npx eff config [options]
+eff config [options]
 ```
 
 Discovers all `param()` declarations from your handlers, checks which SSM parameters exist, and interactively prompts for missing ones. Each value is stored as `SecureString`.
@@ -233,7 +239,7 @@ Empty input skips the parameter.
 ### list
 
 ```bash
-npx eff config list [options]
+eff config list [options]
 ```
 
 Shows all declared parameters with their status:
@@ -244,19 +250,19 @@ Config parameters (my-service / dev)
   ✓ checkout  /my-service/dev/stripe/secret-key  set
   ✗ checkout  /my-service/dev/webhook-secret      missing
 
-  1 missing — run npx eff config to set them
+  1 missing — run eff config to set them
 ```
 
 ### set
 
 ```bash
-npx eff config set <key> [options]
+eff config set <key> [options]
 ```
 
 Create or update a specific parameter. The full SSM path is built automatically: `/${project}/${stage}/${key}`.
 
 ```bash
-npx eff config set stripe/secret-key --stage prod
+eff config set stripe/secret-key --stage prod
 # prompts for value, stores as SecureString at /my-service/prod/stripe/secret-key
 ```
 
@@ -281,10 +287,10 @@ Effortless automatically creates a shared Lambda layer from your `dependencies` 
 
 ```bash
 # Show layer info (default)
-npx eff layer
+eff layer
 
 # Build layer locally for debugging
-npx eff layer --build
+eff layer --build
 ```
 
 **Options:**

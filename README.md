@@ -3,46 +3,109 @@
 [![npm version](https://img.shields.io/npm/v/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
 [![npm downloads](https://img.shields.io/npm/dw/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
 
-TypeScript framework for AWS serverless. Export handlers, deploy with one command. No YAML, no CloudFormation, no state files.
+**Write a TypeScript handler. Export it. Deploy. That's it.**
 
-```bash
-npm install effortless-aws
-```
+No CloudFormation. No Terraform. No YAML. No state files. Lambda, API Gateway, DynamoDB, IAM — all created from your code in ~10 seconds.
 
-## What it looks like
+## The problem
+
+Adding one Lambda endpoint with existing tools:
+
+1. Write the handler
+2. Define Lambda in CloudFormation / CDK / SST / Terraform
+3. Create an IAM role with the right permissions
+4. Wire up API Gateway route
+5. Configure environment variables
+6. Wait 2-5 minutes for CloudFormation
+
+**Six steps, five files, one endpoint.**
+
+## With Effortless
 
 ```typescript
+// src/api.ts
 import { defineHttp } from "effortless-aws";
 
 export const hello = defineHttp({
   method: "GET",
   path: "/hello",
-  onRequest: async () => {
-    return { status: 200, body: { message: "Hello!" } };
-  },
+  onRequest: async () => ({
+    status: 200,
+    body: { message: "Hello!" },
+  }),
 });
 ```
 
 ```bash
-npx eff deploy
+npx eff deploy   # ~10 seconds
 ```
 
-One export, one command. Lambda, API Gateway route, and IAM role created automatically.
+One file. One command. Lambda + API Gateway route + IAM role created automatically.
 
-## Features
+## A more real example
 
-- **Infrastructure from code** — export a handler, get the AWS resources. No config files.
-- **Typed everything** — `defineTable<Order>` gives you typed `put()`, typed `deps.orders.get()`, typed `record.new`.
-- **Direct AWS SDK deploys** — no CloudFormation. Deploy in ~5-10s, not minutes.
-- **No state files** — AWS resource tags are the source of truth.
-- **Cross-handler deps** — `deps: { orders }` auto-wires IAM and injects a typed `TableClient`.
-- **SSM params** — `param("stripe-key")` fetches from Parameter Store at cold start. Auto IAM, auto caching.
-- **Partial batch failures** — DynamoDB stream processing reports failed records individually.
-- **Cold start caching** — `context` factory runs once per cold start, cached across invocations.
+```typescript
+import { defineTable, defineHttp, typed } from "effortless-aws";
+
+type Order = { id: string; product: string; amount: number };
+
+// Creates a DynamoDB table + stream processor Lambda
+export const orders = defineTable({
+  pk: { name: "id", type: "string" },
+  schema: typed<Order>(),
+  onRecord: async ({ record }) => {
+    console.log("New order:", record.new!.product);
+  },
+});
+
+// Creates an HTTP Lambda with DynamoDB write permissions
+export const createOrder = defineHttp({
+  method: "POST",
+  path: "/orders",
+  deps: { orders },
+  onRequest: async ({ req, deps }) => {
+    await deps.orders.put({           // typed client — knows Order shape
+      id: crypto.randomUUID(),
+      product: req.body.product,
+      amount: req.body.amount,
+    });
+    return { status: 201, body: { ok: true } };
+  },
+});
+```
+
+This creates: DynamoDB table, stream processor Lambda, HTTP Lambda, API Gateway route, IAM roles for both, environment variable wiring. **Zero config files.**
+
+## What's in the box
+
+- **`defineHttp`** — HTTP endpoints via API Gateway
+- **`defineApi`** — REST API with typed GET/POST routes
+- **`defineApp`** — SSR frameworks (Nuxt, Astro) via CloudFront + Lambda
+- **`defineTable`** — DynamoDB tables with typed clients and stream processing
+- **`defineFifoQueue`** — SQS FIFO queue consumers
+- **`defineBucket`** — S3 buckets with event triggers
+- **`defineMailer`** — SES email sending
+- **`defineStaticSite`** — CloudFront + S3 static sites
+
+**Cross-handler deps** — `deps: { orders }` auto-wires IAM and injects a typed `TableClient`.
+
+**SSM params** — `param("stripe-key")` fetches secrets from Parameter Store at cold start. Auto IAM, auto caching.
+
+## Packages
+
+| Package | What it does |
+|---------|-------------|
+| [`effortless-aws`](https://www.npmjs.com/package/effortless-aws) | Handler definitions and runtime |
+| [`@effortless-aws/cli`](https://www.npmjs.com/package/@effortless-aws/cli) | Build, deploy, logs, cleanup |
+
+```bash
+npm install effortless-aws
+npm install -D @effortless-aws/cli
+```
 
 ## Documentation
 
-Full docs, examples, and API reference: **[effortless-aws docs](https://effortless-aws.website)**
+**[effortless-aws.website](https://effortless-aws.website)**
 
 ## License
 

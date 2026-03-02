@@ -29,10 +29,10 @@ import AnimatedHero from '../../components/AnimatedHero.astro';
     <LinkButton href="/comparisons/#why-not-cloudformation" variant="secondary" icon="right-arrow">Learn more</LinkButton>
   </Card>
   <Card title="Type safety everywhere">
-    One `defineTable` call creates the table, generates typed clients, and validates data at runtime with Effect Schema.
+    One `defineTable` call creates the table, generates typed clients, and validates data at runtime.
 
     - Typed `.put()`, `.get()`, typed stream records
-    - Schema validation via Effect Schema before your handler runs
+    - Schema validation before your handler runs
     - One definition — types flow to clients, streams, and deps
 
     <LinkButton href="/definitions/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
@@ -150,7 +150,7 @@ Each tab adds a layer — every export creates real AWS infrastructure.
 ### Deploy
 
 ```bash
-$ npx eff deploy
+$ eff deploy
 
 Deployed 3 handler(s) in 8s:
   [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-dev-todos
@@ -161,7 +161,7 @@ Deployed 3 handler(s) in 8s:
 Need a separate environment? Add `--stage`:
 
 ```bash
-$ npx eff deploy --stage prod
+$ eff deploy --stage prod
 
 Deployed 3 handler(s) in 8s:
   [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-prod-todos

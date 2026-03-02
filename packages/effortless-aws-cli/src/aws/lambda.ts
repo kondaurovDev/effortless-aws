@@ -235,19 +235,49 @@ export const ensureFunctionUrl = (functionName: string) =>
 
 export const addCloudFrontPermission = (functionName: string, distributionArn: string) =>
   Effect.gen(function* () {
-    yield* lambda.make("add_permission", {
-      FunctionName: functionName,
-      StatementId: "cloudfront-oac",
-      Action: "lambda:InvokeFunctionUrl",
-      Principal: "cloudfront.amazonaws.com",
-      SourceArn: distributionArn,
-      FunctionUrlAuthType: "AWS_IAM",
-    }).pipe(
-      Effect.catchIf(
-        e => e._tag === "LambdaError" && e.is("ResourceConflictException"),
-        () => Effect.logDebug(`CloudFront permission already exists for ${functionName}`)
-      )
-    );
+    // Since Oct 2025, new Function URLs require both InvokeFunctionUrl and InvokeFunction
+    const statements = [
+      {
+        statementId: "cloudfront-oac",
+        action: "lambda:InvokeFunctionUrl",
+        authType: "AWS_IAM" as const,
+      },
+      {
+        statementId: "cloudfront-oac-invoke",
+        action: "lambda:InvokeFunction",
+        authType: undefined,
+      },
+    ];
+
+    for (const stmt of statements) {
+      yield* lambda.make("add_permission", {
+        FunctionName: functionName,
+        StatementId: stmt.statementId,
+        Action: stmt.action,
+        Principal: "cloudfront.amazonaws.com",
+        SourceArn: distributionArn,
+        ...(stmt.authType ? { FunctionUrlAuthType: stmt.authType } : {}),
+      }).pipe(
+        Effect.catchIf(
+          e => e._tag === "LambdaError" && e.is("ResourceConflictException"),
+          () => Effect.gen(function* () {
+            yield* Effect.logDebug(`Permission ${stmt.statementId} exists for ${functionName}, replacing...`);
+            yield* lambda.make("remove_permission", {
+              FunctionName: functionName,
+              StatementId: stmt.statementId,
+            });
+            yield* lambda.make("add_permission", {
+              FunctionName: functionName,
+              StatementId: stmt.statementId,
+              Action: stmt.action,
+              Principal: "cloudfront.amazonaws.com",
+              SourceArn: distributionArn,
+              ...(stmt.authType ? { FunctionUrlAuthType: stmt.authType } : {}),
+            });
+          })
+        )
+      );
+    }
   });
 
 // ============ Cleanup ============

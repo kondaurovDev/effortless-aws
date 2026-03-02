@@ -43,7 +43,7 @@ export const createPayment = defineHttp({
 });
 
 export const processOrders = defineFifoQueue({
-  schema: Schema.decodeUnknownSync(OrderSchema),
+  schema: (input) => OrderSchema.parse(input),
   idempotency: {
     key: (msg) => msg.orderId,
     ttl: "24 hours",
@@ -232,11 +232,10 @@ export const api = defineHttp({
 **Approach**: `define*` returns an object that serves as both a deployment descriptor and a typed runtime client. Use it directly — effortless detects the dependency at build time and wires everything.
 
 ```typescript
+const OrderEvent = z.object({ orderId: z.string(), amount: z.number() });
+
 export const processOrder = defineFifoQueue({
-  schema: Schema.decodeUnknownSync(Schema.Struct({
-    orderId: Schema.String,
-    amount: Schema.Number,
-  })),
+  schema: (input) => OrderEvent.parse(input),
   onMessage: async ({ message }) => {
     await fulfillOrder(message.body.orderId, message.body.amount);
   },
@@ -277,7 +276,7 @@ Per-message processing:
 
 ```typescript
 export const processOrder = defineFifoQueue({
-  schema: Schema.decodeUnknownSync(OrderSchema),
+  schema: (input) => OrderSchema.parse(input),
   batchSize: 10,
   batchWindow: 30,
   dlq: { maxRetries: 3 },
@@ -294,7 +293,7 @@ Batch processing:
 
 ```typescript
 export const importProducts = defineFifoQueue({
-  schema: Schema.decodeUnknownSync(ProductSchema),
+  schema: (input) => ProductSchema.parse(input),
   batchSize: 10,
   batchWindow: 60,
   dlq: { maxRetries: 3 },

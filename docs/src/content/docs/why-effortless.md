@@ -82,7 +82,7 @@ export const createOrder = defineHttp({
 ```
 
 ```bash
-npx eff deploy    # ~10 seconds
+eff deploy    # ~10 seconds
 ```
 
 This single file creates:
@@ -103,7 +103,7 @@ The most common Lambda pattern: HTTP endpoints that read/write from DynamoDB.
 
 ```typescript
 import { defineTable, defineHttp, typed } from "effortless-aws";
-import { Schema } from "effect";
+import { z } from "zod";
 
 type User = { id: string; email: string; name: string; createdAt: string };
 
@@ -116,10 +116,8 @@ export const users = defineTable({
 export const createUser = defineHttp({
   method: "POST",
   path: "/users",
-  schema: Schema.Struct({
-    email: Schema.String,
-    name: Schema.String,
-  }),
+  schema: (input: unknown) =>
+    z.object({ email: z.string(), name: z.string() }).parse(input),
   deps: { users },
   onRequest: async ({ data, deps }) => {
     const user: User = {

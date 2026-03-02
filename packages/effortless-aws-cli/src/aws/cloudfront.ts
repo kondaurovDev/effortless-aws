@@ -558,11 +558,13 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
         CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
       },
       Compress: true,
+      SmoothStreaming: false,
       CachePolicyId: CACHING_DISABLED_POLICY_ID,
       OriginRequestPolicyId: ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
       ResponseHeadersPolicyId: SECURITY_HEADERS_POLICY_ID,
       FunctionAssociations: { Quantity: 0, Items: [] },
       LambdaFunctionAssociations: { Quantity: 0, Items: [] },
+      FieldLevelEncryptionId: "",
     };
 
     // Cache behaviors for static asset patterns → S3

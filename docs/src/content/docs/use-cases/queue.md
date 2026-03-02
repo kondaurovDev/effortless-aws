@@ -26,7 +26,7 @@ export const orderQueue = defineFifoQueue({
 });
 ```
 
-After `npx eff deploy`, you get an SQS FIFO queue named `{project}-{stage}-orderQueue.fifo` and a Lambda that processes each message. If your handler throws, only that specific message is retried — the rest of the batch succeeds.
+After `eff deploy`, you get an SQS FIFO queue named `{project}-{stage}-orderQueue.fifo` and a Lambda that processes each message. If your handler throws, only that specific message is retried — the rest of the batch succeeds.
 
 The `message` object gives you:
 - `message.body` — parsed and typed message body (`OrderEvent`)
@@ -43,16 +43,16 @@ Pass a `schema` function and Effortless validates every message body automatical
 
 ```typescript
 import { defineFifoQueue } from "effortless-aws";
-import { Schema } from "effect";
+import { z } from "zod";
 
-const PaymentEvent = Schema.Struct({
-  paymentId: Schema.String,
-  amount: Schema.Number.pipe(Schema.greaterThan(0)),
-  currency: Schema.String,
+const PaymentEvent = z.object({
+  paymentId: z.string(),
+  amount: z.number().positive(),
+  currency: z.string(),
 });
 
 export const paymentQueue = defineFifoQueue({
-  schema: Schema.decodeUnknownSync(PaymentEvent),
+  schema: (input) => PaymentEvent.parse(input),
   onMessage: async ({ message }) => {
     // message.body is typed: { paymentId: string, amount: number, currency: string }
     await chargeCustomer(message.body.paymentId, message.body.amount);

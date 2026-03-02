@@ -57,8 +57,8 @@ Typically 5-10 seconds for a full deploy, 3-5 seconds for a code-only update. Ef
 Use the `--stage` flag. Each stage gets fully isolated resources — separate tables, Lambdas, API Gateway.
 
 ```bash
-npx eff deploy              # default stage (dev)
-npx eff deploy --stage prod # production
+eff deploy              # default stage (dev)
+eff deploy --stage prod # production
 ```
 
 No shared state between stages. Each stage is completely independent.
@@ -71,7 +71,7 @@ This means: no S3 backends, no lock files, no state drift, no "terraform import"
 
 ### Can I use Effortless in CI/CD?
 
-Yes. `npx eff deploy` works in any environment with AWS credentials. For GitHub Actions:
+Yes. `eff deploy` works in any environment with AWS credentials. For GitHub Actions:
 
 ```yaml
 - name: Deploy
@@ -79,7 +79,7 @@ Yes. `npx eff deploy` works in any environment with AWS credentials. For GitHub 
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     AWS_REGION: eu-west-1
-  run: npx eff deploy --stage prod
+  run: eff deploy --stage prod
 ```
 
 ### What happens if I stop using Effortless?
@@ -238,18 +238,16 @@ export const listOrders = defineHttp({
 
 ### How do I validate request bodies?
 
-Use the `schema` option with Effect Schema:
+Use the `schema` option with any validation library (e.g. Zod):
 
 ```typescript
-import { Schema } from "effect";
+import { z } from "zod";
 
 export const createUser = defineHttp({
   method: "POST",
   path: "/users",
-  schema: Schema.Struct({
-    email: Schema.String,
-    name: Schema.String,
-  }),
+  schema: (input: unknown) =>
+    z.object({ email: z.string(), name: z.string() }).parse(input),
   onRequest: async ({ data }) => {
     // data.email and data.name are typed and validated
   },
@@ -289,7 +287,7 @@ export const checkout = defineHttp({
 });
 ```
 
-Create the secret with `npx eff config set stripe/secret-key` or manually via `aws ssm put-parameter --name /my-app/dev/stripe/secret-key --value sk_... --type SecureString`. If you forget, `eff deploy` warns about missing parameters. See [HTTP API — Using secrets](/use-cases/http-api/#using-secrets) and [CLI — config](/cli/#config).
+Create the secret with `eff config set stripe/secret-key` or manually via `aws ssm put-parameter --name /my-app/dev/stripe/secret-key --value sk_... --type SecureString`. If you forget, `eff deploy` warns about missing parameters. See [HTTP API — Using secrets](/use-cases/http-api/#using-secrets) and [CLI — config](/cli/#config).
 
 ### Why SSM Parameter Store and not Secrets Manager?
 
@@ -388,7 +386,7 @@ See [Installation — AWS Credentials](/installation/#aws-credentials).
 ### My Lambda returns 502 Bad Gateway
 
 Common causes:
-- **Handler threw an error** — check CloudWatch Logs: `npx eff logs <handler-name>`
+- **Handler threw an error** — check CloudWatch Logs: `eff logs <handler-name>`
 - **Timeout** — default is 30s, increase in config if needed
 - **Missing permissions** — if your handler calls AWS services not managed by Effortless, add them to `permissions` in handler config
 

@@ -146,7 +146,7 @@ const tableName = Resource.Orders.name;
 ```typescript
 // Effortless — infrastructure IS the code
 export const orders = defineTable({
-  schema: { id: Schema.String, amount: Schema.Number },
+  schema: typed<{ id: string; amount: number }>(),
   primaryKey: "id",
   onInsert: async ({ newItem }) => {
     // typed: newItem.amount is number
@@ -194,7 +194,7 @@ api("main").post("/orders", async (ctx) => {
 ```typescript
 // Effortless — AWS-native, schema-driven
 export const orders = defineTable({
-  schema: { id: Schema.String, amount: Schema.Number },
+  schema: typed<{ id: string; amount: number }>(),
   primaryKey: "id",
 });
 // orders.put() is typed, validated, auto-IAM'd
@@ -204,7 +204,7 @@ export const orders = defineTable({
 |---|---|---|
 | Multi-cloud | Yes (AWS, GCP, Azure) | No — AWS only |
 | Typed clients from schema | No | Yes |
-| Schema validation at runtime | No | Yes (Effect Schema) |
+| Schema validation at runtime | No | Yes |
 | Deployment engine | Pulumi/Terraform | Direct AWS SDK |
 | Own runtime/SDK | Yes (gRPC sidecar) | No — native AWS Lambda |
 | State files | Yes (Terraform/Pulumi state) | No — AWS tags |
@@ -253,7 +253,7 @@ const worker = await Worker("api", {
 ```typescript
 // Effortless — infrastructure IS the code
 export const orders = defineTable({
-  schema: { id: Schema.String, amount: Schema.Number },
+  schema: typed<{ id: string; amount: number }>(),
   primaryKey: "id",
 });
 

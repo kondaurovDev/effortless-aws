@@ -44,7 +44,7 @@ AWS region where all resources will be created.
 region: "eu-central-1"    // default
 ```
 
-Can be overridden per deploy with `npx eff deploy --region us-east-1`.
+Can be overridden per deploy with `eff deploy --region us-east-1`.
 
 ### `stage`
 
@@ -54,11 +54,11 @@ Deployment stage for resource isolation. Each stage gets its own set of resource
 stage: "dev"              // default
 ```
 
-Override per deploy with `npx eff deploy --stage prod`. This lets you run multiple environments in the same AWS account without conflicts.
+Override per deploy with `eff deploy --stage prod`. This lets you run multiple environments in the same AWS account without conflicts.
 
 ### `handlers`
 
-Glob patterns or directory paths to scan for handler exports. Used by `npx eff deploy` (without a file argument) to auto-discover all handlers.
+Glob patterns or directory paths to scan for handler exports. Used by `eff deploy` (without a file argument) to auto-discover all handlers.
 
 ```typescript
 // Single directory — scans for all .ts files
@@ -68,7 +68,7 @@ handlers: "src"
 handlers: ["src/**/*.ts", "lib/**/*.handler.ts"]
 ```
 
-If you pass a file directly to the CLI (`npx eff deploy src/api.ts`), only that file is deployed — regardless of this setting.
+If you pass a file directly to the CLI (`eff deploy src/api.ts`), only that file is deployed — regardless of this setting.
 
 ### `defaults`
 
