@@ -1,0 +1,10 @@
+# @effortless-aws/cli
+
+## 0.1.1
+
+### Patch Changes
+
+- [`175e517`](https://github.com/kondaurovDev/effortless-aws/commit/175e5172cbd4c463a810e663a670461e1d8cc2f9) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add README
+
+- Updated dependencies [[`477f35e`](https://github.com/kondaurovDev/effortless-aws/commit/477f35e6269c82c7b1372129b3c9f9542c027030)]:
+  - effortless-aws@0.17.0
