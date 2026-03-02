@@ -1,5 +1,10 @@
 Write all code, comments, commit messages, and documentation in English.
 
+## Monorepo
+- This is a pnpm workspace monorepo (see `pnpm-workspace.yaml`). Packages live in `packages/`.
+- Use the pnpm `catalog:` protocol for dependency versions shared across multiple packages. Catalog versions are defined in `pnpm-workspace.yaml`.
+- Install dev dependencies into the specific package (`pnpm add -D <pkg> --filter <package-name>`), not the workspace root.
+
 ## Releases
 - Release packages via changesets: add a `.changeset/<name>.md` file with the bump type and description.
 - Do NOT edit `package.json` version directly.

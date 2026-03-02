@@ -1,65 +1,149 @@
 ---
 title: Website
-description: Serve static sites and SPAs with defineApp and defineStaticSite — via Lambda or CloudFront CDN.
+description: Deploy SSR frameworks with defineApp and static sites with defineStaticSite — via CloudFront CDN.
 ---
 
-You've built a frontend — React, Vue, Astro, a documentation site — and you need to host it. On AWS that usually means: create an S3 bucket, configure permissions, set up CloudFront, write rewrite rules for SPAs, handle cache invalidation. Or if you just want it alongside your API — figure out how to serve static files from Lambda.
+You've built a frontend and you need to host it. But not all frontends are the same — and the hosting approach depends on what your app actually does at request time.
 
-Effortless gives you two options depending on your needs: **defineApp** (Lambda + API Gateway) and **defineStaticSite** (CloudFront + S3).
+## Static sites vs SSR — what's the difference?
 
-## defineApp — serve alongside your API
+A **static site** is a set of pre-built HTML, CSS, and JS files. When you run `npm run build`, the framework generates all pages upfront. The server's job is simple: find the file, send it back. A blog, a documentation site, a landing page — these are static. Every visitor gets the same files.
 
-Your frontend lives in the same project as your API. You want everything on the same domain, deployed with one command.
+A **single-page application (SPA)** is a variation of a static site. There's one `index.html` and a JS bundle that handles routing in the browser. The server still just serves files — but any URL that doesn't match a real file returns `index.html`, and the JS router takes over. React, Vue, and Angular apps typically work this way.
 
-`defineApp` bundles your built site into a Lambda that serves static files through API Gateway. Since the site shares the same API Gateway as your HTTP handlers, there's no extra infrastructure — no S3 bucket, no CloudFront distribution, no additional cost.
+**Server-side rendering (SSR)** is fundamentally different. When a request comes in, server code runs to generate the HTML on the fly. The page might fetch data from a database, check the user's session, or render personalized content. The result is a complete HTML page — search engines can crawl it, the first paint is fast, and the page works even before JS loads.
+
+Modern frameworks blur the line. Nuxt, Astro, SvelteKit, and Next.js can do both: render some pages on the server, pre-build others as static HTML, and serve JS bundles as static assets. That's why they produce two outputs — a **server handler** (the code that runs per-request) and **static assets** (the pre-built files that never change).
+
+### Why SSR matters
+
+- **SEO** — search engines get fully rendered HTML without executing JavaScript
+- **Performance** — users see content immediately, no blank page while JS loads
+- **Personalization** — each request can render user-specific content (logged-in state, locale, A/B tests)
+- **Data freshness** — pages show real-time data, not stale builds from hours ago
+- **Progressive enhancement** — the page works before client JS hydrates
+
+The tradeoff is infrastructure: you need a server. On AWS, that means Lambda. Effortless handles the wiring — you point it at the framework output and deploy.
+
+---
+
+Effortless gives you two options depending on your needs: **defineApp** (SSR frameworks via CloudFront + Lambda Function URL + S3) and **defineStaticSite** (static sites and SPAs via CloudFront + S3).
+
+## defineApp — deploy SSR frameworks
+
+Your app uses server-side rendering — Nuxt, Next.js, or any framework that produces a server handler and static assets.
+
+`defineApp` creates a CloudFront distribution with two origins: a Lambda Function URL for server-side rendering, and an S3 bucket for static assets. The framework's built server handler runs in Lambda, while static assets (JS bundles, CSS, images) are served directly from S3 with CDN caching.
 
 ```typescript
-// src/site.ts
+// src/app.ts
 import { defineApp } from "effortless-aws";
 
-export const docs = defineApp({
-  dir: "dist",
-  path: "/",
-  build: "npx astro build",
+export const app = defineApp({
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
 });
 ```
 
 On deploy, Effortless:
-1. Runs `npx astro build` to produce the `dist/` folder
-2. Bundles all files into the Lambda ZIP
-3. Creates a Lambda that serves them with correct content types
-4. Sets up API Gateway routes for `GET /` and `GET /{proxy+}`
+1. Runs `nuxt build` to produce the server and assets directories
+2. ZIPs the server directory and deploys it as a Lambda function
+3. Creates a Lambda Function URL (secured with AWS_IAM + CloudFront OAC)
+4. Creates an S3 bucket and uploads static assets
+5. Creates a CloudFront distribution with auto-detected cache behaviors
 
-HTML files get `Cache-Control: public, max-age=0, must-revalidate`. Assets (JS, CSS, images) get `Cache-Control: public, max-age=31536000, immutable`. No manual cache configuration.
+Static assets are detected automatically from the assets directory. Directories become `/{name}/*` patterns, files become `/{name}` — all routed to S3 with `CachingOptimized`. Everything else goes to the Lambda Function URL with `CachingDisabled`.
 
-### SPA mode
+### Supported frameworks
 
-Your React or Vue app uses client-side routing. Every URL should return `index.html` and let the JS router handle the path.
+Any framework that builds into a server handler + static assets works with `defineApp`. The `server` directory must contain an `index.mjs` (or `index.js`) exporting a Lambda-compatible `handler` function.
+
+#### Nuxt
+
+The best-supported framework. Nuxt uses [Nitro](https://nitro.build/) which has a built-in `aws-lambda` preset that produces a Lambda handler directly.
 
 ```typescript
 export const app = defineApp({
-  dir: "build",
-  path: "/app",
-  build: "npm run build",
-  spa: true,
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
 });
 ```
 
-With `spa: true`, any request that doesn't match a real file returns `index.html`. So `/app/dashboard`, `/app/settings/profile`, `/app/anything` all serve your SPA — and the client-side router takes over.
-
-### Frontend + API in one project
-
-This is where defineApp shines — your frontend and backend deploy together. No CORS issues, no separate infrastructure.
+Set `NITRO_PRESET=aws-lambda` as an environment variable, or configure it in `nuxt.config.ts`:
 
 ```typescript
-// src/site.ts
+// nuxt.config.ts
+export default defineNuxtConfig({
+  nitro: {
+    preset: "aws-lambda",
+  },
+});
+```
+
+#### Next.js (via OpenNext)
+
+Next.js doesn't produce a Lambda handler natively. [OpenNext](https://opennext.js.org/) is an open-source adapter that transforms Next.js output into Lambda-compatible packages.
+
+```typescript
+export const app = defineApp({
+  server: ".open-next/server-function",
+  assets: ".open-next/assets",
+  build: "npx open-next build",
+});
+```
+
+OpenNext runs `next build` internally and produces `.open-next/server-function/index.mjs` (Lambda handler) and `.open-next/assets` (static files for S3).
+
+#### Other Nitro-powered frameworks
+
+Any framework built on [Nitro](https://nitro.build/) supports the `aws-lambda` preset and works the same way as Nuxt — set the preset and point `defineApp` at the output directories. This includes [Analog](https://analogjs.org/) (Angular) and [Vinxi](https://vinxi.vercel.app/)-based frameworks.
+
+#### Bringing your own handler
+
+If your framework doesn't have a Lambda adapter, you can write a thin wrapper yourself. The `server` directory needs an `index.mjs` that exports a `handler(event, context)` function matching the [Lambda function handler](https://docs.aws.amazon.com/lambda/latest/dg/nodejs-handler.html) signature. Wrap your framework's HTTP server with a library like [`serverless-http`](https://github.com/dougmoscrop/serverless-http) or [`@vendia/serverless-express`](https://github.com/vendia/serverless-express).
+
+### Custom domain
+
+```typescript
+export const app = defineApp({
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
+  domain: "app.example.com",
+});
+```
+
+Effortless automatically finds your ACM certificate in us-east-1 and configures SSL.
+
+Stage-specific domains are also supported:
+
+```typescript
+export const app = defineApp({
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
+  domain: {
+    prod: "app.example.com",
+    staging: "staging.example.com",
+  },
+});
+```
+
+### SSR + API in one project
+
+Your Nuxt/Astro app and API handlers deploy together.
+
+```typescript
+// src/app.ts
 import { defineApp } from "effortless-aws";
 
 export const frontend = defineApp({
-  dir: "client/dist",
-  path: "/",
-  build: "cd client && npm run build",
-  spa: true,
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
+  memory: 1024,
 });
 ```
 
@@ -85,7 +169,7 @@ export const listItems = defineHttp({
 });
 ```
 
-Your React app fetches `/api/items` — same domain, same API Gateway. The frontend serves from `/`, the API from `/api/*`. Everything deploys with one command.
+The SSR app is served from CloudFront, and the API from API Gateway — each with its own URL. Use the SSR framework's built-in API routes or proxy to the API Gateway URL from the frontend.
 
 ---
 
@@ -146,7 +230,7 @@ Effortless automatically finds your ACM certificate in us-east-1 and configures 
 
 ### SPA mode
 
-Same as defineApp — enable `spa: true` and all routes return `index.html`:
+For client-side routed apps (React, Vue, Angular), enable `spa: true` — all routes return `index.html`:
 
 ```typescript
 export const app = defineStaticSite({
@@ -259,18 +343,17 @@ Each `defineStaticSite` creates its own CloudFront distribution, so there's no p
 
 | | defineApp | defineStaticSite |
 |---|---|---|
-| Serves via | Lambda + API Gateway | CloudFront + S3 |
-| Global CDN | No | Yes |
-| Custom domain | No (uses API Gateway URL) | Yes (`domain` option) |
+| Serves via | CloudFront + Lambda Function URL + S3 | CloudFront + S3 |
+| Server-side rendering | Yes | No |
+| Global CDN | Yes | Yes |
+| Custom domain | Yes (`domain` option) | Yes (`domain` option) |
 | www redirect | No | Automatic (when cert covers www) |
 | Edge auth/middleware | No | Yes (`middleware` option — Lambda@Edge) |
-| API route proxying | Built-in (same API Gateway) | Yes (`routes` option — same domain, no CORS) |
-| Security headers | No | Automatic (HSTS, X-Frame-Options, etc.) |
-| Custom error pages | No | Automatic 404 page (or `errorPage` override) |
-| Extra AWS resources | None | S3 bucket + CloudFront distribution |
-| Best for | Internal tools, fullstack apps | Public sites, docs, protected admin panels |
+| Security headers | Automatic | Automatic |
+| Extra AWS resources | Lambda + S3 bucket + CloudFront distribution | S3 bucket + CloudFront distribution |
+| Best for | SSR frameworks (Nuxt, Next.js) | Static sites, SPAs, docs |
 
-**Rule of thumb**: if your site lives alongside API handlers — use `defineApp`. If it's a standalone public site that needs CDN performance — use `defineStaticSite`.
+**Rule of thumb**: if your framework produces a server handler (Nuxt, Next.js via OpenNext) — use `defineApp`. If your site is fully static or a client-side SPA — use `defineStaticSite`.
 
 ## See also
 

@@ -1,6 +1,6 @@
 ---
 title: Definitions
-description: All definition types — defineHttp, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineBucket, defineSchedule, defineEvent.
+description: All definition types — defineHttp, defineApi, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineBucket, defineSchedule, defineEvent.
 ---
 
 ## Overview
@@ -12,6 +12,7 @@ Some definitions include a Lambda handler (a callback like `onRequest`, `onRecor
 | Definition | Creates | Handler required? |
 |---|---|---|
 | [defineHttp](#definehttp) | API Gateway + Lambda | Yes (`onRequest`) |
+| [defineApi](#defineapi) | API Gateway + single Lambda (fat Lambda) | Optional (`get` / `post`) |
 | [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onBatch` |
 | [defineApp](#defineapp) | API Gateway + Lambda serving static files | No (built-in file server) |
 | [defineStaticSite](#definestaticsite) | S3 + CloudFront + optional Lambda@Edge | No (optional `middleware`) |
@@ -275,6 +276,113 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 - **Schema validation** — when `schema` is set, the body is parsed and validated before `onRequest` runs. Invalid requests get a 400 response automatically.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances with auto-wired IAM permissions and environment variables.
 - **Auto-infrastructure** — API Gateway HTTP API, route, Lambda integration, and IAM permissions are created on deploy.
+
+:::tip[Multiple routes under one path?]
+If you need multiple GET routes and/or a POST command handler under a shared base path, see [defineApi](#defineapi) — it deploys a single Lambda with built-in routing and supports CQRS-style discriminated union schemas.
+:::
+
+---
+
+## defineApi
+
+Creates: API Gateway HTTP API + single Lambda (fat Lambda) with catch-all `{proxy+}` route
+
+`defineApi` is a CQRS-style handler for APIs with multiple routes under a shared base path. It deploys **one Lambda** that handles all routing internally — no need to manage multiple Lambda functions or API Gateway routes.
+
+- **GET routes** — query handlers keyed by relative path (e.g., `"/users/{id}"`)
+- **POST handler** — single command entry point with discriminated union schema
+- Shared `deps`, `config`, `setup`, `static`, `onError` across all routes
+- Unmatched routes return 404 automatically
+
+```typescript
+export default defineApi({
+  // Required
+  basePath: string,  // e.g. "/api" — prefix for all routes
+
+  // Optional
+  memory?: number,
+  timeout?: DurationInput,
+  permissions?: Permission[],
+  setup?: ({ deps, config }) => C,
+  deps?: { [key]: TableHandler },
+  config?: { [key]: param(...) },
+  static?: string[],
+  onError?: (error, req) => HttpResponse,
+
+  // GET routes — queries
+  get?: {
+    "/path": async ({ req, ctx, deps, config }) => {
+      // req.params — path parameters extracted from {param} placeholders
+      return { status: 200, body: { ... } };
+    },
+  },
+
+  // POST — commands
+  schema?: (input: unknown) => T,     // validate & parse POST body
+  post?: async ({ req, data, ctx, deps, config }) => {
+    // data — parsed body (when schema is set)
+    return { status: 201, body: { ... } };
+  },
+});
+```
+
+### CQRS with discriminated unions
+
+The `schema` + `post` pattern works great with discriminated unions — one POST endpoint handles all commands:
+
+```typescript
+import { defineApi, defineTable, typed } from "effortless-aws";
+import { Schema } from "effect";
+
+type User = { tag: string; name: string; email: string };
+
+export const users = defineTable({ schema: typed<User>() });
+
+const Action = Schema.Union(
+  Schema.Struct({ action: Schema.Literal("create"), name: Schema.String, email: Schema.String }),
+  Schema.Struct({ action: Schema.Literal("delete"), id: Schema.String }),
+);
+
+export default defineApi({
+  basePath: "/api",
+  deps: { users },
+
+  get: {
+    "/users": async ({ deps }) => ({
+      status: 200,
+      body: await deps.users.queryByTag({ tag: "user" }),
+    }),
+    "/users/{id}": async ({ req, deps }) => ({
+      status: 200,
+      body: await deps.users.get({ pk: `USER#${req.params.id}`, sk: "PROFILE" }),
+    }),
+  },
+
+  schema: Schema.decodeUnknownSync(Action),
+  post: async ({ data, deps }) => {
+    switch (data.action) {
+      case "create": {
+        const id = crypto.randomUUID();
+        await deps.users.put({ pk: `USER#${id}`, sk: "PROFILE", data: { tag: "user", ...data } });
+        return { status: 201, body: { id } };
+      }
+      case "delete": {
+        await deps.users.delete({ pk: `USER#${data.id}`, sk: "PROFILE" });
+        return { status: 200, body: { ok: true } };
+      }
+    }
+  },
+});
+```
+
+### When to use defineApi vs defineHttp
+
+| | defineHttp | defineApi |
+|---|---|---|
+| **Routes** | One method + one path per handler | Multiple GET routes + one POST handler |
+| **Lambda count** | One Lambda per endpoint | Single fat Lambda |
+| **Routing** | API Gateway routes to specific Lambda | Lambda routes internally |
+| **Best for** | Simple endpoints, webhooks | CRUD APIs, CQRS, JSON-RPC |
 
 ---
 
@@ -555,46 +663,45 @@ export const users = defineTable({
 
 ## defineApp
 
-Creates: API Gateway HTTP API + Lambda serving static files.
+Creates: CloudFront distribution + Lambda Function URL + S3 bucket for deploying SSR frameworks.
 
 ```typescript
 export const app = defineApp({
   // Required
-  dir: string,                       // directory with built site files
+  server: string,                    // directory with Lambda server handler (e.g. ".output/server")
+  assets: string,                    // directory with static assets for S3 (e.g. ".output/public")
 
   // Optional
-  path?: string,                     // base URL path (e.g. "/app")
-  index?: string,                    // default: "index.html"
-  spa?: boolean,                     // SPA mode: serve index for all paths (default: false)
+  path?: string,                     // base URL path (default: "/")
   build?: string,                    // shell command to run before deploy
-  memory?: number,                   // Lambda memory in MB (default: 256)
-  timeout?: number,                  // Lambda timeout in seconds (default: 5)
+  memory?: number,                   // Lambda memory in MB (default: 1024)
+  timeout?: number,                  // Lambda timeout in seconds (default: 30)
+  permissions?: string[],            // additional IAM permissions
+  domain?: string | Record<string, string>,  // custom domain (or stage-keyed)
 });
 ```
 
-Files are bundled into the Lambda ZIP. The runtime serves them with auto-detected content types, cache headers, and path traversal protection.
+The `server` directory must contain an `index.mjs` (or `index.js`) that exports a `handler` function — this is the standard output of frameworks like Nuxt (`NITRO_PRESET=aws-lambda`) and Astro SSR.
+
+Static assets from `assets` are uploaded to S3 and served via CloudFront with `CachingOptimized`. All other requests go to the Lambda Function URL with `CachingDisabled`.
 
 ```typescript
 export const app = defineApp({
-  dir: "dist",
-  path: "/app",
-  build: "npm run build",
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
+  domain: "app.example.com",
 });
 ```
 
-- HTML files: `Cache-Control: public, max-age=0, must-revalidate`
-- Other files (JS, CSS, images): `Cache-Control: public, max-age=31536000, immutable`
-
-When `spa: true`, all paths that don't match a file are served with `index.html`. This enables client-side routing (React Router, Vue Router, etc.).
-
 **Built-in best practices**:
-- **Content-type detection** — auto-detected from file extensions (HTML, CSS, JS, images, fonts, etc.).
-- **Cache headers** — HTML files are revalidated on every request; hashed assets are cached for 1 year.
-- **Path traversal protection** — requests attempting `../` traversal are blocked with 403.
-- **SPA support** — when `spa: true`, returns `index.html` for paths without file extensions.
-- **Auto-infrastructure** — API Gateway HTTP API, route, Lambda integration, and IAM permissions are created on deploy.
+- **Lambda Function URL** — no API Gateway overhead (~20-50ms latency saved), secured with AWS_IAM + CloudFront OAC.
+- **Auto-detected cache behaviors** — static asset patterns (directories and files in `assets`) are auto-detected and routed to S3 with immutable caching.
+- **CloudFront CDN** — global edge distribution for both static assets and SSR responses.
+- **Custom domain** — string or stage-keyed record (`{ prod: "app.example.com" }`). ACM certificate in us-east-1 is auto-discovered.
+- **Auto-infrastructure** — Lambda, Function URL, S3 bucket, CloudFront distribution, OAC, IAM role, and bucket policy are all created on deploy.
 
-For CDN-backed sites (S3 + CloudFront), use [defineStaticSite](#definestaticsite) instead.
+For static-only sites (no SSR), use [defineStaticSite](#definestaticsite) instead.
 
 ---
 

@@ -331,17 +331,16 @@ export const dbHandler = defineHttp({
 
 Yes, two options:
 
-**Same domain as API** (via Lambda + API Gateway):
+**SSR framework** (via CloudFront + Lambda Function URL + S3):
 ```typescript
 export const app = defineApp({
-  path: "/",
-  dir: "dist",
-  build: "npm run build",
-  spa: true,
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
 });
 ```
 
-**Global CDN** (via CloudFront + S3):
+**Static site / SPA** (via CloudFront + S3):
 ```typescript
 export const site = defineStaticSite({
   dir: "dist",
@@ -356,11 +355,10 @@ See [Website guide](/use-cases/web-app/) for the full comparison.
 
 | | `defineApp` | `defineStaticSite` |
 |---|---|---|
-| Served from | Lambda + API Gateway | CloudFront CDN (edge) |
-| Latency | Regional (single region) | Global (~50ms worldwide) |
-| Same domain as API | Yes | Separate domain |
-| Cost | Lambda invocations | CloudFront transfer |
-| Best for | Internal tools, prototypes | Public-facing sites |
+| Served from | CloudFront + Lambda Function URL + S3 | CloudFront + S3 |
+| Server-side rendering | Yes | No |
+| Global CDN | Yes | Yes |
+| Best for | SSR frameworks (Nuxt, Astro SSR) | Static sites, SPAs, docs |
 
 ---
 

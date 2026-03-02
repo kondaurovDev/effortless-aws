@@ -1,6 +1,6 @@
 ---
 title: HTTP API
-description: Build REST APIs with defineHttp — routes, validation, database access, and secrets.
+description: Build REST APIs with defineHttp and defineApi — routes, validation, database access, and secrets.
 ---
 
 You need a backend API. Maybe it's a mobile app that fetches data, a webhook endpoint for a third-party service, or a simple CRUD API for your side project. You don't want to set up Express, configure Docker, or manage a server.
@@ -168,7 +168,39 @@ Or manually: `aws ssm put-parameter --name /my-service/dev/stripe/secret-key --v
 
 Effortless reads parameters at `/${project}/${stage}/${key}`. If you forget to create a parameter, `eff deploy` will warn you about missing values.
 
+## Multiple routes under one API
+
+The examples above use one `defineHttp` per route — each gets its own Lambda. This is fine for a handful of endpoints. But if you're building a CRUD API with many routes, shared setup, and a POST endpoint for commands, consider `defineApi` instead. It deploys a single Lambda that handles all routing internally:
+
+```typescript
+import { defineApi } from "effortless-aws";
+
+export default defineApi({
+  basePath: "/api",
+  deps: { tasks },
+
+  get: {
+    "/tasks": async ({ deps }) => ({
+      status: 200,
+      body: await deps.tasks.queryByTag({ tag: "task" }),
+    }),
+    "/tasks/{id}": async ({ req, deps }) => ({
+      status: 200,
+      body: await deps.tasks.get({ pk: `TASK#${req.params.id}`, sk: "DETAIL" }),
+    }),
+  },
+
+  post: async ({ data, deps }) => {
+    // handle create/update/delete commands
+    return { status: 201, body: { ok: true } };
+  },
+});
+```
+
+See [Definitions reference — defineApi](/definitions/#defineapi) for the full API.
+
 ## See also
 
 - [Definitions reference — defineHttp](/definitions/#definehttp) — all configuration options
+- [Definitions reference — defineApi](/definitions/#defineapi) — CQRS-style multi-route API
 - [Architecture — Inter-handler dependencies](/architecture/#inter-handler-dependencies-deps) — how deps wiring works

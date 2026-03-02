@@ -1,0 +1,65 @@
+{
+  "name": "effortless-aws-cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "CLI and deploy tooling for effortless-aws",
+  "homepage": "https://effortless-aws.website",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kondaurovDev/effortless-aws.git",
+    "directory": "packages/effortless-aws-cli"
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "eff": "./dist/cli/index.js",
+    "effortless": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "gen": "gen-aws-sdk",
+    "prebuild": "pnpm run gen",
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "pretest": "pnpm run build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-acm": "catalog:",
+    "@aws-sdk/client-apigatewayv2": "catalog:",
+    "@aws-sdk/client-cloudfront": "catalog:",
+    "@aws-sdk/client-cloudwatch-logs": "catalog:",
+    "@aws-sdk/client-dynamodb": "catalog:",
+    "@aws-sdk/client-iam": "catalog:",
+    "@aws-sdk/client-lambda": "catalog:",
+    "@aws-sdk/client-resource-groups-tagging-api": "catalog:",
+    "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/client-sesv2": "catalog:",
+    "@aws-sdk/client-sqs": "catalog:",
+    "@aws-sdk/client-ssm": "catalog:",
+    "@aws-sdk/util-dynamodb": "catalog:",
+    "@effect/cli": "^0.73.1",
+    "@effect/platform": "^0.94.2",
+    "@effect/platform-node": "^0.104.1",
+    "archiver": "^7.0.1",
+    "effect": "^3.19.16",
+    "effortless-aws": "workspace:*",
+    "esbuild": "^0.25.0",
+    "glob": "^13.0.0",
+    "ts-morph": "^27.0.2"
+  },
+  "devDependencies": {
+    "@effect-ak/aws-sdk": "1.0.0-rc.3",
+    "@types/adm-zip": "^0.5.7",
+    "@types/archiver": "^7.0.0",
+    "@types/glob": "^9.0.0",
+    "@types/node": "catalog:",
+    "adm-zip": "^0.5.16",
+    "tsup": "catalog:",
+    "type-fest": "catalog:",
+    "typescript": "catalog:",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.0.18"
+  }
+}

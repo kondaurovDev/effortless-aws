@@ -132,17 +132,16 @@ Each tab adds a layer — every export creates real AWS infrastructure.
     ```
   </TabItem>
   <TabItem label="4. Serve the frontend">
-    Point to a build directory — the frontend is served on the same domain as your API. SPA routing, content-type detection, caching headers included.
+    Deploy an SSR framework with CloudFront CDN — static assets from S3, server-side rendering from Lambda Function URL.
 
     ```typescript
     // src/app.ts
     import { defineApp } from "effortless-aws";
 
     export const frontend = defineApp({
-      dir: "dist",
-      path: "/",
-      spa: true,
-      build: "npm run build",
+      server: ".output/server",
+      assets: ".output/public",
+      build: "nuxt build",
     });
     ```
   </TabItem>
@@ -156,7 +155,7 @@ $ npx eff deploy
 Deployed 3 handler(s) in 8s:
   [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-dev-todos
   [http]  addTodo  https://abc123.execute-api.eu-west-1.amazonaws.com/todos
-  [app]   frontend https://abc123.execute-api.eu-west-1.amazonaws.com/
+  [app]   frontend https://d1234567890.cloudfront.net
 ```
 
 Need a separate environment? Add `--stage`:

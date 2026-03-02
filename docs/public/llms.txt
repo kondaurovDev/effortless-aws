@@ -1,0 +1,543 @@
+# Effortless AWS
+
+> Code-first AWS Lambda framework for TypeScript. Export handlers, deploy with one command.
+
+Effortless AWS is a TypeScript framework where you define AWS resources (Lambda, DynamoDB, SQS, S3, SES, CloudFront) by exporting handler objects from `.ts` files. The framework handles all infrastructure — IAM roles, API Gateway routes, event source mappings, Lambda layers — automatically. No YAML, no CloudFormation, no state files.
+
+- Package: `effortless-aws` (npm)
+- CLI: `npx eff deploy`
+- Docs: https://effortless-aws.website
+
+## Project setup
+
+```typescript
+// effortless.config.ts
+import { defineConfig } from "effortless-aws";
+
+export default defineConfig({
+  name: "my-service",       // prefix for all AWS resources
+  region: "eu-central-1",
+  handlers: ["src/**/*.ts"], // glob patterns to discover handlers
+  stage: "dev",              // default stage, override with --stage
+  defaults: {
+    memory: 256,             // MB (128–10240)
+    timeout: "30 seconds",   // human-readable
+    runtime: "nodejs24.x",
+  },
+});
+```
+
+All Lambdas run on ARM64 (Graviton2). Not configurable.
+
+## Core concepts
+
+### Handler = exported const
+
+Every `export const x = define*({...})` creates AWS resources. The export name becomes the resource name.
+
+### deps = automatic IAM wiring
+
+Reference other handlers via `deps: { orders, uploads, mailer }`. The framework injects typed clients and creates IAM permissions automatically.
+
+### config = SSM secrets
+
+`config: { key: param("ssm/path") }` fetches secrets from SSM Parameter Store at cold start, caches them. SSM path: `/${project}/${stage}/${key}`.
+
+### setup = cold-start factory
+
+`setup: async ({ deps, config }) => ({ db: createPool(config.dbUrl) })` runs once per cold start. Return value is available as `ctx` in callbacks.
+
+### schema = validation
+
+Pass an Effect Schema or `typed<T>()` for type-only. Validated data arrives as `data` arg in callbacks.
+
+### static = bundled files
+
+`static: ["src/templates/*.ejs"]` bundles files into Lambda ZIP. Access via `files.read("src/templates/invoice.ejs")`.
+
+## Handler types
+
+### defineHttp — REST API endpoint
+
+Creates API Gateway route + Lambda.
+
+```typescript
+import { defineHttp, param } from "effortless-aws";
+import { Schema } from "effect";
+
+export const createUser = defineHttp({
+  // Required
+  method: "POST",                    // GET | POST | PUT | DELETE | PATCH | ANY
+  path: "/users",                    // supports {param} placeholders
+
+  // Callback (required)
+  onRequest: async ({ req, data, deps, config, ctx, files }) => {
+    return {
+      status: 201,
+      body: { id: "123" },           // auto-serialized to JSON
+      headers: { "x-custom": "val" },
+      contentType: "json",           // json | html | text | css | js | xml | csv | svg
+    };
+  },
+
+  // Optional
+  schema: Schema.Struct({ email: Schema.String, name: Schema.String }),
+  deps: { users, uploads },
+  config: { stripeKey: param("stripe/secret-key") },
+  setup: async ({ deps, config }) => ({ stripe: new Stripe(config.stripeKey) }),
+  static: ["src/templates/*.html"],
+  memory: 512,
+  timeout: 60,                       // seconds (handler-level)
+  permissions: ["s3:GetObject"],     // extra IAM on top of auto-managed
+  logLevel: "debug",                 // "error" | "info" (default) | "debug"
+  onError: (error, req) => ({       // custom error response
+    status: 500,
+    body: { error: "Something went wrong" },
+  }),
+});
+```
+
+**`req` object:**
+- `req.method` — HTTP method
+- `req.path` — request path
+- `req.headers` — `Record<string, string | undefined>`
+- `req.query` — query string parameters
+- `req.params` — path parameters from `{param}` placeholders
+- `req.body` — parsed body (JSON auto-parsed)
+- `req.rawBody` — raw string body
+
+### defineApi — CQRS-style API
+
+Creates API Gateway route + single Lambda with GET routing and POST command handling. Deploys as a fat Lambda with a catch-all `{proxy+}` route — routing is done inside the function.
+
+Use `defineApi` when you need multiple routes under a shared base path with shared deps/config/setup. For single-method endpoints, use `defineHttp` instead.
+
+```typescript
+import { defineApi, defineTable, typed, param } from "effortless-aws";
+import { Schema } from "effect";
+
+type User = { tag: string; name: string; email: string };
+
+export const users = defineTable({ schema: typed<User>() });
+
+// Discriminated union for POST commands
+const Action = Schema.Union(
+  Schema.Struct({ action: Schema.Literal("create"), name: Schema.String, email: Schema.String }),
+  Schema.Struct({ action: Schema.Literal("delete"), id: Schema.String }),
+);
+
+export default defineApi({
+  basePath: "/api",                          // all routes prefixed with /api
+  deps: { users },
+  config: { dbUrl: param("database-url") },
+  setup: async ({ deps, config }) => ({ pool: createPool(config.dbUrl) }),
+
+  // GET routes — queries (path-based routing, no body)
+  get: {
+    "/users": async ({ req, deps }) => ({
+      status: 200,
+      body: await deps.users.queryByTag({ tag: "user" }),
+    }),
+    "/users/{id}": async ({ req, deps }) => ({
+      status: 200,
+      body: await deps.users.get({ pk: `USER#${req.params.id}`, sk: "PROFILE" }),
+    }),
+  },
+
+  // POST — commands (single handler, discriminated union)
+  schema: Schema.decodeUnknownSync(Action),
+  post: async ({ data, deps }) => {
+    switch (data.action) {
+      case "create": {
+        const id = crypto.randomUUID();
+        await deps.users.put({ pk: `USER#${id}`, sk: "PROFILE", data: { tag: "user", ...data } });
+        return { status: 201, body: { id } };
+      }
+      case "delete": {
+        await deps.users.delete({ pk: `USER#${data.id}`, sk: "PROFILE" });
+        return { status: 200, body: { ok: true } };
+      }
+    }
+  },
+});
+```
+
+**Key differences from `defineHttp`:**
+- `basePath` instead of `method` + `path` — single Lambda handles all routes
+- `get` — record of `{ path: handler }` for query routes with `{param}` extraction
+- `schema` + `post` — single POST handler with discriminated union for commands
+- Both `get` and `post` are optional (you can use just one)
+- Shared `deps`, `config`, `setup`, `static`, `onError` across all routes
+- Unmatched routes get a 404 automatically
+
+### defineTable — DynamoDB table
+
+Creates a DynamoDB table. Optionally creates a stream Lambda if `onRecord`/`onBatch` is provided.
+
+**Single-table design with fixed envelope:**
+
+| Attribute | Type   | Purpose                           |
+|-----------|--------|-----------------------------------|
+| `pk`      | String | Partition key                     |
+| `sk`      | String | Sort key                          |
+| `tag`     | String | Entity type (auto-extracted from data) |
+| `data`    | Map    | Your domain data (`T`)            |
+| `ttl`     | Number | Optional TTL timestamp            |
+
+```typescript
+import { defineTable, typed } from "effortless-aws";
+
+type Order = { tag: string; amount: number; status: string };
+
+// Resource-only (no Lambda, just a table)
+export const orders = defineTable({
+  schema: typed<Order>(),
+});
+
+// With stream handler
+export const orders = defineTable({
+  schema: typed<Order>(),
+  tagField: "tag",           // default; change to "type" or "kind" if needed
+
+  // Per-record processing (partial batch failures built in)
+  onRecord: async ({ record, deps, config, ctx }) => {
+    // record.eventName: "INSERT" | "MODIFY" | "REMOVE"
+    // record.new?.data — new item data (typed as Order)
+    // record.old?.data — previous item data
+    // record.keys — { pk, sk }
+  },
+
+  // OR batch processing
+  onBatch: async ({ records }) => { /* all records at once */ },
+
+  // OR record + summary
+  onRecord: async ({ record }) => { return { amount: record.new!.data.amount }; },
+  onBatchComplete: async ({ results, failures }) => { /* aggregate */ },
+
+  batchSize: 100,            // 1-10000, default varies
+  deps: { notifications },
+  config: { webhookUrl: param("webhook/url") },
+  setup: async ({ deps, config }) => ({ /* cold-start init */ }),
+  memory: 256,
+  timeout: 30,
+  logLevel: "info",
+});
+```
+
+**TableClient API** (available via `deps`):
+
+```typescript
+// Put
+await table.put({ pk: "USER#alice", sk: "PROFILE", data: { tag: "user", name: "Alice" } });
+await table.put({ pk: "...", sk: "...", data: {...}, ttl: unixTimestamp }, { ifNotExists: true });
+
+// Get
+const item = await table.get({ pk: "USER#alice", sk: "PROFILE" });
+// item.data.name → typed
+
+// Delete
+await table.delete({ pk: "USER#alice", sk: "PROFILE" });
+
+// Query
+const items = await table.query({ pk: "USER#alice", sk: { begins_with: "ORDER#" } });
+const items = await table.query({
+  pk: "USER#alice",
+  sk: { begins_with: "ORDER#" },
+  limit: 10,
+  scanIndexForward: false,   // newest first
+});
+
+// Query by tag (GSI)
+const users = await table.queryByTag({ tag: "user", limit: 50 });
+
+// Update (auto-prefixes data. in DynamoDB expression)
+await table.update({ pk: "USER#alice", sk: "ORDER#001" }, {
+  set: { status: "shipped" },
+  append: { events: ["shipped"] },
+  remove: ["tempNotes"],
+  tag: "shipped-order",
+  ttl: unixTimestamp,        // or null to remove
+});
+```
+
+### defineFifoQueue — SQS FIFO queue
+
+Creates SQS FIFO queue + Lambda consumer.
+
+```typescript
+import { defineFifoQueue, typed } from "effortless-aws";
+
+type OrderEvent = { orderId: string; action: "created" | "shipped" };
+
+export const orderQueue = defineFifoQueue({
+  schema: typed<OrderEvent>(),
+
+  // Per-message (partial batch failures built in)
+  onMessage: async ({ message, deps, config, ctx }) => {
+    // message.body — typed as OrderEvent
+    // message.messageId, message.messageGroupId, message.rawBody
+  },
+
+  // OR batch processing
+  onBatch: async ({ messages }) => { /* all messages at once */ },
+
+  batchSize: 10,              // 1-10, default: 10
+  batchWindow: 10,            // seconds to wait, 0-300
+  visibilityTimeout: 120,     // seconds before retry
+  retentionPeriod: 86400,     // message retention in seconds
+  contentBasedDeduplication: true,
+  deps: { orders },
+  config: { apiKey: param("api-key") },
+  memory: 256,
+  timeout: 30,
+  logLevel: "info",
+});
+```
+
+**Sending messages** (from another handler via `deps`):
+
+```typescript
+export const createOrder = defineHttp({
+  deps: { orderQueue },
+  onRequest: async ({ deps }) => {
+    await deps.orderQueue.send({
+      body: { orderId: "123", action: "created" },
+      messageGroupId: "order-123",
+    });
+    return { status: 200, body: { ok: true } };
+  },
+});
+```
+
+### defineBucket — S3 bucket
+
+Creates an S3 bucket. Optionally creates event Lambda.
+
+```typescript
+import { defineBucket } from "effortless-aws";
+
+// Resource-only
+export const uploads = defineBucket({});
+
+// With event handlers
+export const images = defineBucket({
+  prefix: "uploads/",       // filter by key prefix
+  suffix: ".jpg",            // filter by key suffix
+
+  onObjectCreated: async ({ event, bucket, deps }) => {
+    // event.key, event.size, event.eventName, event.eTag, event.eventTime
+    // bucket — BucketClient for this bucket
+    const file = await bucket.get(event.key);
+  },
+
+  onObjectRemoved: async ({ event }) => {
+    await removeFromIndex(event.key);
+  },
+
+  deps: { records },
+  config: { apiKey: param("api-key") },
+  memory: 256,
+  timeout: 30,
+});
+```
+
+**BucketClient API** (available via `deps`):
+
+```typescript
+await bucket.put("path/file.csv", content);
+await bucket.put("path/photo.jpg", buffer, { contentType: "image/jpeg" });
+const file = await bucket.get("path/file.csv");  // { body: Buffer, contentType?: string } | undefined
+await bucket.delete("path/file.csv");
+const files = await bucket.list("prefix/");       // [{ key, size, lastModified }]
+```
+
+### defineMailer — SES email
+
+Creates SES email identity with DKIM. Resource-only, used via `deps`.
+
+```typescript
+import { defineMailer } from "effortless-aws";
+
+export const mailer = defineMailer({ domain: "myapp.com" });
+```
+
+**EmailClient API** (available via `deps`):
+
+```typescript
+await deps.mailer.send({
+  from: "hello@myapp.com",
+  to: "user@example.com",           // or ["a@b.com", "c@d.com"]
+  subject: "Welcome!",
+  html: "<h1>Welcome!</h1>",        // at least one of html/text required
+  text: "Welcome!",
+});
+```
+
+### defineApp — SSR framework deployment
+
+Creates CloudFront + Lambda Function URL + S3 for SSR frameworks (Nuxt, Next.js via OpenNext).
+
+```typescript
+import { defineApp } from "effortless-aws";
+
+export const frontend = defineApp({
+  server: ".output/server",   // directory with index.mjs Lambda handler
+  assets: ".output/public",   // static assets → S3
+  build: "nuxt build",        // build command (runs before deploy)
+  domain: "app.example.com",  // optional custom domain (needs ACM cert in us-east-1)
+  memory: 1024,
+});
+
+// Stage-specific domains
+export const app = defineApp({
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
+  domain: {
+    prod: "app.example.com",
+    staging: "staging.example.com",
+  },
+});
+```
+
+**Supported frameworks:**
+- Nuxt (native, set `NITRO_PRESET=aws-lambda`)
+- Next.js (via OpenNext: `server: ".open-next/server-function"`, `assets: ".open-next/assets"`, `build: "npx open-next build"`)
+- Any Nitro-based framework (Analog, Vinxi)
+- Custom handler (export `handler(event, context)` from `index.mjs`)
+
+### defineStaticSite — static site / SPA on CloudFront
+
+Creates S3 + CloudFront distribution.
+
+```typescript
+import { defineStaticSite } from "effortless-aws";
+
+export const docs = defineStaticSite({
+  dir: "dist",                // directory with built static files
+  build: "npm run build",     // build command
+  domain: "docs.example.com", // optional custom domain
+  spa: true,                  // SPA mode: all routes → index.html
+  errorPage: "404.html",      // custom error page (non-SPA only)
+
+  // API proxying (eliminates CORS)
+  routes: {
+    "/api/*": apiHandler,     // proxy to API Gateway
+  },
+
+  // Edge authentication (Lambda@Edge)
+  middleware: async (request) => {
+    // request: { uri, method, querystring, headers, cookies }
+    if (!request.cookies.session) {
+      return { redirect: "https://example.com/login" };
+    }
+    // return nothing → serve the page
+    // return { status: 403, body: "Denied" } → block
+  },
+});
+```
+
+## CLI commands
+
+```bash
+npx eff deploy                         # deploy all handlers
+npx eff deploy ./src/api.ts            # deploy specific file
+npx eff deploy createUser              # deploy specific handler
+npx eff deploy --stage prod            # deploy to production
+
+npx eff status                         # compare code vs deployed resources
+npx eff logs processOrder --tail       # stream CloudWatch logs
+npx eff logs processOrder --since 1h   # logs from last hour
+
+npx eff config                         # interactive SSM parameter setup
+npx eff config list                    # show all params and status
+npx eff config set stripe/secret-key   # set specific parameter
+
+npx eff cleanup                        # preview orphaned resources
+npx eff cleanup --handler oldHandler --all  # delete specific handler
+npx eff cleanup --all                  # delete all resources
+npx eff cleanup --layer --all          # clean up layer versions
+npx eff cleanup --roles --all          # clean up orphaned IAM roles
+
+npx eff layer                          # show dependency layer info
+npx eff layer --build                  # build layer locally
+```
+
+All commands accept `--project`, `--stage`, `--region`, `--verbose`.
+
+## Key patterns and conventions
+
+### Naming
+
+All AWS resources follow `${project}-${stage}-${handlerName}`:
+- Lambda: `my-service-dev-createUser`
+- DynamoDB: `my-service-dev-orders`
+- SQS FIFO: `my-service-dev-orderQueue.fifo`
+- API Gateway: `my-service-dev` (shared per project+stage)
+
+### Stage isolation
+
+Each stage gets fully independent resources. No shared infrastructure between `dev` and `prod`.
+
+### No state files
+
+Resources are discovered via AWS resource tags (not CloudFormation/Terraform state). Tags: `effortless-project`, `effortless-stage`, `effortless-handler`, `effortless-component`.
+
+### Lambda layer
+
+Production `dependencies` from `package.json` are bundled into a shared Lambda Layer. AWS SDK v3 packages are excluded (provided by Lambda runtime). Layer is hash-versioned — only re-uploaded when deps change.
+
+### Type inference
+
+All generics are inferred automatically. Never specify generics manually:
+
+```typescript
+export const orders = defineTable({
+  schema: typed<Order>(),                       // T = Order
+  deps: { users },                              // D inferred
+  config: { threshold: param("threshold", Number) }, // P inferred, Number transform applied
+  setup: async ({ config }) => ({               // C = return type
+    db: createPool(config.threshold),
+  }),
+  onRecord: async ({ record, ctx, deps, config }) => {
+    // record.new?.data is Order
+    // ctx is { db: Pool }
+    // deps.users is TableClient<User>
+    // config.threshold is number
+  },
+});
+```
+
+### Callback args
+
+Handler callbacks receive a single object with relevant args. Args are conditionally present based on configuration:
+- `req` — HTTP request (defineHttp)
+- `data` — validated body (when schema is set)
+- `deps` — typed dep clients (when deps is set)
+- `config` — resolved SSM values (when config is set)
+- `ctx` — setup return value (when setup is set)
+- `files` — static file reader (when static is set)
+- `record` / `records` / `message` / `messages` — event data (type-specific)
+- `event` / `bucket` — S3 event data (defineBucket)
+
+### param() with transforms
+
+```typescript
+config: {
+  apiKey: param("api-key"),                    // string
+  port: param("port", Number),                 // number (transform applied)
+  config: param("app-config", JSON.parse),     // parsed JSON
+}
+```
+
+### typed() helper
+
+Type-only schema (no runtime validation):
+```typescript
+schema: typed<MyType>()
+```
+
+Runtime validation with Effect Schema:
+```typescript
+schema: Schema.decodeUnknownSync(MySchema)
+```

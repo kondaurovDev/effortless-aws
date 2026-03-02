@@ -1,0 +1,53 @@
+{
+  "name": "effortless-aws",
+  "version": "0.16.2",
+  "license": "MIT",
+  "type": "module",
+  "description": "Code-first AWS Lambda framework. Export handlers, deploy with one command.",
+  "homepage": "https://effortless-aws.website",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kondaurovDev/effortless-aws.git",
+    "directory": "packages/effortless-aws"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "aws",
+    "lambda",
+    "serverless",
+    "framework",
+    "typescript",
+    "dynamodb",
+    "api-gateway",
+    "sqs",
+    "infrastructure-from-code"
+  ],
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime/*": {
+      "default": "./dist/runtime/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "catalog:",
+    "@aws-sdk/client-s3": "catalog:",
+    "@aws-sdk/client-sesv2": "catalog:",
+    "@aws-sdk/client-ssm": "catalog:",
+    "@aws-sdk/util-dynamodb": "catalog:",
+    "@types/aws-lambda": "^8.10.144",
+    "@types/node": "catalog:",
+    "type-fest": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:"
+  }
+}

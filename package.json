@@ -1,87 +1,12 @@
 {
-  "name": "effortless-aws",
-  "version": "0.16.2",
-  "license": "MIT",
-  "type": "module",
-  "description": "Code-first AWS Lambda framework. Export handlers, deploy with one command.",
-  "homepage": "https://effortless-aws.website",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/kondaurovDev/effortless-aws.git"
-  },
-  "files": [
-    "dist"
-  ],
-  "keywords": [
-    "aws",
-    "lambda",
-    "serverless",
-    "framework",
-    "typescript",
-    "dynamodb",
-    "api-gateway",
-    "sqs",
-    "infrastructure-from-code",
-    "deploy",
-    "effect"
-  ],
-  "bin": {
-    "eff": "./dist/cli/index.js",
-    "effortless": "./dist/cli/index.js"
-  },
+  "private": true,
   "scripts": {
-    "gen": "gen-aws-sdk",
-    "prebuild": "pnpm run gen",
-    "build": "tsup",
-    "typecheck": "tsc --noEmit",
-    "pretest": "tsup",
-    "test": "vitest run",
-    "link": "pnpm build && pnpm link --global"
-  },
-  "exports": {
-    "./package.json": "./package.json",
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
-  "dependencies": {
-    "@aws-sdk/client-acm": "^3.993.0",
-    "@aws-sdk/client-apigatewayv2": "^3.975.0",
-    "@aws-sdk/client-cloudfront": "^3.989.0",
-    "@aws-sdk/client-cloudwatch-logs": "^3.990.0",
-    "@aws-sdk/client-dynamodb": "^3.975.0",
-    "@aws-sdk/client-iam": "^3.975.0",
-    "@aws-sdk/client-lambda": "^3.975.0",
-    "@aws-sdk/client-resource-groups-tagging-api": "^3.975.0",
-    "@aws-sdk/client-s3": "^3.989.0",
-    "@aws-sdk/client-sesv2": "^3.994.0",
-    "@aws-sdk/client-sqs": "^3.989.0",
-    "@aws-sdk/client-ssm": "^3.985.0",
-    "@aws-sdk/util-dynamodb": "^3.975.0",
-    "archiver": "^7.0.1",
-    "esbuild": "^0.25.0",
-    "glob": "^13.0.0",
-    "ts-morph": "^27.0.2"
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
   },
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.2",
-    "@changesets/cli": "^2.29.8",
-    "@effect-ak/aws-sdk": "1.0.0-rc.3",
-    "@effect/cli": "^0.73.1",
-    "@effect/platform": "^0.94.2",
-    "@effect/platform-node": "^0.104.1",
-    "@types/adm-zip": "^0.5.7",
-    "@types/archiver": "^7.0.0",
-    "@types/aws-lambda": "^8.10.144",
-    "@types/glob": "^9.0.0",
-    "@types/node": "^22.19.9",
-    "adm-zip": "^0.5.16",
-    "effect": "^3.19.16",
-    "tsup": "^8.5.1",
-    "type-fest": "^4.22.1",
-    "typescript": "^5.9.3",
-    "vite-tsconfig-paths": "^6.0.5",
-    "vitest": "^4.0.18"
+    "@changesets/cli": "^2.29.8"
   }
 }

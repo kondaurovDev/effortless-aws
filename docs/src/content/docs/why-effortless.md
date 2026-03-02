@@ -187,22 +187,22 @@ export const analytics = defineTable({
 
 The stream, event source mapping, batch size config, and partial failure reporting are all handled automatically.
 
-### Static site / SPA behind API Gateway
+### SSR framework deployment
 
-Serve a React/Vue/Astro app alongside your API — same project, same deploy.
+Deploy Nuxt, Astro SSR, or any framework with server-side rendering — CloudFront CDN with Lambda Function URL for SSR and S3 for static assets.
 
 ```typescript
 import { defineApp, defineHttp } from "effortless-aws";
 
-// Static site served via Lambda
+// SSR app via CloudFront + Lambda Function URL
 export const app = defineApp({
-  path: "/",
-  dir: "dist",
-  build: "npm run build",
-  spa: true,  // all routes → index.html
+  server: ".output/server",
+  assets: ".output/public",
+  build: "nuxt build",
+  domain: "app.example.com",
 });
 
-// API endpoints alongside the site
+// API endpoints in the same project
 export const getItems = defineHttp({
   method: "GET",
   path: "/api/items",
@@ -212,12 +212,12 @@ export const getItems = defineHttp({
 });
 ```
 
-Or use CloudFront + S3 for global CDN distribution:
+Or for static sites, use CloudFront + S3:
 
 ```typescript
-import { defineCdn } from "effortless-aws";
+import { defineStaticSite } from "effortless-aws";
 
-export const site = defineCdn({
+export const site = defineStaticSite({
   dir: "dist",
   build: "npm run build",
   spa: true,

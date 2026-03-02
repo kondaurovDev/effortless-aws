@@ -158,7 +158,7 @@ Effortless auto-manages permissions for built-in features. You only need `permis
 
 ### `logLevel`
 
-Controls the verbosity of structured logs emitted to CloudWatch. Defaults to `"info"` for `defineHttp`, `defineTable`, and `defineFifoQueue`, and `"error"` for `defineApp`.
+Controls the verbosity of structured logs emitted to CloudWatch. Defaults to `"info"` for `defineHttp`, `defineTable`, and `defineFifoQueue`.
 
 | Level | What gets logged |
 |-------|-----------------|
