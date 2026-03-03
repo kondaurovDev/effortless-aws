@@ -1,5 +1,11 @@
 # @effortless-aws/cli
 
+## 0.2.2
+
+### Patch Changes
+
+- [`f82734a`](https://github.com/kondaurovDev/effortless-aws/commit/f82734a3afa4bd68ad1e260ee0403cb8de65d5bc) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - fix: switch Lambda Function URL to AuthType NONE to fix POST requests through CloudFront OAC
+
 ## 0.2.1
 
 ### Patch Changes
