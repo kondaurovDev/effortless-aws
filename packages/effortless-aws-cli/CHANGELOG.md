@@ -1,5 +1,11 @@
 # @effortless-aws/cli
 
+## 0.2.3
+
+### Patch Changes
+
+- [`0a0c4e7`](https://github.com/kondaurovDev/effortless-aws/commit/0a0c4e7fb362fb1c9f288b618e6949633c532108) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - fix: exclude AWS runtime packages (@aws-sdk/_, @smithy/_, @aws-crypto/_, @aws/_) from Lambda layer and lockfile hash
+
 ## 0.2.2
 
 ### Patch Changes
