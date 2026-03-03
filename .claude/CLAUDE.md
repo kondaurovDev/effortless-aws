@@ -7,6 +7,9 @@ Write all code, comments, commit messages, and documentation in English.
 
 ## Releases
 - Release packages via changesets: add a `.changeset/<name>.md` file with the bump type and description.
+- Package names for changesets (must match `package.json#name` exactly):
+  - `effortless-aws` — `packages/effortless-aws` (runtime library)
+  - `@effortless-aws/cli` — `packages/effortless-aws-cli` (CLI tool)
 - Do NOT edit `package.json` version directly.
 - Publishing is handled by GitHub Actions — never run `changeset version` or `changeset publish` locally. Just push to main.
 
