@@ -12,6 +12,21 @@ const ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2
 // AWS managed SecurityHeadersPolicy (X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy)
 const SECURITY_HEADERS_POLICY_ID = "67f7725c-6f97-4210-82d7-5512b31e9d03";
 
+/**
+ * Expand route patterns so `/prefix/*` also covers the bare `/prefix` path.
+ * CloudFront `/prefix/*` only matches `/prefix/...`, not `/prefix` itself.
+ */
+const expandRoutePatterns = (patterns: string[]): string[] => {
+  const expanded = new Set<string>();
+  for (const p of patterns) {
+    expanded.add(p);
+    if (p.endsWith("/*")) {
+      expanded.add(p.slice(0, -2));
+    }
+  }
+  return [...expanded];
+};
+
 export type EnsureOACInput = {
   name: string;
   originType?: "s3" | "lambda";
@@ -206,7 +221,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
     const s3OriginDomain = `${bucketName}.s3.${bucketRegion}.amazonaws.com`;
 
     // Build origins array: S3 + optional API Gateway
-    const hasApiRoutes = apiOriginDomain && routePatterns && routePatterns.length > 0;
+    const expandedRoutePatterns = routePatterns ? expandRoutePatterns(routePatterns) : undefined;
+    const hasApiRoutes = apiOriginDomain && expandedRoutePatterns && expandedRoutePatterns.length > 0;
     const apiOriginId = hasApiRoutes ? `API-${project}-${stage}` : undefined;
 
     const originsItems = [
@@ -242,8 +258,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
 
     const cacheBehaviors = hasApiRoutes
       ? {
-          Quantity: routePatterns.length,
-          Items: routePatterns.map(pattern => ({
+          Quantity: expandedRoutePatterns.length,
+          Items: expandedRoutePatterns.map(pattern => ({
             PathPattern: pattern,
             TargetOriginId: apiOriginId!,
             ViewerProtocolPolicy: "redirect-to-https" as const,
@@ -329,7 +345,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
       // Check origins count and cache behaviors
       const originsMatch = (currentConfig.Origins?.Quantity ?? 0) === originsItems.length;
       const currentBehaviorPatterns = (currentConfig.CacheBehaviors?.Items ?? []).map(b => b.PathPattern).sort();
-      const desiredBehaviorPatterns = (routePatterns ?? []).slice().sort();
+      const desiredBehaviorPatterns = (expandedRoutePatterns ?? []).slice().sort();
       const behaviorsMatch =
         currentBehaviorPatterns.length === desiredBehaviorPatterns.length &&
         desiredBehaviorPatterns.every((p, i) => currentBehaviorPatterns[i] === p);
@@ -526,7 +542,8 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
     const CACHED_METHODS = ["GET", "HEAD"] as const;
 
     // Origins: Lambda Function URL (default) + S3 (static assets) + optional API Gateway
-    const hasApiRoutes = apiOriginDomain && routePatterns && routePatterns.length > 0;
+    const expandedRoutePatterns = routePatterns ? expandRoutePatterns(routePatterns) : undefined;
+    const hasApiRoutes = apiOriginDomain && expandedRoutePatterns && expandedRoutePatterns.length > 0;
     const apiOriginId = hasApiRoutes ? `API-${project}-${stage}` : undefined;
 
     const originsItems = [
@@ -592,7 +609,7 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
 
     // Cache behaviors: API routes (no cache) → asset patterns (cached) → default (SSR)
     const apiRouteBehaviors = hasApiRoutes
-      ? routePatterns.map(pattern => ({
+      ? expandedRoutePatterns.map(pattern => ({
           PathPattern: pattern,
           TargetOriginId: apiOriginId!,
           ViewerProtocolPolicy: "redirect-to-https" as const,
