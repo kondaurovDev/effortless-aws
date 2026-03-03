@@ -11,7 +11,7 @@ import {
   ensureRole,
   ensureLambda,
   ensureFunctionUrl,
-  addCloudFrontPermission,
+  addFunctionUrlPublicAccess,
   ensureBucket,
   syncFiles,
   putBucketPolicyForOAC,
@@ -134,10 +134,6 @@ export const deployApp = (input: DeployAppInput) =>
     const s3OacName = `${project}-${stage}-oac`;
     const { oacId: s3OacId } = yield* ensureOAC({ name: s3OacName, originType: "s3" });
 
-    // 8. Ensure Lambda OAC
-    const lambdaOacName = `${project}-${stage}-lambda-oac`;
-    const { oacId: lambdaOacId } = yield* ensureOAC({ name: lambdaOacName, originType: "lambda" });
-
     // 9. Detect asset patterns from the assets directory
     const assetsDir = path.resolve(projectDir, config.assets);
     const assetPatterns = detectAssetPatterns(assetsDir);
@@ -165,7 +161,6 @@ export const deployApp = (input: DeployAppInput) =>
       bucketRegion: region,
       s3OacId,
       lambdaOriginDomain,
-      lambdaOacId,
       assetPatterns,
       tags: makeTags(tagCtx, "cloudfront-distribution"),
       aliases,
@@ -175,8 +170,8 @@ export const deployApp = (input: DeployAppInput) =>
         : {}),
     });
 
-    // 12. Add CloudFront → Lambda permission
-    yield* addCloudFrontPermission(lambdaName, distributionArn);
+    // 12. Allow public access to Function URL
+    yield* addFunctionUrlPublicAccess(lambdaName);
 
     // 13. Set S3 bucket policy for OAC
     yield* putBucketPolicyForOAC(bucketName, distributionArn);

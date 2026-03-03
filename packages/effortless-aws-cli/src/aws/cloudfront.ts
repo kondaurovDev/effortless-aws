@@ -505,8 +505,6 @@ export type EnsureSsrDistributionInput = {
   s3OacId: string;
   /** Lambda Function URL domain (e.g. "abc123.lambda-url.eu-west-1.on.aws") */
   lambdaOriginDomain: string;
-  /** OAC ID for Lambda origin */
-  lambdaOacId: string;
   /** CloudFront path patterns for S3 static assets (e.g. ["/_nuxt/*", "/favicon.ico"]) */
   assetPatterns: string[];
   tags: Record<string, string>;
@@ -520,7 +518,7 @@ export type EnsureSsrDistributionInput = {
 
 export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
   Effect.gen(function* () {
-    const { project, stage, handlerName, bucketName, bucketRegion, s3OacId, lambdaOriginDomain, lambdaOacId, assetPatterns, tags, aliases, acmCertificateArn, apiOriginDomain, routePatterns } = input;
+    const { project, stage, handlerName, bucketName, bucketRegion, s3OacId, lambdaOriginDomain, assetPatterns, tags, aliases, acmCertificateArn, apiOriginDomain, routePatterns } = input;
 
     const comment = makeDistComment(project, stage, handlerName);
     const lambdaOriginId = `Lambda-${project}-${stage}-${handlerName}`;
@@ -551,7 +549,6 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
         Id: lambdaOriginId,
         DomainName: lambdaOriginDomain,
         OriginPath: "",
-        OriginAccessControlId: lambdaOacId,
         CustomOriginConfig: {
           HTTPPort: 80,
           HTTPSPort: 443,

@@ -219,62 +219,40 @@ export const ensureFunctionUrl = (functionName: string) =>
     );
 
     if (existing) {
-      yield* Effect.logDebug(`Function URL already exists: ${existing.FunctionUrl}`);
+      yield* lambda.make("update_function_url_config", {
+        FunctionName: functionName,
+        AuthType: "NONE",
+      });
       return { functionUrl: existing.FunctionUrl! };
     }
 
     yield* Effect.logDebug(`Creating Function URL for: ${functionName}`);
     const result = yield* lambda.make("create_function_url_config", {
       FunctionName: functionName,
-      AuthType: "AWS_IAM",
+      AuthType: "NONE",
       InvokeMode: "BUFFERED",
     });
 
     return { functionUrl: result.FunctionUrl! };
   });
 
-export const addCloudFrontPermission = (functionName: string, distributionArn: string) =>
+export const addFunctionUrlPublicAccess = (functionName: string) =>
   Effect.gen(function* () {
-    // Since Oct 2025, new Function URLs require both InvokeFunctionUrl and InvokeFunction
     const statements = [
-      {
-        statementId: "cloudfront-oac",
-        action: "lambda:InvokeFunctionUrl",
-        authType: "AWS_IAM" as const,
-      },
-      {
-        statementId: "cloudfront-oac-invoke",
-        action: "lambda:InvokeFunction",
-        authType: undefined,
-      },
+      { statementId: "function-url-public", action: "lambda:InvokeFunctionUrl", urlAuthType: "NONE" as const },
+      { statementId: "function-url-invoke", action: "lambda:InvokeFunction", urlAuthType: undefined },
     ];
-
     for (const stmt of statements) {
       yield* lambda.make("add_permission", {
         FunctionName: functionName,
         StatementId: stmt.statementId,
         Action: stmt.action,
-        Principal: "cloudfront.amazonaws.com",
-        SourceArn: distributionArn,
-        ...(stmt.authType ? { FunctionUrlAuthType: stmt.authType } : {}),
+        Principal: "*",
+        ...(stmt.urlAuthType ? { FunctionUrlAuthType: stmt.urlAuthType } : {}),
       }).pipe(
         Effect.catchIf(
           e => e._tag === "LambdaError" && e.is("ResourceConflictException"),
-          () => Effect.gen(function* () {
-            yield* Effect.logDebug(`Permission ${stmt.statementId} exists for ${functionName}, replacing...`);
-            yield* lambda.make("remove_permission", {
-              FunctionName: functionName,
-              StatementId: stmt.statementId,
-            });
-            yield* lambda.make("add_permission", {
-              FunctionName: functionName,
-              StatementId: stmt.statementId,
-              Action: stmt.action,
-              Principal: "cloudfront.amazonaws.com",
-              SourceArn: distributionArn,
-              ...(stmt.authType ? { FunctionUrlAuthType: stmt.authType } : {}),
-            });
-          })
+          () => Effect.logDebug(`Permission ${stmt.statementId} already exists for ${functionName}`)
         )
       );
     }
