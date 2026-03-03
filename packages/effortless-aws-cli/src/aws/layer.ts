@@ -134,6 +134,22 @@ const DEV_ONLY_PREFIXES = [
 ];
 
 /**
+ * Recursively extract all string values from a package.json `exports` field.
+ * Handles: string shorthand, object condition maps, and nested subpath maps.
+ */
+const extractExportPaths = (value: unknown): string[] => {
+  if (typeof value === "string") return [value];
+  if (typeof value === "object" && value !== null) {
+    return Object.values(value).flatMap(extractExportPaths);
+  }
+  return [];
+};
+
+/** Returns true for `.ts`/`.tsx`/`.mts`/`.cts` paths that are NOT declaration files */
+const isRawTypeScript = (p: string) =>
+  /\.(?:ts|tsx|mts|cts)$/.test(p) && !p.endsWith(".d.ts") && !p.endsWith(".d.mts") && !p.endsWith(".d.cts");
+
+/**
  * Check for common dependency misplacements in package.json.
  * Returns warnings for dev packages in `dependencies` (bloats layer)
  * and runtime-looking packages in `devDependencies` (missing from layer).
@@ -167,6 +183,35 @@ export const checkDependencyWarnings = (projectDir: string) =>
       warnings.push(
         `"dependencies" is empty but "devDependencies" has ${devDeps.length} package(s). Runtime packages must be in "dependencies" to be included in the Lambda layer.`
       );
+    }
+
+    // Check for TypeScript entry points in production dependencies.
+    // Node.js refuses to strip types from files under node_modules
+    // (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so .ts exports
+    // in the Lambda Layer will crash at runtime.
+    for (const dep of deps) {
+      const depPath = getPackageRealPath(projectDir, dep);
+      if (!depPath) continue;
+
+      const depPkgPath = path.join(depPath, "package.json");
+      if (!fsSync.existsSync(depPkgPath)) continue;
+
+      try {
+        const depPkg = JSON.parse(fsSync.readFileSync(depPkgPath, "utf-8"));
+        const entryPoints: string[] = [];
+        if (typeof depPkg.main === "string") entryPoints.push(depPkg.main);
+        if (typeof depPkg.module === "string") entryPoints.push(depPkg.module);
+        entryPoints.push(...extractExportPaths(depPkg.exports));
+
+        const tsEntries = [...new Set(entryPoints.filter(isRawTypeScript))];
+        if (tsEntries.length > 0) {
+          warnings.push(
+            `Package "${dep}" has TypeScript entry points (${tsEntries.join(", ")}) that will fail at runtime in node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING). Move it to "devDependencies" so esbuild can bundle and transpile it.`
+          );
+        }
+      } catch {
+        // skip unreadable package.json
+      }
     }
 
     return warnings;

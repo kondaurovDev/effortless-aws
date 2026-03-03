@@ -4,7 +4,8 @@ import { Effect, Console, Logger, LogLevel, Option } from "effect";
 import {
   Aws,
   getAllResourcesByTags,
-  groupResourcesByHandler
+  groupResourcesByHandler,
+  checkDependencyWarnings,
 } from "../../aws";
 import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
 import { projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
@@ -346,6 +347,17 @@ export const statusCommand = Command.make(
         if (counts.orphaned > 0) parts.push(c.red(`${counts.orphaned} orphaned`));
 
         yield* Console.log(`\nTotal: ${parts.join(", ")}`);
+
+        // Dependency warnings
+        const depWarnings = yield* checkDependencyWarnings(projectDir).pipe(
+          Effect.catchAll(() => Effect.succeed([] as string[]))
+        );
+        if (depWarnings.length > 0) {
+          yield* Console.log("");
+          for (const w of depWarnings) {
+            yield* Console.log(c.yellow(`  ⚠ ${w}`));
+          }
+        }
       }).pipe(
         Effect.provide(clientsLayer),
         Logger.withMinimumLogLevel(logLevel)

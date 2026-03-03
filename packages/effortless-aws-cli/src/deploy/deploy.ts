@@ -244,6 +244,41 @@ const buildBucketNameMap = (
 };
 
 /**
+ * Validate that all handler deps reference a discovered table, bucket, or mailer.
+ * Returns a list of human-readable error strings (empty = all valid).
+ */
+const validateDeps = (
+  discovered: DiscoveredHandlers,
+  tableNameMap: Map<string, string>,
+  bucketNameMap: Map<string, string>,
+  mailerDomainMap: Map<string, string>,
+): string[] => {
+  const errors: string[] = [];
+  const allGroups = [
+    ...discovered.httpHandlers,
+    ...discovered.apiHandlers,
+    ...discovered.tableHandlers,
+    ...discovered.fifoQueueHandlers,
+    ...discovered.bucketHandlers,
+    ...discovered.staticSiteHandlers,
+    ...discovered.appHandlers,
+    ...discovered.mailerHandlers,
+  ];
+  for (const { exports } of allGroups) {
+    for (const fn of exports) {
+      for (const key of fn.depsKeys) {
+        if (!tableNameMap.has(key) && !bucketNameMap.has(key) && !mailerDomainMap.has(key)) {
+          errors.push(
+            `Handler "${fn.exportName}" depends on "${key}", but no matching table, bucket, or mailer handler was found. Make sure it is exported.`
+          );
+        }
+      }
+    }
+  }
+  return errors;
+};
+
+/**
  * Resolve deps keys to environment variables and IAM permissions.
  * Checks table, bucket, and mailer name maps.
  */
@@ -709,6 +744,16 @@ export const deployProject = (input: DeployProjectInput) =>
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
     const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
     const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
+
+    // Validate deps references before deploying anything
+    const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap);
+    if (depsErrors.length > 0) {
+      yield* Console.log("");
+      for (const err of depsErrors) {
+        yield* Console.log(`  ${c.red("✗")} ${err}`);
+      }
+      return yield* Effect.fail(new Error("Unresolved deps — aborting deploy"));
+    }
 
     // Prepare layer (uses packageDir for package.json/node_modules, falls back to projectDir)
     const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
