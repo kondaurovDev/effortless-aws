@@ -1,5 +1,16 @@
 # @effortless-aws/cli
 
+## 0.3.0
+
+### Minor Changes
+
+- [`1bce89f`](https://github.com/kondaurovDev/effortless-aws/commit/1bce89fa5f7e132cd984579d0c41656fd7d9f1ae) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Remove defineHttp, migrate defineApi to Lambda Function URLs, rewrite documentation
+
+### Patch Changes
+
+- Updated dependencies [[`1bce89f`](https://github.com/kondaurovDev/effortless-aws/commit/1bce89fa5f7e132cd984579d0c41656fd7d9f1ae)]:
+  - effortless-aws@0.19.0
+
 ## 0.2.3
 
 ### Patch Changes

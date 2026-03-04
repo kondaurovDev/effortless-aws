@@ -1,6 +1,6 @@
 {
   "name": "@effortless-aws/cli",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "license": "MIT",
   "type": "module",
   "description": "CLI and deploy tooling for effortless-aws",
