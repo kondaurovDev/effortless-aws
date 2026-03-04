@@ -30,6 +30,15 @@ export type MiddlewareHandler = (
   request: MiddlewareRequest
 ) => Promise<MiddlewareResult> | MiddlewareResult;
 
+/** SEO options for auto-generating sitemap.xml, robots.txt, and submitting to Google Indexing API */
+export type StaticSiteSeo = {
+  /** Sitemap filename (e.g. "sitemap.xml", "sitemap-v2.xml") */
+  sitemap: string;
+  /** Path to Google service account JSON key file for Indexing API batch submission.
+   * Requires adding the service account email as an owner in Google Search Console. */
+  googleIndexing?: string;
+};
+
 /**
  * Configuration for a static site handler (S3 + CloudFront)
  */
@@ -55,6 +64,8 @@ export type StaticSiteConfig = {
   errorPage?: string;
   /** Lambda@Edge middleware that runs before serving pages. Use for auth checks, redirects, etc. */
   middleware?: MiddlewareHandler;
+  /** SEO: auto-generate sitemap.xml and robots.txt at deploy time, optionally submit URLs to Google Indexing API */
+  seo?: StaticSiteSeo;
 };
 
 /**

@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { Architecture } from "@aws-sdk/client-lambda";
 import { execSync } from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import type { ExtractedStaticSiteFunction } from "~/build/bundle";
 import { bundle, zip } from "~/build/bundle";
@@ -22,6 +23,7 @@ import {
   invalidateDistribution,
   findCertificate,
 } from "../aws";
+import { generateSitemap, generateRobots, collectHtmlKeys, keysToUrls, submitToGoogleIndexing } from "./seo";
 
 // ============ Static site deployment ============
 
@@ -44,6 +46,8 @@ export type DeployStaticSiteResult = {
   url: string;
   distributionId: string;
   bucketName: string;
+  seoGenerated?: string[];
+  indexingResult?: { submitted: number; skipped: number; failed: number };
 };
 
 /** Deploy middleware as Lambda@Edge in us-east-1 */
@@ -299,6 +303,35 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     const sourceDir = path.resolve(projectDir, config.dir);
     yield* syncFiles({ bucketName, sourceDir });
 
+    // 8b. Generate and upload SEO files (sitemap.xml, robots.txt)
+    const seo = config.seo;
+    const siteUrl = domain ? `https://${domain}` : `https://${domainName}`;
+
+    const seoGenerated: string[] = [];
+    if (seo) {
+      const sitemapName = seo.sitemap;
+
+      if (!fs.existsSync(path.join(sourceDir, sitemapName))) {
+        const sitemap = generateSitemap(siteUrl, sourceDir);
+        yield* putObject({
+          bucketName,
+          key: sitemapName,
+          body: sitemap,
+          contentType: "application/xml; charset=utf-8",
+        });
+        seoGenerated.push(sitemapName);
+      }
+
+      const robots = generateRobots(siteUrl, sitemapName);
+      yield* putObject({
+        bucketName,
+        key: "robots.txt",
+        body: robots,
+        contentType: "text/plain; charset=utf-8",
+      });
+      seoGenerated.push("robots.txt");
+    }
+
     // 9. Upload generated error page (non-SPA, no custom errorPage)
     if (!isSpa && !config.errorPage) {
       yield* putObject({
@@ -312,14 +345,28 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     // 10. Invalidate CloudFront cache
     yield* invalidateDistribution(distributionId);
 
-    const url = domain ? `https://${domain}` : `https://${domainName}`;
-    yield* Effect.logDebug(`Static site deployed: ${url}`);
+    // 11. Submit pages to Google Indexing API (skips already indexed)
+    let indexingResult: { submitted: number; skipped: number; failed: number } | undefined;
+    if (seo?.googleIndexing) {
+      const allHtmlKeys = collectHtmlKeys(sourceDir);
+      const allPageUrls = keysToUrls(siteUrl, allHtmlKeys);
+      indexingResult = yield* submitToGoogleIndexing({
+        serviceAccountPath: seo.googleIndexing,
+        projectDir,
+        bucketName,
+        allPageUrls,
+      });
+    }
+
+    yield* Effect.logDebug(`Static site deployed: ${siteUrl}`);
 
     return {
       exportName,
       handlerName,
-      url,
+      url: siteUrl,
       distributionId,
       bucketName,
+      seoGenerated: seoGenerated.length > 0 ? seoGenerated : undefined,
+      indexingResult,
     } satisfies DeployStaticSiteResult;
   });

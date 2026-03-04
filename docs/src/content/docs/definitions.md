@@ -672,6 +672,10 @@ export const docs = defineStaticSite({
   errorPage?: string,                // custom 404 page relative to dir (default: auto-generated)
   routes?: { [pattern]: handler },   // path patterns proxied to API Gateway
   middleware?: (request) => ...,     // Lambda@Edge middleware for auth, redirects, etc.
+  seo?: {
+    sitemap: string,                 // sitemap filename (e.g. "sitemap.xml")
+    googleIndexing?: string,         // path to Google service account JSON key
+  },
 });
 ```
 
@@ -818,6 +822,55 @@ export const docs = defineStaticSite({
 
 For SPA sites (`spa: true`), error pages are not used — all paths route to `index.html`.
 
+### SEO — sitemap, robots.txt, Google Indexing
+
+Add `seo` to auto-generate `sitemap.xml` and `robots.txt` at deploy time, and optionally submit pages to the Google Indexing API for faster crawling.
+
+```typescript
+export const docs = defineStaticSite({
+  dir: "dist",
+  build: "npm run build",
+  domain: "example.com",
+  seo: {
+    sitemap: "sitemap.xml",
+  },
+});
+```
+
+On every deploy, Effortless:
+1. Walks the `dir` directory and collects all `.html` files
+2. Generates a sitemap XML with `<loc>` entries for each page (skips `404.html` and `500.html`)
+3. Generates `robots.txt` with `Allow: /` and a `Sitemap:` directive pointing to your sitemap
+4. Uploads both to S3 (sitemap is skipped if you already have one in `dir` — e.g. from Astro's sitemap plugin)
+
+URL paths are normalized: `about/index.html` becomes `https://example.com/about/`, `page.html` stays as `https://example.com/page.html`.
+
+#### Google Indexing API
+
+Google can take days or weeks to discover new pages. The [Indexing API](https://developers.google.com/search/apis/indexing-api/v3/quickstart) lets you notify Google immediately when pages are published.
+
+```typescript
+export const docs = defineStaticSite({
+  dir: "dist",
+  domain: "example.com",
+  seo: {
+    sitemap: "sitemap.xml",
+    googleIndexing: "~/google-service-account.json",
+  },
+});
+```
+
+On deploy, Effortless submits all page URLs via the Indexing API. Already-submitted URLs are tracked in S3 and skipped on subsequent deploys — only new pages are submitted.
+
+**Setup:**
+1. Create a [Google Cloud service account](https://console.cloud.google.com/iam-admin/serviceaccounts) and download the JSON key
+2. In [Google Search Console](https://search.google.com/search-console), add the service account email as an **Owner** (Settings → Users and permissions)
+3. Set `googleIndexing` to the path of your JSON key file (relative to project root, or `~/` for home directory)
+
+:::note[Google Indexing API quota]
+Google allows up to 200 URL notifications per day. If your site has more than 200 pages, Effortless submits the first 200 and picks up the rest on the next deploy.
+:::
+
 **Built-in best practices**:
 - **URL rewriting** — automatically resolves `/path/` to `/path/index.html` via CloudFront Function.
 - **SPA support** — when `spa: true`, 403/404 errors return `index.html` for client-side routing.
@@ -827,6 +880,7 @@ For SPA sites (`spa: true`), error pages are not used — all paths route to `in
 - **Global distribution** — served via CloudFront edge locations worldwide.
 - **Custom domains** — set `domain` for a custom domain with automatic ACM certificate lookup and optional www→non-www redirect.
 - **Edge middleware** — add `middleware` for auth checks, redirects, or access control via Lambda@Edge. Full Node.js runtime at the edge — JWT validation, cookie checks, custom logic.
+- **SEO automation** — auto-generate `sitemap.xml` and `robots.txt` at deploy time, submit new pages to Google Indexing API.
 - **Orphan cleanup** — when CloudFront Functions become unused (e.g. after config changes), they are automatically deleted on the next deploy.
 - **Auto-infrastructure** — S3 bucket, CloudFront distribution, Origin Access Control, CloudFront Function (or Lambda@Edge), cache invalidation, and SSL certificate configuration on deploy.
 

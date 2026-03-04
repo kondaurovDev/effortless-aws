@@ -80,7 +80,21 @@ export const deployCommand = Command.make(
               summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[api]")}   ${c.bold(r.exportName)}  ${c.dim(r.url)}` });
             }
             for (const r of results.staticSiteResults) {
-              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[site]")}  ${c.bold(r.exportName)}: ${c.cyan(r.url)}` });
+              let line = `  ${c.cyan("[site]")}  ${c.bold(r.exportName)}: ${c.cyan(r.url)}`;
+              const extras: string[] = [];
+              if (r.seoGenerated) extras.push(`seo: ${r.seoGenerated.join(", ")}`);
+              if (r.indexingResult) {
+                const { submitted, skipped, failed } = r.indexingResult;
+                if (submitted > 0 || failed > 0) {
+                  const parts = [`${submitted} submitted`];
+                  if (failed > 0) parts.push(c.red(`${failed} failed`));
+                  extras.push(`indexing: ${parts.join(", ")}`);
+                } else {
+                  extras.push(`indexing: all ${skipped} pages already indexed`);
+                }
+              }
+              if (extras.length > 0) line += `  ${c.dim(extras.join(" | "))}`;
+              summaryLines.push({ name: r.exportName, line });
             }
             summaryLines.sort((a, b) => a.name.localeCompare(b.name));
             for (const { line } of summaryLines) {

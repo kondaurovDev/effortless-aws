@@ -102,6 +102,7 @@ export type SyncFilesResult = {
   uploaded: number;
   deleted: number;
   unchanged: number;
+  uploadedKeys: string[];
 };
 
 export const syncFiles = (input: SyncFilesInput) =>
@@ -142,6 +143,7 @@ export const syncFiles = (input: SyncFilesInput) =>
 
     let uploaded = 0;
     let unchanged = 0;
+    const uploadedKeys: string[] = [];
 
     // Upload new/changed files
     for (const [key, filePath] of localFiles) {
@@ -169,10 +171,11 @@ export const syncFiles = (input: SyncFilesInput) =>
         CacheControl: cacheControl,
       });
       uploaded++;
+      uploadedKeys.push(key);
     }
 
     // Delete files that no longer exist locally
-    const keysToDelete = [...existingObjects.keys()].filter(k => !localFiles.has(k));
+    const keysToDelete = [...existingObjects.keys()].filter(k => !localFiles.has(k) && !k.startsWith("_effortless/"));
     let deleted = 0;
 
     if (keysToDelete.length > 0) {
@@ -191,7 +194,7 @@ export const syncFiles = (input: SyncFilesInput) =>
     }
 
     yield* Effect.logDebug(`S3 sync: ${uploaded} uploaded, ${deleted} deleted, ${unchanged} unchanged`);
-    return { uploaded, deleted, unchanged } satisfies SyncFilesResult;
+    return { uploaded, deleted, unchanged, uploadedKeys } satisfies SyncFilesResult;
   });
 
 export type PutObjectInput = {

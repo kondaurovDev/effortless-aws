@@ -8,7 +8,6 @@
     "preview": "astro preview"
   },
   "devDependencies": {
-    "@astrojs/sitemap": "^3.7.0",
     "@astrojs/starlight": "^0.32.0",
     "astro": "^5.0.0",
     "effortless-aws": "link:../packages/effortless-aws",

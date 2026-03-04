@@ -705,13 +705,16 @@ export const deployProject = (input: DeployProjectInput) =>
       return yield* Effect.fail(new Error("Unresolved deps — aborting deploy"));
     }
 
-    // Prepare layer (uses packageDir for package.json/node_modules, falls back to projectDir)
-    const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
-      project: input.project,
-      stage: stage,
-      region: input.region,
-      packageDir: input.packageDir ?? input.projectDir
-    });
+    // Prepare layer only when Lambda-based handlers exist
+    const needsLambda = totalTableHandlers + totalAppHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers > 0;
+    const { layerArn, layerVersion, layerStatus, external } = needsLambda
+      ? yield* prepareLayer({
+          project: input.project,
+          stage: stage,
+          region: input.region,
+          packageDir: input.packageDir ?? input.projectDir
+        })
+      : { layerArn: undefined, layerVersion: undefined, layerStatus: undefined, external: [] as string[] };
 
     if (layerArn && layerStatus) {
       const status = layerStatus === "cached" ? c.dim("cached") : c.green("created");

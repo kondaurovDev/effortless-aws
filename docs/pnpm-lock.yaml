@@ -8,9 +8,6 @@ importers:
 
   .:
     devDependencies:
-      '@astrojs/sitemap':
-        specifier: ^3.7.0
-        version: 3.7.0
       '@astrojs/starlight':
         specifier: ^0.32.0
         version: 0.32.6(astro@5.17.2(rollup@4.57.1)(typescript@5.9.3))

@@ -337,6 +337,35 @@ export const admin = defineStaticSite({
 
 Each `defineStaticSite` creates its own CloudFront distribution, so there's no performance penalty for the public site.
 
+### SEO — sitemap, robots.txt, Google Indexing
+
+Search engines need to discover your pages. A sitemap tells crawlers what pages exist, `robots.txt` tells them where the sitemap is, and the Google Indexing API notifies Google immediately when new pages are published.
+
+Effortless generates both files at deploy time and optionally submits pages to the Indexing API — no framework plugins needed.
+
+```typescript
+export const docs = defineStaticSite({
+  dir: "dist",
+  build: "npm run build",
+  domain: "docs.example.com",
+  seo: {
+    sitemap: "sitemap.xml",
+    googleIndexing: "~/google-service-account.json",
+  },
+});
+```
+
+The `sitemap` field is the filename for the generated sitemap. Effortless walks your `dir`, finds all HTML files, and generates a sitemap XML with clean URLs (`/about/` instead of `/about/index.html`). If you already have a `sitemap.xml` in your build output (from Astro, Next.js, etc.), the auto-generated one is skipped.
+
+`robots.txt` is always generated pointing to your sitemap — it's overwritten on every deploy.
+
+`googleIndexing` points to a Google Cloud service account JSON key. On each deploy, new page URLs are submitted via the [Indexing API](https://developers.google.com/search/apis/indexing-api/v3/quickstart). Already-submitted URLs are tracked in S3 and skipped — so only new pages are sent to Google.
+
+To set up Google Indexing:
+1. Create a service account in [Google Cloud Console](https://console.cloud.google.com/iam-admin/serviceaccounts) and download the JSON key
+2. In [Search Console](https://search.google.com/search-console), add the service account email as an **Owner**
+3. Point `googleIndexing` to the key file path (relative to project root, or `~/` for home directory)
+
 ---
 
 ## Which one to choose?
@@ -349,6 +378,7 @@ Each `defineStaticSite` creates its own CloudFront distribution, so there's no p
 | Custom domain | Yes (`domain` option) | Yes (`domain` option) |
 | www redirect | No | Automatic (when cert covers www) |
 | Edge auth/middleware | No | Yes (`middleware` option — Lambda@Edge) |
+| SEO automation | No | Yes (`seo` option — sitemap, robots.txt, Google Indexing) |
 | Security headers | Automatic | Automatic |
 | Extra AWS resources | Lambda + S3 bucket + CloudFront distribution | S3 bucket + CloudFront distribution |
 | Best for | SSR frameworks (Nuxt, Next.js) | Static sites, SPAs, docs |

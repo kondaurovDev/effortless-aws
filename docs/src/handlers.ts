@@ -5,4 +5,8 @@ export const docsCDN = defineStaticSite({
   build: "pnpm run build",
   domain: "effortless-aws.website",
   spa: false,
+  seo: {
+    sitemap: "sitemap.xml",
+    googleIndexing: '~/google-index-seo.json'
+  },
 });
