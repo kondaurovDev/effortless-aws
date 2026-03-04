@@ -22,33 +22,35 @@ After deploy, you get an S3 bucket named `{project}-{stage}-uploads`. Other hand
 
 ```typescript
 // src/api.ts
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 import { uploads } from "./uploads";
 
-export const uploadFile = defineHttp({
-  method: "POST",
-  path: "/upload/{filename}",
+export const uploadFile = defineApi({
+  basePath: "/upload",
   deps: { uploads },
-  onRequest: async ({ req, deps }) => {
-    await deps.uploads.put(req.params.filename, req.body);
-    return { status: 201, body: { key: req.params.filename } };
+  post: {
+    "/{filename}": async ({ req, deps }) => {
+      await deps.uploads.put(req.params.filename, req.body);
+      return { status: 201, body: { key: req.params.filename } };
+    },
   },
 });
 
-export const getFile = defineHttp({
-  method: "GET",
-  path: "/files/{filename}",
+export const getFile = defineApi({
+  basePath: "/files",
   deps: { uploads },
-  onRequest: async ({ req, deps }) => {
-    const file = await deps.uploads.get(req.params.filename);
-    if (!file) return { status: 404, body: { error: "Not found" } };
-    return {
-      status: 200,
-      body: file.body.toString("base64"),
-      headers: {
-        "content-type": file.contentType ?? "application/octet-stream",
-      },
-    };
+  get: {
+    "/{filename}": async ({ req, deps }) => {
+      const file = await deps.uploads.get(req.params.filename);
+      if (!file) return { status: 404, body: { error: "Not found" } };
+      return {
+        status: 200,
+        body: file.body.toString("base64"),
+        headers: {
+          "content-type": file.contentType ?? "application/octet-stream",
+        },
+      };
+    },
   },
 });
 ```

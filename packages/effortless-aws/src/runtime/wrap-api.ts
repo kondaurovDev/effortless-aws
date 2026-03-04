@@ -1,5 +1,5 @@
 import type { ApiHandler } from "../handlers/define-api";
-import type { ContentType } from "../handlers/define-http";
+import type { ContentType } from "../handlers/shared";
 import { createHandlerRuntime } from "./handler-utils";
 
 const CONTENT_TYPE_MAP: Record<ContentType, string> = {

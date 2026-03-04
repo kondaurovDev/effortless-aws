@@ -2,9 +2,6 @@ import { Effect, Console } from "effect";
 import { c } from "~/cli/colors";
 import {
   Aws,
-  ensureProjectApi,
-  addRouteToApi,
-  removeStaleRoutes,
   makeTags,
   resolveStage,
   type TagContext,
@@ -12,6 +9,8 @@ import {
   readProductionDependencies,
   collectLayerPackages,
   cleanupOrphanedFunctions,
+  ensureFunctionUrl,
+  addFunctionUrlPublicAccess,
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
 import type { ParamEntry } from "~/build/handler-registry";
@@ -25,15 +24,14 @@ export {
   type DeployInput
 } from "./shared";
 
-// Re-export from deploy-http
-export { deploy, deployAll } from "./deploy-http";
-
 // Re-export from deploy-table
 export { deployTable, deployAllTables } from "./deploy-table";
 
+// Re-export from deploy-api
+export { deploy } from "./deploy-api";
+
 // Import for internal use
 import { type DeployInput, type DeployResult, type DeployTableResult } from "./shared";
-import { deployLambda } from "./deploy-http";
 import { deployTableFunction } from "./deploy-table";
 import { deployApp, type DeployAppResult } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
@@ -255,7 +253,6 @@ const validateDeps = (
 ): string[] => {
   const errors: string[] = [];
   const allGroups = [
-    ...discovered.httpHandlers,
     ...discovered.apiHandlers,
     ...discovered.tableHandlers,
     ...discovered.fifoQueueHandlers,
@@ -404,40 +401,6 @@ const resolveHandlerEnv = (
   };
 };
 
-const buildHttpTasks = (
-  ctx: DeployTaskCtx,
-  handlers: DiscoveredHandlers["httpHandlers"],
-  apiId: string,
-  results: DeployResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
-  const { region } = ctx.input;
-  for (const { file, exports } of handlers) {
-    for (const fn of exports) {
-      tasks.push(
-        Effect.gen(function* () {
-          const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
-          const { exportName, functionArn, status, config, handlerName } = yield* deployLambda({
-            input: makeDeployInput(ctx, file), fn,
-            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
-            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
-            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
-            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
-          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
-
-          const { apiUrl: handlerUrl } = yield* addRouteToApi({
-            apiId, region, functionArn, method: config.method, path: config.path,
-          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
-
-          results.push({ exportName, url: handlerUrl, functionArn });
-          yield* ctx.logComplete( exportName, "http", status);
-        })
-      );
-    }
-  }
-  return tasks;
-};
-
 const buildTableTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["tableHandlers"],
@@ -470,13 +433,10 @@ const buildAppTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["appHandlers"],
   results: DeployAppResult[],
-  apiId?: string,
+  apiOriginDomain?: string,
 ): Effect.Effect<void, unknown>[] => {
   const tasks: Effect.Effect<void, unknown>[] = [];
   const { region } = ctx.input;
-  const apiOriginDomain = apiId
-    ? `${apiId}.execute-api.${region}.amazonaws.com`
-    : undefined;
   for (const { exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -504,13 +464,10 @@ const buildStaticSiteTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["staticSiteHandlers"],
   results: DeployStaticSiteResult[],
-  apiId?: string,
+  apiOriginDomain?: string,
 ): Effect.Effect<void, unknown>[] => {
   const tasks: Effect.Effect<void, unknown>[] = [];
   const { region } = ctx.input;
-  const apiOriginDomain = apiId
-    ? `${apiId}.execute-api.${region}.amazonaws.com`
-    : undefined;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -620,7 +577,6 @@ const buildMailerTasks = (
 const buildApiTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["apiHandlers"],
-  apiId: string,
   results: DeployResult[],
 ): Effect.Effect<void, unknown>[] => {
   const tasks: Effect.Effect<void, unknown>[] = [];
@@ -630,7 +586,7 @@ const buildApiTasks = (
       tasks.push(
         Effect.gen(function* () {
           const env = resolveHandlerEnv(fn.depsKeys, fn.paramEntries, ctx);
-          const { exportName, functionArn, status, config } = yield* deployApiFunction({
+          const { exportName, functionArn, status, handlerName } = yield* deployApiFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
             ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
@@ -638,17 +594,16 @@ const buildApiTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
 
-          // Route 1: ANY /basePath
-          yield* addRouteToApi({
-            apiId, region, functionArn, method: "ANY", path: config.basePath,
-          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
+          // Setup Function URL with CORS
+          const lambdaName = `${ctx.input.project}-${ctx.stage}-${handlerName}`;
+          const { functionUrl } = yield* ensureFunctionUrl(lambdaName).pipe(
+            Effect.provide(Aws.makeClients({ lambda: { region } }))
+          );
+          yield* addFunctionUrlPublicAccess(lambdaName).pipe(
+            Effect.provide(Aws.makeClients({ lambda: { region } }))
+          );
 
-          // Route 2: ANY /basePath/{proxy+}
-          const { apiUrl: handlerUrl } = yield* addRouteToApi({
-            apiId, region, functionArn, method: "ANY", path: `${config.basePath}/{proxy+}`,
-          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, apigatewayv2: { region } })));
-
-          results.push({ exportName, url: handlerUrl, functionArn });
+          results.push({ exportName, url: functionUrl, functionArn });
           yield* ctx.logComplete(exportName, "api", status);
         })
       );
@@ -672,9 +627,6 @@ export type DeployProjectInput = {
 };
 
 export type DeployProjectResult = {
-  apiId?: string;
-  apiUrl?: string;
-  httpResults: DeployResult[];
   tableResults: DeployTableResult[];
   appResults: DeployAppResult[];
   staticSiteResults: DeployStaticSiteResult[];
@@ -697,9 +649,8 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers } = discoverHandlers(files);
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers } = discoverHandlers(files);
 
-    const totalHttpHandlers = httpHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalStaticSiteHandlers = input.noSites ? 0 : staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
@@ -707,14 +658,13 @@ export const deployProject = (input: DeployProjectInput) =>
     const totalBucketHandlers = bucketHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalMailerHandlers = mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalApiHandlers = apiHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalHttpHandlers + totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers;
+    const totalAllHandlers = totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers;
 
     if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
     }
 
     const parts: string[] = [];
-    if (totalHttpHandlers > 0) parts.push(`${totalHttpHandlers} http`);
     if (totalTableHandlers > 0) parts.push(`${totalTableHandlers} table`);
     if (totalAppHandlers > 0) parts.push(`${totalAppHandlers} app`);
     if (totalStaticSiteHandlers > 0) parts.push(`${totalStaticSiteHandlers} site`);
@@ -725,7 +675,7 @@ export const deployProject = (input: DeployProjectInput) =>
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
     // Check for missing SSM parameters
-    const discovered = { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
+    const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
     const requiredParams = collectRequiredParams(discovered, input.project, stage);
     if (requiredParams.length > 0) {
       const { missing } = yield* checkMissingParams(requiredParams).pipe(
@@ -768,48 +718,10 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Console.log(`  ${c.dim("Layer:")} ${status} ${c.dim(`v${layerVersion}`)} (${external.length} packages)`);
     }
 
-    // Setup API Gateway for HTTP/app handlers
-    let apiId: string | undefined;
-    let apiUrl: string | undefined;
-
-    const staticSitesNeedApi = !input.noSites && staticSiteHandlers.some(
-      ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
-    );
-    const appsNeedApi = appHandlers.some(
-      ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
-    );
-
-    if (totalHttpHandlers > 0 || totalApiHandlers > 0 || staticSitesNeedApi || appsNeedApi) {
-      const tagCtx: TagContext = {
-        project: input.project,
-        stage: stage,
-        handler: "api"
-      };
-
-      const api = yield* ensureProjectApi({
-        projectName: input.project,
-        stage: tagCtx.stage,
-        region: input.region,
-        tags: makeTags(tagCtx, "api-gateway")
-      }).pipe(
-        Effect.provide(
-          Aws.makeClients({
-            apigatewayv2: { region: input.region }
-          })
-        )
-      );
-
-      apiId = api.apiId;
-      apiUrl = `https://${apiId}.execute-api.${input.region}.amazonaws.com`;
-      yield* Console.log(`  ${c.dim("API Gateway:")} ${apiId}`);
-    }
-
     yield* Console.log("");
 
     // Build handler manifest and live progress tracker
     const manifest: HandlerManifest = [];
-    for (const { exports } of httpHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "http" });
     for (const { exports } of tableHandlers)
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "table" });
     for (const { exports } of appHandlers)
@@ -833,7 +745,6 @@ export const deployProject = (input: DeployProjectInput) =>
       input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, logComplete,
     };
 
-    const httpResults: DeployResult[] = [];
     const tableResults: DeployTableResult[] = [];
     const appResults: DeployAppResult[] = [];
     const staticSiteResults: DeployStaticSiteResult[] = [];
@@ -842,18 +753,56 @@ export const deployProject = (input: DeployProjectInput) =>
     const mailerResults: DeployMailerResult[] = [];
     const apiResults: DeployResult[] = [];
 
-    const tasks = [
-      ...(apiId ? buildHttpTasks(ctx, httpHandlers, apiId, httpResults) : []),
-      ...buildTableTasks(ctx, tableHandlers, tableResults),
-      ...buildAppTasks(ctx, appHandlers, appResults, apiId),
-      ...(input.noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiId)),
-      ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
-      ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
-      ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
-      ...(apiId ? buildApiTasks(ctx, apiHandlers, apiId, apiResults) : []),
-    ];
+    // Check if app/site handlers need API origin (for CloudFront proxying)
+    const staticSitesNeedApi = !input.noSites && staticSiteHandlers.some(
+      ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
+    );
+    const appsNeedApi = appHandlers.some(
+      ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
+    );
+    const needsTwoPhase = (staticSitesNeedApi || appsNeedApi) && totalApiHandlers > 0;
 
-    yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
+    if (needsTwoPhase) {
+      // Phase 1: Deploy everything except app/site (need Function URL from API handlers)
+      const phase1Tasks = [
+        ...buildApiTasks(ctx, apiHandlers, apiResults),
+        ...buildTableTasks(ctx, tableHandlers, tableResults),
+        ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+        ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
+        ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
+      ];
+
+      yield* Effect.all(phase1Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
+
+      // Extract API origin domain from first API handler's Function URL
+      const firstApiUrl = apiResults[0]?.url;
+      const apiOriginDomain = firstApiUrl
+        ? firstApiUrl.replace("https://", "").replace(/\/$/, "")
+        : undefined;
+
+      // Phase 2: Deploy app/site handlers with API origin
+      const phase2Tasks = [
+        ...buildAppTasks(ctx, appHandlers, appResults, apiOriginDomain),
+        ...(input.noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiOriginDomain)),
+      ];
+
+      if (phase2Tasks.length > 0) {
+        yield* Effect.all(phase2Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
+      }
+    } else {
+      // Single phase: deploy everything in parallel
+      const tasks = [
+        ...buildApiTasks(ctx, apiHandlers, apiResults),
+        ...buildTableTasks(ctx, tableHandlers, tableResults),
+        ...buildAppTasks(ctx, appHandlers, appResults),
+        ...(input.noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults)),
+        ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+        ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
+        ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
+      ];
+
+      yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
+    }
 
     // Clean up orphaned CloudFront Functions (e.g. after rename or config change)
     if ((!input.noSites && staticSiteResults.length > 0) || appResults.length > 0) {
@@ -868,35 +817,5 @@ export const deployProject = (input: DeployProjectInput) =>
       );
     }
 
-    // Remove stale API Gateway routes
-    if (apiId) {
-      const activeRouteKeys = new Set<string>();
-
-      for (const { exports } of httpHandlers) {
-        for (const fn of exports) {
-          activeRouteKeys.add(`${fn.config.method} ${fn.config.path}`);
-        }
-      }
-
-      for (const { exports } of apiHandlers) {
-        for (const fn of exports) {
-          activeRouteKeys.add(`ANY ${fn.config.basePath}`);
-          activeRouteKeys.add(`ANY ${fn.config.basePath}/{proxy+}`);
-        }
-      }
-
-      yield* removeStaleRoutes(apiId, activeRouteKeys).pipe(
-        Effect.provide(
-          Aws.makeClients({
-            apigatewayv2: { region: input.region }
-          })
-        )
-      );
-    }
-
-    if (apiUrl) {
-      yield* Effect.logDebug(`Deployment complete! API: ${apiUrl}`);
-    }
-
-    return { apiId, apiUrl, httpResults, tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, apiResults };
+    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, apiResults };
   });

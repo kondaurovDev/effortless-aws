@@ -230,7 +230,7 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.config.errorPage).toBeUndefined();
   });
 
-  it("should not match defineApp or defineHttp calls", () => {
+  it("should not match defineApp or other define* calls", () => {
     const source = `
       import { defineApp } from "effortless-aws";
 

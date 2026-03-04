@@ -14,7 +14,6 @@ export default defineConfig([
   // Runtime wrappers - separate files consumed by CLI at deploy time
   {
     entry: {
-      "runtime/wrap-http": "src/runtime/wrap-http.ts",
       "runtime/wrap-table-stream": "src/runtime/wrap-table-stream.ts",
       "runtime/wrap-fifo-queue": "src/runtime/wrap-fifo-queue.ts",
       "runtime/wrap-bucket": "src/runtime/wrap-bucket.ts",

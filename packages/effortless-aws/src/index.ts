@@ -3,7 +3,6 @@ export { defineConfig } from "./config"
 export type { EffortlessConfig } from "./config"
 
 // Handlers
-export { defineHttp } from "./handlers/define-http"
 export { defineTable } from "./handlers/define-table"
 export { defineApp } from "./handlers/define-app"
 export { defineStaticSite } from "./handlers/define-static-site"
@@ -15,7 +14,7 @@ export { param } from "./handlers/handler-options"
 export { typed } from "./handlers/handler-options"
 
 // Types
-export type { HttpConfig, HttpRequest, HttpResponse, HttpMethod, ContentType, HttpHandler, HttpHandlerFn, DefineHttpOptions, ResolveDeps } from "./handlers/define-http"
+export type { HttpRequest, HttpResponse, HttpMethod, ContentType } from "./handlers/shared"
 export type { TableConfig, TableRecord, TableHandler, StreamView, DefineTableOptions, TableRecordFn, TableBatchFn, TableBatchCompleteFn, FailedRecord } from "./handlers/define-table"
 export type { AppConfig, AppHandler } from "./handlers/define-app"
 export type { StaticSiteConfig, StaticSiteHandler, MiddlewareRequest, MiddlewareResult, MiddlewareRedirect, MiddlewareDeny, MiddlewareHandler } from "./handlers/define-static-site"
@@ -28,6 +27,7 @@ export type { BucketClient } from "./runtime/bucket-client"
 export type { EmailClient, SendEmailOptions } from "./runtime/email-client"
 export type { ParamRef, ResolveConfig, TableKey, TableItem, PutInput } from "./handlers/handler-options"
 export type { StaticFiles } from "./handlers/shared"
+export type { ResolveDeps } from "./handlers/handler-deps"
 
 // Shared types
 export type { LambdaConfig, LambdaWithPermissions, LogLevel, Permission, AnyParamRef } from "./handlers/handler-options"

@@ -6,7 +6,7 @@ import { createRequire } from "module";
 import archiver from "archiver";
 import { globSync } from "glob";
 import { generateEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig } from "./handler-registry";
-import type { HttpConfig, TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig } from "effortless-aws";
+import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig } from "effortless-aws";
 
 export type BundleInput = {
   projectDir: string;
@@ -16,13 +16,9 @@ export type BundleInput = {
 
 // ============ Config extraction (uses registry) ============
 
-export type ExtractedFunction = ExtractedConfig<HttpConfig>;
 export type ExtractedTableFunction = ExtractedConfig<TableConfig>;
 export type ExtractedAppFunction = ExtractedConfig<AppConfig>;
 export type ExtractedStaticSiteFunction = ExtractedConfig<StaticSiteConfig>;
-
-export const extractConfigs = (source: string): ExtractedFunction[] =>
-  extractHandlerConfigs<HttpConfig>(source, "http");
 
 export const extractTableConfigs = (source: string): ExtractedTableFunction[] =>
   extractHandlerConfigs<TableConfig>(source, "table");
@@ -53,11 +49,6 @@ export type ExtractedApiFunction = ExtractedConfig<ApiConfig>;
 export const extractApiConfigs = (source: string): ExtractedApiFunction[] =>
   extractHandlerConfigs<ApiConfig>(source, "api");
 
-export const extractConfig = (source: string): HttpConfig | null => {
-  const configs = extractConfigs(source);
-  return configs.length > 0 ? configs[0]?.config ?? null : null;
-};
-
 // ============ Bundle (uses registry) ============
 
 const _require = createRequire(import.meta.url);
@@ -66,7 +57,7 @@ const runtimeDir = path.join(path.dirname(_require.resolve("effortless-aws/packa
 export const bundle = (input: BundleInput & { exportName?: string; external?: string[]; type?: HandlerType }) =>
   Effect.gen(function* () {
     const exportName = input.exportName ?? "default";
-    const type = input.type ?? "http";
+    const type = input.type ?? "api";
     const externals = input.external ?? [];
 
     // Get source path for import statement
@@ -198,7 +189,6 @@ export const findHandlerFiles = (patterns: string[], cwd: string): string[] => {
 };
 
 export type DiscoveredHandlers = {
-  httpHandlers: { file: string; exports: ExtractedFunction[] }[];
   tableHandlers: { file: string; exports: ExtractedTableFunction[] }[];
   appHandlers: { file: string; exports: ExtractedAppFunction[] }[];
   staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[];
@@ -209,7 +199,6 @@ export type DiscoveredHandlers = {
 };
 
 export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
-  const httpHandlers: { file: string; exports: ExtractedFunction[] }[] = [];
   const tableHandlers: { file: string; exports: ExtractedTableFunction[] }[] = [];
   const appHandlers: { file: string; exports: ExtractedAppFunction[] }[] = [];
   const staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[] = [];
@@ -223,7 +212,6 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     if (!fsSync.statSync(file).isFile()) continue;
 
     const source = fsSync.readFileSync(file, "utf-8");
-    const http = extractConfigs(source);
     const table = extractTableConfigs(source);
     const app = extractAppConfigs(source);
     const staticSite = extractStaticSiteConfigs(source);
@@ -232,7 +220,6 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     const mailer = extractMailerConfigs(source);
     const api = extractApiConfigs(source);
 
-    if (http.length > 0) httpHandlers.push({ file, exports: http });
     if (table.length > 0) tableHandlers.push({ file, exports: table });
     if (app.length > 0) appHandlers.push({ file, exports: app });
     if (staticSite.length > 0) staticSiteHandlers.push({ file, exports: staticSite });
@@ -242,7 +229,7 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
     if (api.length > 0) apiHandlers.push({ file, exports: api });
   }
 
-  return { httpHandlers, tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
+  return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
 };
 
 /** Flatten all discovered handlers into a list of { exportName, file, type } */
@@ -253,7 +240,6 @@ export const flattenHandlers = (discovered: DiscoveredHandlers) => {
   ) => handlers.flatMap(h => h.exports.map(e => ({ exportName: e.exportName, file: h.file, type })));
 
   return [
-    ...entries("http", discovered.httpHandlers),
     ...entries("table", discovered.tableHandlers),
     ...entries("app", discovered.appHandlers),
     ...entries("site", discovered.staticSiteHandlers),

@@ -31,11 +31,10 @@ export type MailerHandler = {
  * ```typescript
  * export const mailer = defineMailer({ domain: "myapp.com" });
  *
- * export const signup = defineHttp({
- *   method: "POST",
- *   path: "/signup",
+ * export const api = defineApi({
+ *   basePath: "/signup",
  *   deps: { mailer },
- *   onRequest: async ({ req, deps }) => {
+ *   post: async ({ req, deps }) => {
  *     await deps.mailer.send({
  *       from: "hello@myapp.com",
  *       to: req.body.email,

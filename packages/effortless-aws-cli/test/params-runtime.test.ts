@@ -24,13 +24,13 @@ vi.mock("@aws-sdk/client-ssm", () => ({
   },
 }));
 
-import { wrapHttp } from "~aws/runtime/wrap-http"
+import { wrapApi } from "~aws/runtime/wrap-api"
 import { wrapTableStream } from "~aws/runtime/wrap-table-stream"
-import type { HttpHandler } from "~aws/handlers/define-http"
+import type { ApiHandler } from "~aws/handlers/define-api"
 import type { TableHandler } from "~aws/handlers/define-table"
 
 const makeHttpEvent = (overrides: Record<string, unknown> = {}) => ({
-  requestContext: { http: { method: "GET", path: "/test" } },
+  requestContext: { http: { method: "POST", path: "/test" } },
   headers: {},
   queryStringParameters: {},
   pathParameters: {},
@@ -75,7 +75,7 @@ describe("params runtime injection", () => {
     process.env = originalEnv;
   });
 
-  describe("HTTP handler (wrapHttp)", () => {
+  describe("HTTP handler (wrapApi)", () => {
 
     it("should inject resolved params into handler", async () => {
       process.env = {
@@ -88,18 +88,18 @@ describe("params runtime injection", () => {
       let capturedConfig: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/test" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler<undefined, undefined, any, any>;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
       const response = await wrapped(makeHttpEvent());
 
       expect(response.statusCode).toBe(200);
@@ -118,8 +118,8 @@ describe("params runtime injection", () => {
       let capturedConfig: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/test" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         config: {
           appConfig: {
             __brand: "effortless-param",
@@ -127,13 +127,13 @@ describe("params runtime injection", () => {
             transform: (raw: string) => JSON.parse(raw),
           },
         },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler<undefined, undefined, any, any>;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
 
       expect(capturedConfig.appConfig).toEqual({ feature: true });
@@ -150,19 +150,19 @@ describe("params runtime injection", () => {
       let capturedCtx: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/test" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         setup: ({ config }: any) => ({ poolUrl: config.dbUrl }),
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedCtx = args.ctx;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, any, any, any>;
+      } as unknown as ApiHandler<undefined, any, any, any>;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
 
       expect(capturedCtx).toEqual({ poolUrl: "postgres://localhost/db" });
@@ -180,19 +180,19 @@ describe("params runtime injection", () => {
       let capturedArgs: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/test" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler<undefined, undefined, any, any>;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
 
       expect(capturedArgs.config.dbUrl).toBe("postgres://localhost/db");
@@ -204,17 +204,17 @@ describe("params runtime injection", () => {
       delete process.env.EFF_PARAM_dbUrl;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/test" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           return { status: 200, body: {} };
         },
-      } as unknown as HttpHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler<undefined, undefined, any, any>;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
 
       await expect(wrapped(makeHttpEvent())).rejects.toThrow(
         'Missing environment variable EFF_PARAM_dbUrl for param "dbUrl"'
@@ -225,15 +225,15 @@ describe("params runtime injection", () => {
       let capturedArgs: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/hello" },
-        onRequest: async (args: any) => {
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
+        post: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { hello: "world" } };
         },
-      } as unknown as HttpHandler;
+      } as unknown as ApiHandler;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
 
       expect(capturedArgs.config).toBeUndefined();
@@ -249,17 +249,17 @@ describe("params runtime injection", () => {
       setupSsmMock({ "/myapp/prod/database-url": "postgres://localhost/db" });
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/test" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           return { status: 200, body: { url: args.config.dbUrl } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler<undefined, undefined, any, any>;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
       await wrapped(makeHttpEvent());
 

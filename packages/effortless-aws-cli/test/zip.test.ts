@@ -11,12 +11,13 @@ describe("zip", () => {
 
   it("should create valid zip archive", async () => {
     const handlerCode = `
-      import { defineHttp } from "effortless-aws";
+      import { defineApi } from "effortless-aws";
 
-      export default defineHttp({
-        method: "GET",
-        path: "/zip-test",
-        onRequest: async () => ({ status: 200, body: { ok: true } })
+      export default defineApi({
+        basePath: "/zip-test",
+        get: {
+          "/": async () => ({ status: 200, body: { ok: true } })
+        }
       });
     `;
 

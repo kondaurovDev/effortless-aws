@@ -27,8 +27,8 @@ vi.mock("@aws-sdk/client-s3", () => ({
 }));
 
 import { createEmailClient } from "~aws/runtime/email-client"
-import { wrapHttp } from "~aws/runtime/wrap-http"
-import type { HttpHandler } from "~aws/handlers/define-http"
+import { wrapApi } from "~aws/runtime/wrap-api"
+import type { ApiHandler } from "~aws/handlers/define-api"
 import { defineMailer } from "~aws/handlers/define-mailer"
 
 const makeHttpEvent = (overrides: Record<string, unknown> = {}) => ({
@@ -157,10 +157,10 @@ describe("mailer as dep in HTTP handler", () => {
     let capturedDeps: any = null;
 
     const handler = {
-      __brand: "effortless-http",
-      __spec: { method: "POST", path: "/send" },
+      __brand: "effortless-api",
+      __spec: { basePath: "/send" },
       deps: { mailer: { __brand: "effortless-mailer", __spec: { domain: "myapp.com" } } },
-      onRequest: async (args: any) => {
+      post: async (args: any) => {
         capturedDeps = args.deps;
         await args.deps.mailer.send({
           from: "hello@myapp.com",
@@ -170,9 +170,9 @@ describe("mailer as dep in HTTP handler", () => {
         });
         return { status: 200, body: { ok: true } };
       },
-    } as unknown as HttpHandler<undefined, undefined, any>;
+    } as unknown as ApiHandler<undefined, undefined, any>;
 
-    const wrapped = wrapHttp(handler);
+    const wrapped = wrapApi(handler);
     const response = await wrapped(makeHttpEvent());
 
     expect(response.statusCode).toBe(200);
@@ -191,19 +191,19 @@ describe("mailer as dep in HTTP handler", () => {
     let capturedDeps: any = null;
 
     const handler = {
-      __brand: "effortless-http",
-      __spec: { method: "POST", path: "/send" },
+      __brand: "effortless-api",
+      __spec: { basePath: "/send" },
       deps: {
         mailer: { __brand: "effortless-mailer", __spec: { domain: "myapp.com" } },
         orders: { __brand: "effortless-table", config: {} },
       },
-      onRequest: async (args: any) => {
+      post: async (args: any) => {
         capturedDeps = args.deps;
         return { status: 200, body: { ok: true } };
       },
-    } as unknown as HttpHandler<undefined, undefined, any>;
+    } as unknown as ApiHandler<undefined, undefined, any>;
 
-    const wrapped = wrapHttp(handler);
+    const wrapped = wrapApi(handler);
     await wrapped(makeHttpEvent());
 
     expect(capturedDeps.mailer).toBeDefined();

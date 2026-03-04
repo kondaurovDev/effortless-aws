@@ -4,8 +4,7 @@ export type { HandlerType, HandlerDefinition, ExtractedConfig } from "./handler-
 export {
   bundle,
   zip,
-  extractConfig,
-  extractConfigs,
+  extractApiConfigs,
   extractTableConfigs,
   findHandlerFiles,
   discoverHandlers
@@ -13,7 +12,7 @@ export {
 export type {
   BundleInput,
   ZipInput,
-  ExtractedFunction,
+  ExtractedApiFunction,
   ExtractedTableFunction,
   DiscoveredHandlers
 } from "./bundle";

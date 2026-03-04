@@ -95,7 +95,7 @@ export default defineConfig({
         {
           label: "Resources",
           items: [
-            { label: "Why AWS?", slug: "why-aws" },
+            { label: "Why serverless?", slug: "why-serverless" },
             { label: "FAQ", slug: "faq" },
             { label: "Architecture", slug: "architecture" },
             { label: "Comparisons", slug: "comparisons" },

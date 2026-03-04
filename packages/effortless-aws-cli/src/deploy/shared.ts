@@ -105,7 +105,7 @@ export type DeployCoreLambdaInput = {
   defaultPermissions?: readonly string[];
   memory?: number;
   timeout?: number;
-  bundleType?: "http" | "table" | "app" | "fifoQueue" | "bucket" | "api";
+  bundleType?: "table" | "app" | "fifoQueue" | "bucket" | "api";
   layerArn?: string;
   external?: string[];
   /** Environment variables to set on the Lambda (e.g., for deps) */

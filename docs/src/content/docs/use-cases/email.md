@@ -41,14 +41,13 @@ Import the mailer into any handler and add it to `deps`. The framework injects a
 
 ```typescript
 // src/api.ts
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 import { mailer } from "./mailer";
 
-export const signup = defineHttp({
-  method: "POST",
-  path: "/signup",
+export const signup = defineApi({
+  basePath: "/signup",
   deps: { mailer },
-  onRequest: async ({ req, deps }) => {
+  post: async ({ req, deps }) => {
     // ... create user ...
 
     await deps.mailer.send({
@@ -99,7 +98,7 @@ await deps.mailer.send({
 Mailers compose with tables, buckets, and queues — just add them all to `deps`:
 
 ```typescript
-import { defineHttp, defineTable, typed } from "effortless-aws";
+import { defineApi, defineTable, typed } from "effortless-aws";
 import { mailer } from "./mailer";
 
 type User = { tag: string; name: string; email: string };
@@ -108,25 +107,26 @@ export const users = defineTable({
   schema: typed<User>(),
 });
 
-export const invite = defineHttp({
-  method: "POST",
-  path: "/invite/{userId}",
+export const invite = defineApi({
+  basePath: "/invite",
   deps: { users, mailer },
-  onRequest: async ({ req, deps }) => {
-    const user = await deps.users.get({
-      pk: `USER#${req.params.userId}`,
-      sk: "PROFILE",
-    });
-    if (!user) return { status: 404, body: { error: "User not found" } };
+  post: {
+    "/{userId}": async ({ req, deps }) => {
+      const user = await deps.users.get({
+        pk: `USER#${req.params.userId}`,
+        sk: "PROFILE",
+      });
+      if (!user) return { status: 404, body: { error: "User not found" } };
 
-    await deps.mailer.send({
-      from: "no-reply@myapp.com",
-      to: user.data.email,
-      subject: "You're invited!",
-      html: `<p>Hi ${user.data.name}, you've been invited to join the project.</p>`,
-    });
+      await deps.mailer.send({
+        from: "no-reply@myapp.com",
+        to: user.data.email,
+        subject: "You're invited!",
+        html: `<p>Hi ${user.data.name}, you've been invited to join the project.</p>`,
+      });
 
-    return { status: 200, body: { sent: true } };
+      return { status: 200, body: { sent: true } };
+    },
   },
 });
 ```
@@ -190,15 +190,14 @@ export const orders = defineTable({
 Combine `defineMailer` with `static` files to use email templates:
 
 ```typescript
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 import { mailer } from "./mailer";
 
-export const sendInvoice = defineHttp({
-  method: "POST",
-  path: "/send-invoice",
+export const sendInvoice = defineApi({
+  basePath: "/send-invoice",
   deps: { mailer },
   static: ["src/templates/invoice.html"],
-  onRequest: async ({ req, deps, files }) => {
+  post: async ({ req, deps, files }) => {
     const template = files.read("src/templates/invoice.html");
     const html = template
       .replace("{{name}}", req.body.name)

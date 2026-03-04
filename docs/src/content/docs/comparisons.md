@@ -257,15 +257,17 @@ export const orders = defineTable({
   primaryKey: "id",
 });
 
-export const api = defineHttp({
-  method: "GET", path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   deps: { orders },  // ← auto IAM, typed client
-  onRequest: async ({ deps }) => {
-    const items = await deps.orders.query(/* fully typed */);
-    return { status: 200, body: items };
-  }
+  get: {
+    "/": async ({ deps }) => {
+      const items = await deps.orders.query(/* fully typed */);
+      return { status: 200, body: items };
+    },
+  },
 });
-// No resource declarations — Lambda, IAM, API Gateway all inferred
+// No resource declarations — Lambda, IAM, Function URL all inferred
 ```
 
 | | Alchemy | Effortless |

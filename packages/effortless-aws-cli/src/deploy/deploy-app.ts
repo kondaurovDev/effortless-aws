@@ -57,8 +57,8 @@ export const deployApp = (input: DeployAppInput) =>
     if (routePatterns.length > 0 && !input.apiOriginDomain) {
       return yield* Effect.fail(
         new Error(
-          `App "${exportName}" has routes but no API Gateway exists. ` +
-          `Ensure defineHttp() or defineApi() handlers are included in the discovery patterns.`
+          `App "${exportName}" has routes but no API handler was deployed. ` +
+          `Ensure defineApi() handlers are included in the discovery patterns.`
         )
       );
     }

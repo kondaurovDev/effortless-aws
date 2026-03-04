@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import * as path from "path"
 import * as AdmZip from "adm-zip"
 
-import { extractConfigs, extractTableConfigs } from "~cli/build/bundle"
+import { extractApiConfigs, extractTableConfigs } from "~cli/build/bundle"
 import { zip, resolveStaticFiles } from "~cli/build/bundle"
 import { importBundle, bundleCode } from "./helpers/bundle-code"
 
@@ -13,21 +13,20 @@ const projectDir = path.resolve(__dirname, "..")
 
 describe("static extraction", () => {
 
-  describe("extractConfigs (HTTP)", () => {
+  describe("extractApiConfigs", () => {
 
     it("should extract static globs", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
 
-        export const widget = defineHttp({
-          method: "GET",
-          path: "/widget",
+        export const widget = defineApi({
+          basePath: "/widget",
           static: ["src/templates/*.ejs"],
-          onRequest: async ({ req, files }) => ({ status: 200 })
+          get: { "/": async ({ req, files }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs"]);
@@ -35,17 +34,16 @@ describe("static extraction", () => {
 
     it("should extract multiple static globs", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
 
-        export const widget = defineHttp({
-          method: "GET",
-          path: "/widget",
+        export const widget = defineApi({
+          basePath: "/widget",
           static: ["src/templates/*.ejs", "src/assets/*.css"],
-          onRequest: async ({ req }) => ({ status: 200 })
+          get: { "/": async ({ req }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs", "src/assets/*.css"]);
@@ -53,16 +51,15 @@ describe("static extraction", () => {
 
     it("should return empty staticGlobs when no static property", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
 
-        export const hello = defineHttp({
-          method: "GET",
-          path: "/hello",
-          onRequest: async ({ req }) => ({ status: 200 })
+        export const hello = defineApi({
+          basePath: "/hello",
+          get: { "/": async ({ req }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual([]);
@@ -70,17 +67,16 @@ describe("static extraction", () => {
 
     it("should extract static from default export", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
 
-        export default defineHttp({
-          method: "GET",
-          path: "/widget",
+        export default defineApi({
+          basePath: "/widget",
           static: ["templates/*.ejs"],
-          onRequest: async ({ req }) => ({ status: 200 })
+          get: { "/": async ({ req }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.exportName).toBe("default");
@@ -89,19 +85,18 @@ describe("static extraction", () => {
 
     it("should not leak static into config", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
 
-        export const widget = defineHttp({
-          method: "GET",
-          path: "/widget",
+        export const widget = defineApi({
+          basePath: "/widget",
           static: ["src/templates/*.ejs"],
-          onRequest: async ({ req }) => ({ status: 200 })
+          post: async ({ data }) => ({ status: 200 })
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
-      expect(configs[0]!.config).toEqual({ method: "GET", path: "/widget" });
+      expect(configs[0]!.config).toEqual({ basePath: "/widget" });
       expect(configs[0]!.config).not.toHaveProperty("static");
     });
 
@@ -228,23 +223,24 @@ describe("static files runtime", () => {
 
   it("should inject files service and read bundled file", async () => {
     const handlerCode = `
-      import { defineHttp } from "effortless-aws";
+      import { defineApi } from "effortless-aws";
 
-      export default defineHttp({
-        method: "GET",
-        path: "/widget",
+      export default defineApi({
+        basePath: "/widget",
         static: ["test/fixtures/hello.txt"],
-        onRequest: async ({ req, files }) => ({
-          status: 200,
-          body: { content: files.read("test/fixtures/hello.txt") }
-        })
+        get: {
+          "/": async ({ req, files }) => ({
+            status: 200,
+            body: { content: files.read("test/fixtures/hello.txt") }
+          })
+        }
       });
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir });
 
     const response = await mod.handler({
-      requestContext: { http: { method: "GET", path: "/widget" } },
+      requestContext: { http: { method: "GET", path: "/widget/" } },
       headers: {},
       queryStringParameters: {},
       pathParameters: {},

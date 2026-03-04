@@ -1,7 +1,7 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
-import type { HttpRequest, HttpResponse } from "./define-http";
+import type { HttpRequest, HttpResponse } from "./shared";
 
 /** GET route handler — no schema, no data */
 export type ApiGetHandlerFn<

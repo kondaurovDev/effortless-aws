@@ -1,20 +1,19 @@
 ---
 title: Definitions
-description: All definition types — defineHttp, defineApi, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineBucket, defineSchedule, defineEvent.
+description: All definition types — defineApi, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineBucket, defineSchedule, defineEvent.
 ---
 
 ## Overview
 
 Every resource in Effortless is created with a `define*` function. Each call declares **what** you need — the framework handles the infrastructure.
 
-Some definitions include a Lambda handler (a callback like `onRequest`, `onRecord`, or `onMessage`). Others are **resource-only** — they create AWS resources without any code attached:
+Some definitions include a Lambda handler (a callback like `onRecord`, `onMessage`, or route handlers). Others are **resource-only** — they create AWS resources without any code attached:
 
 | Definition | Creates | Handler required? |
 |---|---|---|
-| [defineHttp](#definehttp) | API Gateway + Lambda | Yes (`onRequest`) |
-| [defineApi](#defineapi) | API Gateway + single Lambda (fat Lambda) | Optional (`get` / `post`) |
+| [defineApi](#defineapi) | Lambda Function URL (single Lambda, multiple routes) | Optional (`get` / `post`) |
 | [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onBatch` |
-| [defineApp](#defineapp) | API Gateway + Lambda serving static files | No (built-in file server) |
+| [defineApp](#defineapp) | CloudFront + Lambda Function URL serving SSR | No (built-in file server) |
 | [defineStaticSite](#definestaticsite) | S3 + CloudFront + optional Lambda@Edge | No (optional `middleware`) |
 | [defineFifoQueue](#definefifoqueue) | SQS FIFO + Lambda | Yes (`onMessage`/`onBatch`) |
 | [defineSchedule](#defineschedule) | EventBridge + Lambda | Yes — Planned |
@@ -33,12 +32,11 @@ export const users = defineTable({
 // Just a bucket — no Lambda, no event notifications
 export const uploads = defineBucket({});
 
-// HTTP endpoint that writes to the table and bucket
-export const createUser = defineHttp({
-  method: "POST",
-  path: "/users",
+// API that writes to the table and bucket
+export const api = defineApi({
+  basePath: "/users",
   deps: { users, uploads },
-  onRequest: async ({ req, deps }) => {
+  post: async ({ req, deps }) => {
     await deps.users.put({
       pk: "USER#1", sk: "PROFILE",
       data: { tag: "user", name: "Alice", email: "alice@example.com" },
@@ -53,12 +51,12 @@ export const createUser = defineHttp({
 
 ## Type inference
 
-Every handler function (`defineHttp`, `defineTable`, `defineFifoQueue`) uses TypeScript generics internally to connect types across `schema`, `setup`, `deps`, `config`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
+Every handler function (`defineApi`, `defineTable`, `defineFifoQueue`) uses TypeScript generics internally to connect types across `schema`, `setup`, `deps`, `config`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
 
 Use `schema` to provide the data type. For type-only schemas (no runtime validation), use the `typed<T>()` helper:
 
 ```typescript
-import { defineTable, defineHttp, defineFifoQueue, typed, param } from "effortless-aws";
+import { defineTable, defineApi, defineFifoQueue, typed, param } from "effortless-aws";
 
 type Order = { tag: string; amount: number; status: string };
 
@@ -106,7 +104,7 @@ export const payments = defineFifoQueue({
 
 ## Shared options
 
-These options are available on all Lambda-backed handlers (`defineHttp`, `defineTable`, `defineFifoQueue`).
+These options are available on all Lambda-backed handlers (`defineApi`, `defineTable`, `defineFifoQueue`).
 
 ### `schema`
 
@@ -195,99 +193,11 @@ Logging verbosity: `"error"` (errors only), `"info"` (+ execution summary), `"de
 
 ---
 
-## defineHttp
-
-Creates: API Gateway HTTP API + Lambda + Route
-
-```typescript
-export const api = defineHttp({
-  // Required
-  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH",
-  path: string,  // e.g. "/api/users/{id}"
-
-  // Optional
-  memory?: number,
-  timeout?: DurationInput,
-  permissions?: Permission[],         // additional IAM permissions (e.g. ["s3:PutObject"])
-  schema?: (input: unknown) => T,     // validate & parse request body
-  setup?: ({ deps, config }) => C,    // factory for shared state (cached on cold start)
-  deps?: { [key]: TableHandler },     // inter-handler dependencies
-  config?: { [key]: param(...) },     // SSM parameters
-
-  onRequest: async ({ req, ctx, data, deps, config }) => {
-    // req.method, req.path, req.headers, req.query, req.params, req.body
-    // ctx — setup result (when setup is set)
-    // data — parsed body (when schema is set)
-    // deps — typed table clients (when deps is set)
-    // config — SSM parameter values (when config is set)
-    return {
-      status: 200,
-      body: { data: "response" },
-      headers?: { ... },
-    };
-  }
-});
-```
-
-### Schema validation
-
-```typescript
-export const createUser = defineHttp({
-  method: "POST",
-  path: "/users",
-  schema: (input) => {
-    const obj = input as any;
-    if (!obj?.name) throw new Error("name is required");
-    return { name: obj.name as string };
-  },
-  onRequest: async ({ data }) => {
-    // data is { name: string } — typed from schema return type
-    return { status: 201, body: { created: data.name } };
-  }
-});
-```
-
-When `schema` throws, the framework returns a 400 response automatically with the error message.
-
-### Dependencies
-
-```typescript
-import { orders } from "./orders.js";
-
-export const createOrder = defineHttp({
-  method: "POST",
-  path: "/orders",
-  deps: { orders },
-  onRequest: async ({ req, deps }) => {
-    // deps.orders is TableClient<Order> — typed from the table's generic
-    await deps.orders.put({
-      pk: "USER#123", sk: "ORDER#456",
-      data: { tag: "order", amount: 99, status: "pending" },
-    });
-    return { status: 201 };
-  }
-});
-```
-
-Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. See [architecture](./architecture#inter-handler-dependencies-deps) for details.
-
-**Built-in best practices**:
-- **Cold start optimization** — the `setup` factory runs once on cold start and is cached across invocations. Use it for DB connections, SDK clients, config loading.
-- **Schema validation** — when `schema` is set, the body is parsed and validated before `onRequest` runs. Invalid requests get a 400 response automatically.
-- **Typed dependencies** — `deps` provides typed `TableClient<T>` instances with auto-wired IAM permissions and environment variables.
-- **Auto-infrastructure** — API Gateway HTTP API, route, Lambda integration, and IAM permissions are created on deploy.
-
-:::tip[Multiple routes under one path?]
-If you need multiple GET routes and/or a POST command handler under a shared base path, see [defineApi](#defineapi) — it deploys a single Lambda with built-in routing and supports CQRS-style discriminated union schemas.
-:::
-
----
-
 ## defineApi
 
-Creates: API Gateway HTTP API + single Lambda (fat Lambda) with catch-all `{proxy+}` route
+Creates: Lambda + Function URL with built-in routing
 
-`defineApi` is a CQRS-style handler for APIs with multiple routes under a shared base path. It deploys **one Lambda** that handles all routing internally — no need to manage multiple Lambda functions or API Gateway routes.
+`defineApi` is the primary way to build HTTP APIs. It deploys **one Lambda** with a Function URL that handles all routing internally — no API Gateway needed.
 
 - **GET routes** — query handlers keyed by relative path (e.g., `"/users/{id}"`)
 - **POST handler** — single command entry point with discriminated union schema
@@ -325,6 +235,46 @@ export default defineApi({
   },
 });
 ```
+
+### Schema validation
+
+```typescript
+export const users = defineApi({
+  basePath: "/users",
+  schema: (input) => {
+    const obj = input as any;
+    if (!obj?.name) throw new Error("name is required");
+    return { name: obj.name as string };
+  },
+  post: async ({ data }) => {
+    // data is { name: string } — typed from schema return type
+    return { status: 201, body: { created: data.name } };
+  },
+});
+```
+
+When `schema` throws, the framework returns a 400 response automatically with the error message.
+
+### Dependencies
+
+```typescript
+import { orders } from "./orders.js";
+
+export const api = defineApi({
+  basePath: "/orders",
+  deps: { orders },
+  post: async ({ req, deps }) => {
+    // deps.orders is TableClient<Order> — typed from the table's generic
+    await deps.orders.put({
+      pk: "USER#123", sk: "ORDER#456",
+      data: { tag: "order", amount: 99, status: "pending" },
+    });
+    return { status: 201 };
+  },
+});
+```
+
+Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. See [architecture](./architecture#inter-handler-dependencies-deps) for details.
 
 ### CQRS with discriminated unions
 
@@ -375,14 +325,14 @@ export default defineApi({
 });
 ```
 
-### When to use defineApi vs defineHttp
-
-| | defineHttp | defineApi |
-|---|---|---|
-| **Routes** | One method + one path per handler | Multiple GET routes + one POST handler |
-| **Lambda count** | One Lambda per endpoint | Single fat Lambda |
-| **Routing** | API Gateway routes to specific Lambda | Lambda routes internally |
-| **Best for** | Simple endpoints, webhooks | CRUD APIs, CQRS, JSON-RPC |
+**Built-in best practices**:
+- **Lambda Function URL** — no API Gateway overhead, lower latency, zero cost for the URL itself.
+- **Single Lambda** — shared cold start, deps, and setup across all routes. One function to deploy and keep warm.
+- **Built-in CORS** — permissive CORS headers configured automatically on the Function URL.
+- **Cold start optimization** — the `setup` factory runs once on cold start and is cached across invocations.
+- **Schema validation** — when `schema` is set, the POST body is parsed and validated before your handler runs. Invalid requests get a 400 response automatically.
+- **Typed dependencies** — `deps` provides typed `TableClient<T>`, `BucketClient`, and `EmailClient` instances with auto-wired IAM permissions.
+- **Auto-infrastructure** — Lambda, Function URL, and IAM permissions are created on deploy.
 
 ---
 
@@ -851,7 +801,7 @@ export const app = defineStaticSite({
 });
 ```
 
-Values are references to `defineHttp` handlers. Effortless resolves the API Gateway domain at deploy time and creates CloudFront cache behaviors for each pattern — with caching disabled, all HTTP methods allowed, and all headers forwarded.
+Values are references to `defineApi` handlers. Effortless resolves the Function URL domain at deploy time and creates CloudFront cache behaviors for each pattern — with caching disabled, all HTTP methods allowed, and all headers forwarded.
 
 ### Error pages
 
@@ -1213,11 +1163,10 @@ Use it as a dependency from other handlers:
 ```typescript
 import { assets } from "./assets.js";
 
-export const upload = defineHttp({
-  method: "POST",
-  path: "/upload",
+export const api = defineApi({
+  basePath: "/uploads",
   deps: { assets },
-  onRequest: async ({ req, deps }) => {
+  post: async ({ req, deps }) => {
     // deps.assets is BucketClient
     await deps.assets.put("uploads/file.txt", req.body);
     return { status: 201 };
@@ -1255,14 +1204,13 @@ On first deploy, DKIM DNS records are printed to the console. Add them to your D
 Import the mailer and add it to `deps`. The framework injects a typed `EmailClient` with SES send permissions auto-wired.
 
 ```typescript
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 import { mailer } from "./mailer.js";
 
-export const sendWelcome = defineHttp({
-  method: "POST",
-  path: "/welcome",
+export const api = defineApi({
+  basePath: "/welcome",
   deps: { mailer },
-  onRequest: async ({ req, deps }) => {
+  post: async ({ req, deps }) => {
     await deps.mailer.send({
       from: "hello@myapp.com",
       to: req.body.email,

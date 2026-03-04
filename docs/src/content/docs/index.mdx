@@ -1,6 +1,6 @@
 ---
 title: Effortless AWS
-description: Code-first AWS Lambda framework. Export handlers, deploy with one command.
+description: Ship entire products on AWS serverless — API, database, website, queues, email — from TypeScript alone.
 template: splash
 ---
 
@@ -9,44 +9,11 @@ import AnimatedHero from '../../components/AnimatedHero.astro';
 
 <AnimatedHero />
 
-<CardGrid>
-  <Card title="Infrastructure from code">
-    Export a handler — get the full AWS infrastructure automatically. No YAML, no config files.
+## The problem
 
-    - Export handler — get Lambda, API Gateway, DynamoDB, IAM
-    - Auto IAM wiring from `deps: { orders }`
-    - Secrets via `param("key")` — fetched from SSM at cold start
+Serverless services are simple individually. The hard part is wiring them into a product — CloudFormation stacks, IAM policies for every connection, event source mappings, environment variable plumbing, minutes-long deploys. You spend more time on infrastructure than on the product itself.
 
-    <LinkButton href="/why-effortless/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
-  </Card>
-  <Card title="Zero overhead deployment">
-    Direct AWS SDK calls instead of CloudFormation. No state files to manage. Deploy in seconds, not minutes.
-
-    - Deploy in ~5-10s — direct API calls, no CloudFormation
-    - No state files — AWS resource tags as source of truth
-    - Smart Lambda Layers with hash-based versioning
-
-    <LinkButton href="/comparisons/#why-not-cloudformation" variant="secondary" icon="right-arrow">Learn more</LinkButton>
-  </Card>
-  <Card title="Type safety everywhere">
-    One `defineTable` call creates the table, generates typed clients, and validates data at runtime.
-
-    - Typed `.put()`, `.get()`, typed stream records
-    - Schema validation before your handler runs
-    - One definition — types flow to clients, streams, and deps
-
-    <LinkButton href="/definitions/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
-  </Card>
-  <Card title="Production ready by default">
-    Built on AWS managed services — multi-AZ availability, automatic scaling, zero maintenance. Best practices baked in.
-
-    - Partial batch failures — bad records don't kill the batch
-    - Cold start caching — `context` factory runs once, reused across invocations
-    - Structured logging with configurable log levels
-
-    <LinkButton href="/why-aws/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
-  </Card>
-</CardGrid>
+<LinkButton href="/why-effortless/" variant="secondary" icon="right-arrow">Why Effortless?</LinkButton>
 
 ## Build a todo app
 
@@ -54,16 +21,15 @@ Each tab adds a layer — every export creates real AWS infrastructure.
 
 <Tabs>
   <TabItem label="1. HTTP API">
-    One export — one endpoint. Method, path, handler function. Returns JSON automatically.
+    One export — one API. Define routes with `get`/`post` under a `basePath`. Returns JSON automatically.
 
     ```typescript
     // src/api.ts
-    import { defineHttp } from "effortless-aws";
+    import { defineApi } from "effortless-aws";
 
-    export const hello = defineHttp({
-      method: "GET",
-      path: "/",
-      onRequest: async () => ({
+    export const hello = defineApi({
+      basePath: "/",
+      get: async () => ({
         status: 200,
         body: { message: "Todo API is running" },
       }),
@@ -85,14 +51,13 @@ Each tab adds a layer — every export creates real AWS infrastructure.
     });
 
     // src/api.ts — use it as a typed dependency
-    import { defineHttp } from "effortless-aws";
+    import { defineApi } from "effortless-aws";
     import { todos } from "./db";
 
-    export const addTodo = defineHttp({
-      method: "POST",
-      path: "/todos",
+    export const todoApi = defineApi({
+      basePath: "/todos",
       deps: { todos },
-      onRequest: async ({ req, deps }) => {
+      post: async ({ req, deps }) => {
         await deps.todos.put({
           id: crypto.randomUUID(),
           title: req.body.title,
@@ -104,22 +69,21 @@ Each tab adds a layer — every export creates real AWS infrastructure.
     ```
   </TabItem>
   <TabItem label="3. Add secrets">
-    `param()` reads secrets from SSM Parameter Store at cold start and caches them. `context` factory creates long-lived clients from those secrets — a built-in DI pattern.
+    `param()` reads secrets from SSM Parameter Store at cold start and caches them. `setup` factory creates long-lived clients from those secrets — a built-in DI pattern.
 
     ```typescript
-    // src/api.ts — add params and context
-    import { defineHttp, param } from "effortless-aws";
+    // src/api.ts — add config and setup
+    import { defineApi, param } from "effortless-aws";
     import { todos } from "./db";
 
-    export const addTodo = defineHttp({
-      method: "POST",
-      path: "/todos",
+    export const todoApi = defineApi({
+      basePath: "/todos",
       deps: { todos },
-      params: { slackUrl: param("slack/webhook") },
-      context: async ({ params }) => ({
-        slack: createSlack(params.slackUrl),
+      config: { slackUrl: param("slack/webhook") },
+      setup: async ({ config }) => ({
+        slack: createSlack(config.slackUrl),
       }),
-      onRequest: async ({ req, deps, ctx }) => {
+      post: async ({ req, deps, ctx }) => {
         await deps.todos.put({
           id: crypto.randomUUID(),
           title: req.body.title,
@@ -154,7 +118,7 @@ $ eff deploy
 
 Deployed 3 handler(s) in 8s:
   [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-dev-todos
-  [http]  addTodo  https://abc123.execute-api.eu-west-1.amazonaws.com/todos
+  [api]   todoApi  https://abc123.lambda-url.eu-west-1.on.aws/todos
   [app]   frontend https://d1234567890.cloudfront.net
 ```
 
@@ -165,19 +129,65 @@ $ eff deploy --stage prod
 
 Deployed 3 handler(s) in 8s:
   [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-prod-todos
-  [http]  addTodo  https://xyz789.execute-api.eu-west-1.amazonaws.com/todos
-  [app]   frontend https://xyz789.execute-api.eu-west-1.amazonaws.com/
+  [api]   todoApi  https://xyz789.lambda-url.eu-west-1.on.aws/todos
+  [app]   frontend https://d1234567890.cloudfront.net
 ```
 
-Fully isolated infrastructure — separate tables, Lambdas, API Gateway. No shared state between stages.
+Fully isolated infrastructure — separate tables, Lambdas, Function URLs. No shared state between stages.
 
-## Compared to
+## Everything a product needs
 
-| | SST v3 | Nitric | Serverless | **Effortless** |
-|---|---|---|---|---|
-| Infra from code (not config) | No | Yes | No | **Yes** |
-| Typed client from schema | No | No | No | **Yes** |
-| No state files | No | No | No | **Yes** |
-| Deploy speed | ~30s | ~30s | minutes | **~5-10s** |
-| Runs in your AWS account | Yes | Yes | Yes | **Yes** |
-| Open source | Yes | Yes | Yes | **Yes** |
+| Your product needs | Effortless handler | AWS resources created |
+|---|---|---|
+| REST API | `defineApi` | Lambda + Function URL + IAM |
+| Database | `defineTable` | DynamoDB + optional stream Lambda |
+| Background jobs | `defineFifoQueue` | SQS FIFO + consumer Lambda |
+| File storage | `defineBucket` | S3 + optional event Lambda |
+| Transactional email | `defineMailer` | SES + DKIM identity |
+| Website / SSR app | `defineApp` | CloudFront + Lambda + S3 |
+| Static site / SPA | `defineStaticSite` | CloudFront + S3 |
+
+All in the same project, all deployed with one command, all with automatic IAM wiring between them.
+
+<LinkButton href="/definitions/" variant="secondary" icon="right-arrow">All definitions</LinkButton>
+
+<CardGrid>
+  <Card title="Ship the whole product">
+    API, database, website, queues, email — define everything in TypeScript, deploy with one command.
+
+    - Export handler — get Lambda, Function URL, DynamoDB, IAM
+    - Auto IAM wiring from `deps: { orders }`
+    - Secrets via `param("key")` — fetched from SSM at cold start
+
+    <LinkButton href="/why-effortless/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
+  </Card>
+  <Card title="Zero overhead deployment">
+    Direct AWS SDK calls instead of CloudFormation. No state files to manage. Deploy in seconds, not minutes.
+
+    - Deploy in ~5-10s — direct API calls, no CloudFormation
+    - No state files — AWS resource tags as source of truth
+    - Smart Lambda Layers with hash-based versioning
+
+    <LinkButton href="/comparisons/#why-not-cloudformation" variant="secondary" icon="right-arrow">Learn more</LinkButton>
+  </Card>
+  <Card title="Type safety everywhere">
+    One `defineTable` call creates the table, generates typed clients, and validates data at runtime.
+
+    - Typed `.put()`, `.get()`, typed stream records
+    - Schema validation before your handler runs
+    - One definition — types flow to clients, streams, and deps
+
+    <LinkButton href="/definitions/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
+  </Card>
+  <Card title="Serverless by default">
+    Pay per use, scale to zero, multi-AZ availability. Nothing runs when nobody is using your product.
+
+    - Zero cost at rest — pay only when your product is used
+    - Scales from zero to thousands of concurrent requests
+    - Multi-AZ redundancy on every service, no configuration
+
+    <LinkButton href="/why-serverless/" variant="secondary" icon="right-arrow">Why serverless?</LinkButton>
+  </Card>
+</CardGrid>
+
+See how Effortless compares to SST, Nitric, Serverless Framework, and others — [detailed comparisons](/comparisons/).

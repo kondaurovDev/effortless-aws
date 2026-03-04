@@ -1,26 +1,25 @@
 import { describe, it, expect } from "vitest"
 
-import { extractConfigs, extractTableConfigs } from "~cli/build/bundle"
+import { extractApiConfigs, extractTableConfigs } from "~cli/build/bundle"
 
 describe("params extraction", () => {
 
-  describe("extractConfigs (HTTP)", () => {
+  describe("extractApiConfigs", () => {
 
     it("should extract param entries from handler", () => {
       const source = `
-        import { defineHttp, param } from "effortless-aws";
+        import { defineApi, param } from "effortless-aws";
 
-        export const api = defineHttp({
-          method: "GET",
-          path: "/orders",
+        export const api = defineApi({
+          basePath: "/orders",
           config: {
             dbUrl: param("database-url"),
           },
-          onRequest: async ({ req, config }) => ({ status: 200 })
+          get: { "/": async ({ req, config }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.paramEntries).toEqual([
@@ -30,20 +29,19 @@ describe("params extraction", () => {
 
     it("should extract multiple param entries", () => {
       const source = `
-        import { defineHttp, param } from "effortless-aws";
+        import { defineApi, param } from "effortless-aws";
 
-        export const api = defineHttp({
-          method: "GET",
-          path: "/orders",
+        export const api = defineApi({
+          basePath: "/orders",
           config: {
             dbUrl: param("database-url"),
             apiKey: param("stripe-api-key"),
           },
-          onRequest: async ({ req, config }) => ({ status: 200 })
+          get: { "/": async ({ req, config }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.paramEntries).toEqual([
@@ -54,20 +52,19 @@ describe("params extraction", () => {
 
     it("should extract param entries with transform", () => {
       const source = `
-        import { defineHttp, param } from "effortless-aws";
+        import { defineApi, param } from "effortless-aws";
         import TOML from "smol-toml";
 
-        export const api = defineHttp({
-          method: "GET",
-          path: "/orders",
+        export const api = defineApi({
+          basePath: "/orders",
           config: {
             appConfig: param("app-config", TOML.parse),
           },
-          onRequest: async ({ req, config }) => ({ status: 200 })
+          get: { "/": async ({ req, config }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.paramEntries).toEqual([
@@ -77,16 +74,15 @@ describe("params extraction", () => {
 
     it("should return empty paramEntries when no params property", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
 
-        export const hello = defineHttp({
-          method: "GET",
-          path: "/hello",
-          onRequest: async ({ req }) => ({ status: 200 })
+        export const hello = defineApi({
+          basePath: "/hello",
+          get: { "/": async ({ req }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.paramEntries).toEqual([]);
@@ -94,19 +90,18 @@ describe("params extraction", () => {
 
     it("should extract params from default export", () => {
       const source = `
-        import { defineHttp, param } from "effortless-aws";
+        import { defineApi, param } from "effortless-aws";
 
-        export default defineHttp({
-          method: "GET",
-          path: "/orders",
+        export default defineApi({
+          basePath: "/orders",
           config: {
             dbUrl: param("database-url"),
           },
-          onRequest: async ({ req }) => ({ status: 200 })
+          get: { "/": async ({ req }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.exportName).toBe("default");
@@ -117,21 +112,20 @@ describe("params extraction", () => {
 
     it("should not leak params into static config", () => {
       const source = `
-        import { defineHttp, param } from "effortless-aws";
+        import { defineApi, param } from "effortless-aws";
 
-        export const api = defineHttp({
-          method: "GET",
-          path: "/orders",
+        export const api = defineApi({
+          basePath: "/orders",
           config: {
             dbUrl: param("database-url"),
           },
-          onRequest: async ({ req }) => ({ status: 200 })
+          get: { "/": async ({ req }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
-      expect(configs[0]!.config).toEqual({ method: "GET", path: "/orders" });
+      expect(configs[0]!.config).toEqual({ basePath: "/orders" });
       expect(configs[0]!.config).not.toHaveProperty("config");
     });
 

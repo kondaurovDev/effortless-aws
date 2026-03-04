@@ -33,7 +33,7 @@ aws sts get-caller-identity
 ```
 
 :::caution
-The IAM user or role needs permissions to manage Lambda, API Gateway, DynamoDB, IAM roles, and SSM. `AdministratorAccess` is simplest for development — scope it down for production.
+The IAM user or role needs permissions to manage Lambda, DynamoDB, IAM roles, S3, SQS, CloudFront, and SSM. `AdministratorAccess` is simplest for development — scope it down for production.
 :::
 
 :::note[Coming soon]
@@ -65,16 +65,15 @@ export default defineConfig({
 
 ```typescript
 // src/api.ts
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const hello = defineHttp({
-  method: "GET",
-  path: "/hello",
-  onRequest: async () => {
-    return {
+export const hello = defineApi({
+  basePath: "/hello",
+  get: {
+    "/": async () => ({
       status: 200,
       body: { message: "Hello from Effortless!" },
-    };
+    }),
   },
 });
 ```
@@ -85,7 +84,7 @@ export const hello = defineHttp({
 eff deploy
 ```
 
-That's it. Lambda + API Gateway + IAM role created in ~10 seconds.
+That's it. Lambda + Function URL + IAM role created in ~10 seconds.
 
 ## Next steps
 

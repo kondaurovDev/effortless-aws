@@ -1,76 +1,57 @@
 ---
 title: Why Effortless?
-description: The problems with current Lambda tooling and how Effortless solves them.
+description: Ship entire products on AWS serverless — API, database, website, queues, email — from TypeScript alone.
 ---
 
-You want to build a backend on AWS Lambda. You write a handler function. Then the real work begins.
+Serverless is the right model for shipping products. Pay per use, scale to zero, zero ops — Lambda, DynamoDB, SQS, S3, SES, CloudFront are proven, scalable services that handle everything from a side project to production traffic.
+
+But delivering a serverless product is unreasonably hard.
 
 ## The problem
 
-Adding a single Lambda endpoint today looks like this:
+Serverless services are simple individually. The hard part is wiring them into a product. Every product needs an API, a database, maybe a queue, file storage, email, and a frontend. Each is a separate AWS service — and connecting them means:
 
-1. Write the handler code
-2. Define the Lambda in CloudFormation/CDK/Terraform/SST config
-3. Create an IAM role with the right permissions
-4. Wire up API Gateway route
-5. Configure environment variables for table names
-6. Update the deployment pipeline
-7. Wait 2-5 minutes for CloudFormation to deploy
+- **CloudFormation / CDK / Terraform stacks** — even a simple app requires hundreds of lines of infrastructure config
+- **IAM policies for every connection** — your API Lambda needs DynamoDB access, your stream Lambda needs SQS access, your queue Lambda needs S3 access — each permission written manually
+- **Event source mappings** — wiring DynamoDB Streams to Lambda, SQS to Lambda, S3 events to Lambda — each with its own config
+- **Environment variables** — table names, queue URLs, bucket names passed between services
+- **Deployment orchestration** — minutes-long CloudFormation deploys, state files to manage, drift to detect
 
-**Seven steps for one endpoint.** And if you need a DynamoDB table with a stream processor, multiply that by three.
+The code for each handler is 10–20 lines. The infrastructure around it is 10x that. You spend more time wiring services together than building the product itself.
 
-The code is the easy part. Everything around it — the YAML, the state files, the IAM policies, the config wiring — that's where the time goes.
+## With Effortless — ship the whole product
 
-### What a typical project looks like
+Same product, same AWS services — but you only write the parts that matter:
 
 ```
 my-service/
 ├── src/
-│   └── handlers/
-│       └── createOrder.ts        ← your code (the part you care about)
-├── infra/
-│   ├── stacks/
-│   │   ├── ApiStack.ts           ← API Gateway config
-│   │   ├── DatabaseStack.ts      ← DynamoDB config
-│   │   └── FunctionStack.ts      ← Lambda config
-│   └── permissions.ts            ← IAM policies
-├── sst.config.ts                 ← or cdk.json, serverless.yml, main.tf...
-└── package.json
-```
-
-Your handler is one file. The infrastructure around it is five. And they all need to stay in sync manually.
-
-## The Effortless approach
-
-Same project:
-
-```
-my-service/
-├── src/
-│   └── orders.ts                 ← handler + infrastructure in one place
+│   ├── orders.ts                 ← API + database + stream processing
+│   ├── uploads.ts                ← file storage + image processing
+│   └── notifications.ts         ← queue + email
 ├── effortless.config.ts          ← project name, region, defaults
 └── package.json
 ```
 
+Each handler definition creates all the AWS resources it needs. `deps` wires them together — IAM permissions, environment variables, typed clients — automatically.
+
 ```typescript
 // src/orders.ts
-import { defineTable, defineHttp, typed } from "effortless-aws";
+import { defineTable, defineApi, typed } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number };
 
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
   onRecord: async ({ record }) => {
     console.log("New order:", record.new!.product);
   },
 });
 
-export const createOrder = defineHttp({
-  method: "POST",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   deps: { orders },
-  onRequest: async ({ req, deps }) => {
+  post: async ({ req, deps }) => {
     await deps.orders.put({
       id: crypto.randomUUID(),
       product: req.body.product,
@@ -82,18 +63,40 @@ export const createOrder = defineHttp({
 ```
 
 ```bash
-eff deploy    # ~10 seconds
+eff deploy    # ~10 seconds — the whole product
 ```
 
-This single file creates:
-- DynamoDB table with partition key
-- Stream processor Lambda (triggered on inserts/updates)
-- HTTP Lambda with DynamoDB write permissions
-- API Gateway `POST /orders` route
-- IAM roles for both Lambdas
-- Environment variables for table name wiring
+One command creates everything: DynamoDB table, stream processor Lambda, API Lambda with Function URL, IAM roles, environment variable wiring. **No YAML. No state files. No IAM policy writing.**
 
-**No YAML. No state files. No IAM policy writing.**
+### Everything a product needs
+
+| Your product needs | Effortless handler | AWS resources created |
+|---|---|---|
+| REST API | `defineApi` | Lambda + Function URL + IAM |
+| Database | `defineTable` | DynamoDB + optional stream Lambda |
+| Background jobs | `defineFifoQueue` | SQS FIFO + consumer Lambda |
+| File storage | `defineBucket` | S3 + optional event Lambda |
+| Transactional email | `defineMailer` | SES + DKIM identity |
+| Website / SSR app | `defineApp` | CloudFront + Lambda + S3 |
+| Static site / SPA | `defineStaticSite` | CloudFront + S3 |
+
+All in the same project, all deployed with one command, all with automatic IAM wiring between them.
+
+```typescript
+// One project. One deploy. A complete product backend.
+export const orders   = defineTable({ schema: typed<Order>(), onRecord: processOrder });
+export const uploads  = defineBucket({ onObjectCreated: processImage });
+export const queue    = defineFifoQueue({ schema: typed<Job>(), onMessage: processJob });
+export const mailer   = defineMailer({ domain: "myapp.com" });
+export const api      = defineApi({
+  basePath: "/api",
+  deps: { orders, uploads, queue, mailer },
+  // all deps are typed, all IAM permissions are automatic
+});
+export const site     = defineStaticSite({ dir: "dist", build: "npm run build" });
+```
+
+You can deliver an entire serverless product from TypeScript alone — and get back to building the product itself.
 
 ## Use cases
 
@@ -102,7 +105,7 @@ This single file creates:
 The most common Lambda pattern: HTTP endpoints that read/write from DynamoDB.
 
 ```typescript
-import { defineTable, defineHttp, typed } from "effortless-aws";
+import { defineTable, defineApi, typed } from "effortless-aws";
 import { z } from "zod";
 
 type User = { id: string; email: string; name: string; createdAt: string };
@@ -112,14 +115,21 @@ export const users = defineTable({
   schema: typed<User>(),
 });
 
-// POST /users — validated request body
-export const createUser = defineHttp({
-  method: "POST",
-  path: "/users",
+export const api = defineApi({
+  basePath: "/users",
+  deps: { users },
+
+  get: {
+    "/{id}": async ({ req, deps }) => {
+      const user = await deps.users.get({ id: req.params.id });
+      if (!user) return { status: 404, body: { error: "Not found" } };
+      return { status: 200, body: user };
+    },
+  },
+
   schema: (input: unknown) =>
     z.object({ email: z.string(), name: z.string() }).parse(input),
-  deps: { users },
-  onRequest: async ({ data, deps }) => {
+  post: async ({ data, deps }) => {
     const user: User = {
       id: crypto.randomUUID(),
       email: data.email,    // typed from schema
@@ -128,18 +138,6 @@ export const createUser = defineHttp({
     };
     await deps.users.put(user);  // typed client, auto IAM
     return { status: 201, body: user };
-  },
-});
-
-// GET /users/{id}
-export const getUser = defineHttp({
-  method: "GET",
-  path: "/users/{id}",
-  deps: { users },
-  onRequest: async ({ req, deps }) => {
-    const user = await deps.users.get({ id: req.params.id });
-    if (!user) return { status: 404, body: { error: "Not found" } };
-    return { status: 200, body: user };
   },
 });
 ```
@@ -172,6 +170,8 @@ export const orders = defineTable({
 });
 
 // Or process records in batches for efficiency
+type AnalyticsEvent = { id: string; event: string; timestamp: number };
+
 export const analytics = defineTable({
   pk: { name: "id", type: "string" },
   schema: typed<AnalyticsEvent>(),
@@ -190,7 +190,7 @@ The stream, event source mapping, batch size config, and partial failure reporti
 Deploy Nuxt, Astro SSR, or any framework with server-side rendering — CloudFront CDN with Lambda Function URL for SSR and S3 for static assets.
 
 ```typescript
-import { defineApp, defineHttp } from "effortless-aws";
+import { defineApp, defineApi } from "effortless-aws";
 
 // SSR app via CloudFront + Lambda Function URL
 export const app = defineApp({
@@ -201,11 +201,12 @@ export const app = defineApp({
 });
 
 // API endpoints in the same project
-export const getItems = defineHttp({
-  method: "GET",
-  path: "/api/items",
-  onRequest: async () => {
-    return { status: 200, body: await fetchItems() };
+export const api = defineApi({
+  basePath: "/api",
+  get: {
+    "/items": async () => {
+      return { status: 200, body: await fetchItems() };
+    },
   },
 });
 ```
@@ -227,18 +228,17 @@ export const site = defineStaticSite({
 Pull secrets from SSM Parameter Store at cold start — cached, typed, auto-permissioned.
 
 ```typescript
-import { defineHttp, param } from "effortless-aws";
+import { defineApi, param } from "effortless-aws";
 
-export const checkout = defineHttp({
-  method: "POST",
-  path: "/checkout",
-  params: {
+export const checkout = defineApi({
+  basePath: "/checkout",
+  config: {
     stripeKey: param("stripe/secret-key"),
     webhookSecret: param("stripe/webhook-secret"),
   },
-  onRequest: async ({ params }) => {
-    // params.stripeKey is fetched from SSM once, cached across invocations
-    const stripe = new Stripe(params.stripeKey);
+  post: async ({ config }) => {
+    // config.stripeKey is fetched from SSM once, cached across invocations
+    const stripe = new Stripe(config.stripeKey);
     // ...
   },
 });
@@ -250,11 +250,11 @@ No manual SSM calls. No `GetParameter` permission writing. No environment variab
 
 | Concept | Traditional | Effortless |
 |---------|-------------|------------|
-| IAM policies | Write JSON policies, attach to roles | Automatic from `deps` and `params` |
+| IAM policies | Write JSON policies, attach to roles | Automatic from `deps` and `config` |
 | CloudFormation / CDK | Learn constructs, stacks, synthesis | Not used |
 | Terraform / HCL | Learn HCL, manage state, plan/apply | Not used |
 | State management | S3 backends, locking, drift detection | AWS tags — no state files |
-| API Gateway config | Routes, integrations, stages, deployments | Derived from `method` + `path` |
+| API Gateway config | Routes, integrations, stages, deployments | Derived from `basePath` + route definitions |
 | DynamoDB streams | Event source mappings, batch config, failure handling | Add `onRecord` to your table |
 | Lambda Layers | Build, publish, version, attach to functions | Automatic for `node_modules` |
 
@@ -262,7 +262,7 @@ No manual SSM calls. No `GetParameter` permission writing. No environment variab
 
 - **Not multi-cloud.** AWS only. This focus is what makes deep integration possible.
 - **Not a managed platform.** Deploys to your AWS account. You own the resources.
-- **Not a full IaC tool.** Focused on the Lambda ecosystem (Lambda, API Gateway, DynamoDB, SQS, EventBridge, S3, CloudFront). For VPCs, RDS, or ECS — use Terraform/CDK alongside.
+- **Not a full IaC tool.** Covers the serverless product stack (Lambda, DynamoDB, SQS, S3, SES, CloudFront). For VPCs, RDS, or ECS — use Terraform/CDK alongside.
 - **Not zero-config.** You still need `effortless.config.ts` for project name and region. But that's one file, not five.
 
 ## Next steps

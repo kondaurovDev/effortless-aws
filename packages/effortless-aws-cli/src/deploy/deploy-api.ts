@@ -2,8 +2,8 @@ import { Effect } from "effect";
 import { extractApiConfigs, type ExtractedApiFunction } from "~/build/bundle";
 import {
   Aws,
-  ensureProjectApi,
-  addRouteToApi,
+  ensureFunctionUrl,
+  addFunctionUrlPublicAccess,
   makeTags,
   resolveStage,
   type TagContext
@@ -63,7 +63,6 @@ export const deploy = (input: DeployInput) =>
 
     const targetExport = input.exportName ?? "default";
     const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
-    const config = fn.config;
     const handlerName = fn.exportName;
 
     const tagCtx: TagContext = {
@@ -88,46 +87,23 @@ export const deploy = (input: DeployInput) =>
       ...(external.length > 0 ? { external } : {})
     });
 
-    // Setup API Gateway with two routes for basePath
-    yield* Effect.logDebug("Setting up API Gateway...");
-    const { apiId } = yield* ensureProjectApi({
-      projectName: input.project,
-      stage: tagCtx.stage,
-      region: input.region,
-      tags: makeTags(tagCtx, "api-gateway")
-    });
+    // Setup Function URL
+    const lambdaName = `${input.project}-${tagCtx.stage}-${handlerName}`;
+    const { functionUrl } = yield* ensureFunctionUrl(lambdaName);
+    yield* addFunctionUrlPublicAccess(lambdaName);
 
-    // Route 1: ANY /basePath — catches POST to base path
-    yield* addRouteToApi({
-      apiId,
-      region: input.region,
-      functionArn,
-      method: "ANY",
-      path: config.basePath
-    });
-
-    // Route 2: ANY /basePath/{proxy+} — catches GET sub-paths
-    const { apiUrl } = yield* addRouteToApi({
-      apiId,
-      region: input.region,
-      functionArn,
-      method: "ANY",
-      path: `${config.basePath}/{proxy+}`
-    });
-
-    yield* Effect.logDebug(`Deployment complete! URL: ${apiUrl}`);
+    yield* Effect.logDebug(`Deployment complete! URL: ${functionUrl}`);
 
     return {
       exportName: fn.exportName,
-      url: apiUrl,
+      url: functionUrl,
       functionArn
     } satisfies DeployResult;
   }).pipe(
     Effect.provide(
       Aws.makeClients({
         lambda: { region: input.region },
-        iam: { region: input.region },
-        apigatewayv2: { region: input.region }
+        iam: { region: input.region }
       })
     )
   );

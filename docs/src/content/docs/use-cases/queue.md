@@ -5,7 +5,7 @@ description: Process messages with defineFifoQueue — ordered delivery, typed m
 
 You need to process tasks asynchronously — order fulfillment, email sending, webhook delivery, data imports. You want guaranteed delivery, ordering, and the ability to retry individual failures without reprocessing the entire batch.
 
-With `defineFifoQueue` you write a message handler, export it, and get a production queue backed by [SQS FIFO + Lambda](/why-aws/#sqs-fifo).
+With `defineFifoQueue` you write a message handler, export it, and get a production queue backed by [SQS FIFO + Lambda](/why-serverless/#sqs-fifo).
 
 ## A simple queue
 

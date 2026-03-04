@@ -29,14 +29,13 @@ Since effortless controls both the runtime and the deployment, these features ca
 **Approach**: Declare `idempotency` in the handler — effortless creates the DynamoDB table on deploy and wires IAM permissions automatically.
 
 ```typescript
-export const createPayment = defineHttp({
-  method: "POST",
-  path: "/payments",
+export const payments = defineApi({
+  basePath: "/payments",
   idempotency: {
     key: (req) => req.body.paymentId,
     ttl: "1 hour",
   },
-  onRequest: async ({ req }) => {
+  post: async ({ req }) => {
     await chargeCustomer(req.body);
     return { status: 200, body: { ok: true } };
   },
@@ -70,15 +69,14 @@ export const processOrders = defineFifoQueue({
 **Approach**: Declare parameters in the handler definition. Effortless fetches and caches them at runtime, and auto-adds IAM permissions on deploy.
 
 ```typescript
-export const api = defineHttp({
-  method: "GET",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   params: {
     dbUrl: param("/prod/database-url"),
     stripeKey: secret("prod/stripe-api-key"),
     features: appConfig("my-app", "feature-flags"),
   },
-  onRequest: async ({ req, params }) => {
+  get: async ({ req, params }) => {
     // params.dbUrl    — string, cached, from SSM Parameter Store
     // params.stripeKey — string, cached, from Secrets Manager
     // params.features  — object, cached, from AppConfig
@@ -103,14 +101,13 @@ export const api = defineHttp({
 **Approach**: Built into every handler via the Effect logging system. Automatically enriches logs with Lambda context. Zero config for basic use, customizable for advanced.
 
 ```typescript
-export const api = defineHttp({
-  method: "POST",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   log: {
     level: "info",
     sampleRate: 0.1,  // 10% of requests also log DEBUG
   },
-  onRequest: async ({ req, log }) => {
+  post: async ({ req, log }) => {
     log.info("Processing order", { orderId: req.body.id });
     // output: {"level":"INFO","message":"Processing order","orderId":"abc-123",
     //          "requestId":"xxx","functionName":"createOrder","coldStart":false,
@@ -141,13 +138,12 @@ export const api = defineHttp({
 **Approach**: Inject `metrics` into every handler. Metrics are collected during invocation and flushed as EMF JSON to stdout on completion — CloudWatch parses the format automatically, no API calls needed.
 
 ```typescript
-export const api = defineHttp({
-  method: "POST",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   metrics: {
     namespace: "MyApp",  // or default to project name
   },
-  onRequest: async ({ req, metrics }) => {
+  post: async ({ req, metrics }) => {
     const order = await createOrder(req.body);
 
     metrics.add("OrderCreated", 1);
@@ -171,22 +167,23 @@ export const api = defineHttp({
 **Approach**: Enable with a flag — effortless configures `TracingConfig: Active` on the Lambda at deploy time and wraps the handler automatically.
 
 ```typescript
-export const api = defineHttp({
-  method: "GET",
-  path: "/users/{id}",
+export const api = defineApi({
+  basePath: "/users",
   tracing: true,
-  onRequest: async ({ req, tracer }) => {
-    // handler automatically traced as a segment
+  get: {
+    "/:id": async ({ req, tracer }) => {
+      // handler automatically traced as a segment
 
-    const user = await tracer.trace("fetchUser", () =>
-      db.get({ id: req.params.id })
-    );
+      const user = await tracer.trace("fetchUser", () =>
+        db.get({ id: req.params.id })
+      );
 
-    const enriched = await tracer.trace("enrichProfile", () =>
-      enrichWithExternalData(user)
-    );
+      const enriched = await tracer.trace("enrichProfile", () =>
+        enrichWithExternalData(user)
+      );
 
-    return { status: 200, body: enriched };
+      return { status: 200, body: enriched };
+    },
   },
 });
 ```
@@ -207,15 +204,14 @@ export const api = defineHttp({
 **Approach**: First-class middleware support in handler definitions. Middleware can also trigger infrastructure changes (e.g., auth middleware adds Cognito/JWT authorizer on API Gateway).
 
 ```typescript
-export const api = defineHttp({
-  method: "POST",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   middleware: [
     cors({ origins: ["https://myapp.com"] }),
     compress(),  // gzip responses > 1KB
     rateLimit({ max: 100, window: "1 minute" }),  // uses DynamoDB counter
   ],
-  onRequest: async ({ req }) => {
+  post: async ({ req }) => {
     return { status: 200, body: { ok: true } };
   },
 });
@@ -241,10 +237,9 @@ export const processOrder = defineFifoQueue({
   },
 });
 
-export const createOrder = defineHttp({
-  method: "POST",
-  path: "/orders",
-  onRequest: async ({ req }) => {
+export const orders = defineApi({
+  basePath: "/orders",
+  post: async ({ req }) => {
     // type-safe — payload shape inferred from processOrder's messageSchema
     await processOrder.send({ orderId: "abc-123", amount: 99 });
     return { status: 202, body: { queued: true } };
@@ -259,7 +254,7 @@ The same pattern applies to all resource types:
 - `bucket.put(key, data)`, `bucket.getSignedUrl(key)` — S3
 
 **What effortless auto-wires on deploy**:
-- IAM permissions (e.g. `sqs:SendMessage` from `createOrder` to `processOrder` queue)
+- IAM permissions (e.g. `sqs:SendMessage` from `orders` to `processOrder` queue)
 - Resource URLs/ARNs injected via environment variables
 
 **Status**: Planned
@@ -342,10 +337,9 @@ export const processOrder = defineFunction({
   },
 });
 
-export const createOrder = defineHttp({
-  method: "POST",
-  path: "/orders",
-  onRequest: async ({ req }) => {
+export const orders = defineApi({
+  basePath: "/orders",
+  post: async ({ req }) => {
     const execId = await processOrder.start({ orderId: req.body.id });
     return { status: 202, body: { executionId: execId } };
   },

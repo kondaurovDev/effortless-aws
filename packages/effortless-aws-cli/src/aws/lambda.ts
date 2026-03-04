@@ -206,6 +206,12 @@ export const publishVersion = (functionName: string) =>
 
 // ============ Function URL ============
 
+const DEFAULT_CORS = {
+  AllowOrigins: ["*"],
+  AllowMethods: ["*"],
+  AllowHeaders: ["*"],
+};
+
 export const ensureFunctionUrl = (functionName: string) =>
   Effect.gen(function* () {
     // Check if Function URL already exists
@@ -222,6 +228,7 @@ export const ensureFunctionUrl = (functionName: string) =>
       yield* lambda.make("update_function_url_config", {
         FunctionName: functionName,
         AuthType: "NONE",
+        Cors: DEFAULT_CORS,
       });
       return { functionUrl: existing.FunctionUrl! };
     }
@@ -231,6 +238,7 @@ export const ensureFunctionUrl = (functionName: string) =>
       FunctionName: functionName,
       AuthType: "NONE",
       InvokeMode: "BUFFERED",
+      Cors: DEFAULT_CORS,
     });
 
     return { functionUrl: result.FunctionUrl! };

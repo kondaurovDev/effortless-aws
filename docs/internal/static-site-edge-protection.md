@@ -114,7 +114,7 @@ Each `defineStaticSite` already creates its own distribution. Separate domains =
 
 ### `edge` (Lambda@Edge) — future
 
-- Bundle user function with esbuild (same as `defineHttp`)
+- Bundle user function with esbuild (same as `defineApi`)
 - Deploy Lambda to `us-east-1` (use `Effect.provide()` with Lambda client `.Default({ region: "us-east-1" })`)
 - Associate as `viewer-request` Lambda@Edge on distribution
 - Include URL rewrite logic inside the Lambda wrapper

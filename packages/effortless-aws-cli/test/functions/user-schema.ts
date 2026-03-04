@@ -1,4 +1,4 @@
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 import { Effect, pipe } from "effect";
 import * as S from "effect/Schema";
 
@@ -21,14 +21,13 @@ const processUser = (input: unknown) =>
     Effect.runSync
   );
 
-export default defineHttp({
-  method: "POST",
-  path: "/user",
-  onRequest: async ({ req }) => {
+export default defineApi({
+  basePath: "/user",
+  post: async ({ req }) => {
     const result = processUser(req.body);
     return {
       status: 200,
       body: result
     };
-  }
+  },
 });

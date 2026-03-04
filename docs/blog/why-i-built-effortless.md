@@ -49,19 +49,20 @@ This matters because some handlers need references to other resources — a Lamb
 Here's what the simplest handler looks like:
 
 ```typescript
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const hello = defineHttp({
-  method: "GET",
-  path: "/hello",
-  onRequest: async ({ req }) => ({
-    status: 200,
-    body: { message: "Hello World!" },
-  }),
+export const hello = defineApi({
+  basePath: "/hello",
+  get: {
+    "/": async () => ({
+      status: 200,
+      body: { message: "Hello World!" },
+    }),
+  },
 });
 ```
 
-That's your **Lambda** function, its **API Gateway** route, and its **IAM** role — all in one file. Run `eff deploy` and it's live.
+That's your **Lambda** function, its **Function URL**, and its **IAM** role — all in one file. Run `eff deploy` and it's live.
 
 ## Before and After
 
@@ -97,19 +98,20 @@ With **effortless-aws**, the same thing is:
 
 ```typescript
 // That's it. One file.
-import { defineHttp, defineTable } from "effortless-aws";
+import { defineApi, defineTable } from "effortless-aws";
 
 export const orders = defineTable({
   pk: "id",
 });
 
-export const getOrders = defineHttp({
-  method: "GET",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   deps: { orders },
-  onRequest: async ({ deps }) => {
-    const items = await deps.orders.scan();
-    return { status: 200, body: items };
+  get: {
+    "/": async ({ deps }) => {
+      const items = await deps.orders.scan();
+      return { status: 200, body: items };
+    },
   },
 });
 ```
@@ -122,7 +124,7 @@ Under the hood, `eff deploy` goes through four stages. Orchestrating them was th
 
 ### 1. Scan
 
-**ts-morph** reads your TypeScript source and extracts every `defineHttp` / `defineTable` call — method, path, deps, params, static files — straight from the AST. This was the part where I realized *metaprogramming* in TypeScript is actually viable. Instead of maintaining separate YAML or JSON config files, **the code itself is the source of truth**. **ts-morph** made it surprisingly elegant.
+**ts-morph** reads your TypeScript source and extracts every `defineApi` / `defineTable` call — basePath, routes, deps, config, static files — straight from the AST. This was the part where I realized *metaprogramming* in TypeScript is actually viable. Instead of maintaining separate YAML or JSON config files, **the code itself is the source of truth**. **ts-morph** made it surprisingly elegant.
 
 ### 2. Bundle
 

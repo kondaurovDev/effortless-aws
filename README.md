@@ -5,7 +5,7 @@
 
 **Write a TypeScript handler. Export it. Deploy. That's it.**
 
-No CloudFormation. No Terraform. No YAML. No state files. Lambda, API Gateway, DynamoDB, IAM — all created from your code in ~10 seconds.
+No CloudFormation. No Terraform. No YAML. No state files. Lambda, DynamoDB, IAM — all created from your code in ~10 seconds.
 
 ## The problem
 
@@ -24,15 +24,16 @@ Adding one Lambda endpoint with existing tools:
 
 ```typescript
 // src/api.ts
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const hello = defineHttp({
-  method: "GET",
-  path: "/hello",
-  onRequest: async () => ({
-    status: 200,
-    body: { message: "Hello!" },
-  }),
+export const hello = defineApi({
+  basePath: "/hello",
+  get: {
+    "/": async () => ({
+      status: 200,
+      body: { message: "Hello!" },
+    }),
+  },
 });
 ```
 
@@ -40,12 +41,12 @@ export const hello = defineHttp({
 npx eff deploy   # ~10 seconds
 ```
 
-One file. One command. Lambda + API Gateway route + IAM role created automatically.
+One file. One command. Lambda + Function URL + IAM role created automatically.
 
 ## A more real example
 
 ```typescript
-import { defineTable, defineHttp, typed } from "effortless-aws";
+import { defineTable, defineApi, typed } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number };
 
@@ -59,11 +60,10 @@ export const orders = defineTable({
 });
 
 // Creates an HTTP Lambda with DynamoDB write permissions
-export const createOrder = defineHttp({
-  method: "POST",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   deps: { orders },
-  onRequest: async ({ req, deps }) => {
+  post: async ({ req, deps }) => {
     await deps.orders.put({           // typed client — knows Order shape
       id: crypto.randomUUID(),
       product: req.body.product,
@@ -74,12 +74,11 @@ export const createOrder = defineHttp({
 });
 ```
 
-This creates: DynamoDB table, stream processor Lambda, HTTP Lambda, API Gateway route, IAM roles for both, environment variable wiring. **Zero config files.**
+This creates: DynamoDB table, stream processor Lambda, HTTP Lambda, Function URL, IAM roles for both, environment variable wiring. **Zero config files.**
 
 ## What's in the box
 
-- **`defineHttp`** — HTTP endpoints via API Gateway
-- **`defineApi`** — REST API with typed GET/POST routes
+- **`defineApi`** — HTTP API with typed GET/POST routes via Lambda Function URL
 - **`defineApp`** — SSR frameworks (Nuxt, Astro) via CloudFront + Lambda
 - **`defineTable`** — DynamoDB tables with typed clients and stream processing
 - **`defineFifoQueue`** — SQS FIFO queue consumers

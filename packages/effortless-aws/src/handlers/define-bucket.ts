@@ -159,14 +159,13 @@ export type BucketHandler<C = undefined, D = undefined, P = undefined, S extends
  *
  * @example As a dependency
  * ```typescript
- * export const processImage = defineHttp({
- *   method: "POST",
- *   path: "/process",
+ * export const api = defineApi({
+ *   basePath: "/process",
  *   deps: { uploads },
- *   onRequest: async ({ req, deps }) => {
+ *   post: async ({ req, deps }) => {
  *     await deps.uploads.put("output.jpg", buffer);
  *     return { status: 200, body: "OK" };
- *   }
+ *   },
  * });
  * ```
  */

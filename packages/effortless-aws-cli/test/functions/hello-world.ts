@@ -1,10 +1,11 @@
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export default defineHttp({
-  method: "GET",
-  path: "/hello",
-  onRequest: async ({ req }) => ({
-    status: 200,
-    body: { message: "Hello World!!!", path: req.path }
-  })
+export default defineApi({
+  basePath: "/hello",
+  get: {
+    "/": async ({ req }) => ({
+      status: 200,
+      body: { message: "Hello World!!!", path: req.path }
+    }),
+  },
 });

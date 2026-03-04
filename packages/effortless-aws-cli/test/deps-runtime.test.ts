@@ -15,12 +15,12 @@ vi.mock("@aws-sdk/client-dynamodb", () => ({
   },
 }));
 
-import { wrapHttp } from "~aws/runtime/wrap-http"
+import { wrapApi } from "~aws/runtime/wrap-api"
 import { wrapTableStream } from "~aws/runtime/wrap-table-stream"
-import type { HttpHandler } from "~aws/handlers/define-http"
+import type { ApiHandler } from "~aws/handlers/define-api"
 import type { TableHandler } from "~aws/handlers/define-table"
 
-const makeHttpEvent = (overrides: Record<string, unknown> = {}) => ({
+const makeApiEvent = (overrides: Record<string, unknown> = {}) => ({
   requestContext: { http: { method: "POST", path: "/test" } },
   headers: {},
   queryStringParameters: {},
@@ -57,7 +57,7 @@ describe("deps runtime injection", () => {
     process.env = originalEnv;
   });
 
-  describe("HTTP handler (wrapHttp)", () => {
+  describe("API handler (wrapApi)", () => {
 
     it("should inject deps with table client into handler", async () => {
       process.env = { ...originalEnv, EFF_DEP_orders: "table:test-project-dev-orders" };
@@ -65,17 +65,17 @@ describe("deps runtime injection", () => {
       let capturedDeps: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "POST", path: "/orders" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedDeps = args.deps;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler<undefined, undefined, any>;
 
-      const wrapped = wrapHttp(handler);
-      const response = await wrapped(makeHttpEvent());
+      const wrapped = wrapApi(handler);
+      const response = await wrapped(makeApiEvent());
 
       expect(response.statusCode).toBe(200);
       expect(capturedDeps).not.toBeNull();
@@ -93,18 +93,18 @@ describe("deps runtime injection", () => {
       let capturedArgs: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "POST", path: "/orders" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         setup: () => ({ env: "test" }),
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, any, any>;
+      } as unknown as ApiHandler<undefined, any, any>;
 
-      const wrapped = wrapHttp(handler);
-      await wrapped(makeHttpEvent());
+      const wrapped = wrapApi(handler);
+      await wrapped(makeApiEvent());
 
       expect(capturedArgs.ctx).toEqual({ env: "test" });
       expect(capturedArgs.deps.orders.tableName).toBe("my-orders-table");
@@ -116,22 +116,22 @@ describe("deps runtime injection", () => {
       let capturedArgs: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "POST", path: "/orders" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         schema: (input: unknown) => {
           const obj = input as any;
           if (!obj?.item) throw new Error("item required");
           return { item: obj.item };
         },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedArgs = args;
           return { status: 201 };
         },
-      } as unknown as HttpHandler<any, undefined, any>;
+      } as unknown as ApiHandler<any, undefined, any>;
 
-      const wrapped = wrapHttp(handler);
-      await wrapped(makeHttpEvent({ body: JSON.stringify({ item: "book" }) }));
+      const wrapped = wrapApi(handler);
+      await wrapped(makeApiEvent({ body: JSON.stringify({ item: "book" }) }));
 
       expect(capturedArgs.data).toEqual({ item: "book" });
       expect(capturedArgs.deps.orders.tableName).toBe("my-orders-table");
@@ -144,18 +144,18 @@ describe("deps runtime injection", () => {
       let capturedDeps: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "POST", path: "/orders" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", __spec: { tagField: "__tag" }, config: {} } },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           capturedDeps = args.deps;
           await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { __tag: "Order", amount: 42 } });
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler<undefined, undefined, any>;
 
-      const wrapped = wrapHttp(handler);
-      await wrapped(makeHttpEvent());
+      const wrapped = wrapApi(handler);
+      await wrapped(makeApiEvent());
 
       expect(capturedDeps.orders.tableName).toBe("test-project-dev-orders");
       // put() should extract tag from data["__tag"], not data["tag"]
@@ -171,17 +171,17 @@ describe("deps runtime injection", () => {
       mockPutItem.mockResolvedValue({});
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "POST", path: "/orders" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", __spec: {}, config: {} } },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { tag: "Order", amount: 42 } });
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler<undefined, undefined, any>;
 
-      const wrapped = wrapHttp(handler);
-      await wrapped(makeHttpEvent());
+      const wrapped = wrapApi(handler);
+      await wrapped(makeApiEvent());
 
       const putArgs = mockPutItem.mock.calls[0]![0];
       expect(putArgs.Item.tag).toEqual({ S: "Order" });
@@ -192,17 +192,17 @@ describe("deps runtime injection", () => {
       delete process.env.EFF_DEP_orders;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "POST", path: "/orders" },
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        onRequest: async (args: any) => {
+        post: async (args: any) => {
           return { status: 200, body: { table: args.deps.orders.tableName } };
         },
-      } as unknown as HttpHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler<undefined, undefined, any>;
 
-      const wrapped = wrapHttp(handler);
+      const wrapped = wrapApi(handler);
 
-      await expect(wrapped(makeHttpEvent())).rejects.toThrow(
+      await expect(wrapped(makeApiEvent())).rejects.toThrow(
         'Missing environment variable EFF_DEP_orders for dep "orders"'
       );
     });
@@ -211,16 +211,16 @@ describe("deps runtime injection", () => {
       let capturedArgs: any = null;
 
       const handler = {
-        __brand: "effortless-http",
-        __spec: { method: "GET", path: "/hello" },
-        onRequest: async (args: any) => {
+        __brand: "effortless-api",
+        __spec: { basePath: "/test" },
+        post: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { hello: "world" } };
         },
-      } as unknown as HttpHandler;
+      } as unknown as ApiHandler;
 
-      const wrapped = wrapHttp(handler);
-      await wrapped(makeHttpEvent());
+      const wrapped = wrapApi(handler);
+      await wrapped(makeApiEvent());
 
       expect(capturedArgs.deps).toBeUndefined();
     });

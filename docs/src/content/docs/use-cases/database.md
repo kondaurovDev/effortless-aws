@@ -3,7 +3,7 @@ title: Database
 description: Create DynamoDB tables with defineTable — single-table design, typed clients, stream processing, and event-driven workflows.
 ---
 
-You need a database for your serverless app. [DynamoDB](/why-aws/#dynamodb) is a fully managed database with single-digit millisecond latency, automatic replication across availability zones, and a built-in streaming feature that turns every write into a real-time event.
+You need a database for your serverless app. [DynamoDB](/why-serverless/#dynamodb) is a fully managed database with single-digit millisecond latency, automatic replication across availability zones, and a built-in streaming feature that turns every write into a real-time event.
 
 The usual pain with DynamoDB isn't the service itself — it's the setup. CloudFormation templates, IAM policies, event source mappings, environment variable wiring, and the boilerplate of single-table design. With `defineTable` you declare the table once, and get a typed client, stream processing, and automatic IAM wiring — all from a single export.
 
@@ -267,20 +267,21 @@ The real power of `defineTable` is how it composes with other handlers. Any HTTP
 
 ```typescript
 // src/api.ts
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 import { users } from "./users";
 
-export const getUser = defineHttp({
-  method: "GET",
-  path: "/users/{id}",
+export const getUser = defineApi({
+  basePath: "/users",
   deps: { users },
-  onRequest: async ({ req, deps }) => {
-    const user = await deps.users.get({
-      pk: `USER#${req.params.id}`,
-      sk: "PROFILE",
-    });
-    if (!user) return { status: 404, body: { error: "User not found" } };
-    return { status: 200, body: user.data };
+  get: {
+    "/{id}": async ({ req, deps }) => {
+      const user = await deps.users.get({
+        pk: `USER#${req.params.id}`,
+        sk: "PROFILE",
+      });
+      if (!user) return { status: 404, body: { error: "User not found" } };
+      return { status: 200, body: user.data };
+    },
   },
 });
 ```

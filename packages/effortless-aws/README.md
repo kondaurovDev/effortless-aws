@@ -11,13 +11,15 @@ npm install effortless-aws
 ## What it looks like
 
 ```typescript
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const hello = defineHttp({
-  method: "GET",
-  path: "/hello",
-  onRequest: async () => {
-    return { status: 200, body: { message: "Hello!" } };
+export const hello = defineApi({
+  basePath: "/hello",
+  get: {
+    "/": async () => ({
+      status: 200,
+      body: { message: "Hello!" },
+    }),
   },
 });
 ```
@@ -26,9 +28,8 @@ export const hello = defineHttp({
 
 | Handler | Description |
 |---------|-------------|
-| `defineHttp` | HTTP endpoint via API Gateway |
-| `defineApi` | REST API with typed GET/POST routes |
-| `defineApp` | Generic Lambda (cron, custom events) |
+| `defineApi` | HTTP API with typed GET/POST routes via Lambda Function URL |
+| `defineApp` | SSR framework deployment (Nuxt, Next.js) via CloudFront |
 | `defineTable` | DynamoDB table with stream processing |
 | `defineFifoQueue` | SQS FIFO queue consumer |
 | `defineBucket` | S3 bucket with event triggers |

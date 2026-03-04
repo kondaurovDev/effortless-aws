@@ -64,14 +64,12 @@ describe("defineApi", () => {
       expect(configs[0]!.config).not.toHaveProperty("schema");
     });
 
-    it("should not match defineHttp calls", () => {
+    it("should not match other define* calls", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineTable } from "effortless-aws";
 
-        export const api = defineHttp({
-          method: "GET",
-          path: "/api",
-          onRequest: async ({ req }) => ({ status: 200 })
+        export const api = defineTable({
+          schema: (input) => input,
         });
       `;
 

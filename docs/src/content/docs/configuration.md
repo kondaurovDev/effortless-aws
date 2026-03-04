@@ -20,7 +20,7 @@ export default defineConfig({
 });
 ```
 
-That's the minimum — a name, a region, and a pattern to find handlers. Effortless will discover all `defineHttp`, `defineTable`, `defineFifoQueue`, and other handler exports in matching files.
+That's the minimum — a name, a region, and a pattern to find handlers. Effortless will discover all `defineApi`, `defineTable`, `defineFifoQueue`, and other handler exports in matching files.
 
 ## Project Config
 
@@ -154,16 +154,17 @@ export default defineConfig({
 Every handler accepts `memory`, `timeout`, and `permissions` to override project defaults. You can also add IAM permissions for specific AWS services a handler needs to access.
 
 ```typescript
-import { defineHttp } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const processImage = defineHttp({
-  method: "POST",
-  path: "/images/resize",
+export const processImage = defineApi({
+  basePath: "/images",
   memory: 1024,                    // needs more memory for image processing
   timeout: 120,                    // 2 minutes (in seconds)
   permissions: ["s3:GetObject", "s3:PutObject"],
-  onRequest: async ({ req }) => {
-    // ...
+  post: {
+    "/resize": async ({ req }) => {
+      // ...
+    },
   },
 });
 ```
@@ -192,7 +193,7 @@ Effortless auto-manages permissions for built-in features. You only need `permis
 
 ### `logLevel`
 
-Controls the verbosity of structured logs emitted to CloudWatch. Defaults to `"info"` for `defineHttp`, `defineTable`, and `defineFifoQueue`.
+Controls the verbosity of structured logs emitted to CloudWatch. Defaults to `"info"` for `defineApi`, `defineTable`, and `defineFifoQueue`.
 
 | Level | What gets logged |
 |-------|-----------------|

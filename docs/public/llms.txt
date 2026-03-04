@@ -2,7 +2,7 @@
 
 > Code-first AWS Lambda framework for TypeScript. Export handlers, deploy with one command.
 
-Effortless AWS is a TypeScript framework where you define AWS resources (Lambda, DynamoDB, SQS, S3, SES, CloudFront) by exporting handler objects from `.ts` files. The framework handles all infrastructure — IAM roles, API Gateway routes, event source mappings, Lambda layers — automatically. No YAML, no CloudFormation, no state files.
+Effortless AWS is a TypeScript framework where you define AWS resources (Lambda, DynamoDB, SQS, S3, SES, CloudFront) by exporting handler objects from `.ts` files. The framework handles all infrastructure — IAM roles, Lambda Function URLs, event source mappings, Lambda layers — automatically. No YAML, no CloudFormation, no state files.
 
 - Package: `effortless-aws` (npm)
 - CLI: `eff deploy`
@@ -57,60 +57,11 @@ Pass a validation function or `typed<T>()` for type-only. Validated data arrives
 
 ## Handler types
 
-### defineHttp — REST API endpoint
+### defineApi — HTTP API
 
-Creates API Gateway route + Lambda.
+Creates Lambda + Function URL with built-in routing. Deploys a single Lambda that handles all routes internally — no API Gateway needed.
 
-```typescript
-import { defineHttp, param } from "effortless-aws";
-import { z } from "zod";
-
-export const createUser = defineHttp({
-  // Required
-  method: "POST",                    // GET | POST | PUT | DELETE | PATCH | ANY
-  path: "/users",                    // supports {param} placeholders
-
-  // Callback (required)
-  onRequest: async ({ req, data, deps, config, ctx, files }) => {
-    return {
-      status: 201,
-      body: { id: "123" },           // auto-serialized to JSON
-      headers: { "x-custom": "val" },
-      contentType: "json",           // json | html | text | css | js | xml | csv | svg
-    };
-  },
-
-  // Optional
-  schema: (input: unknown) => z.object({ email: z.string(), name: z.string() }).parse(input),
-  deps: { users, uploads },
-  config: { stripeKey: param("stripe/secret-key") },
-  setup: async ({ deps, config }) => ({ stripe: new Stripe(config.stripeKey) }),
-  static: ["src/templates/*.html"],
-  memory: 512,
-  timeout: 60,                       // seconds (handler-level)
-  permissions: ["s3:GetObject"],     // extra IAM on top of auto-managed
-  logLevel: "debug",                 // "error" | "info" (default) | "debug"
-  onError: (error, req) => ({       // custom error response
-    status: 500,
-    body: { error: "Something went wrong" },
-  }),
-});
-```
-
-**`req` object:**
-- `req.method` — HTTP method
-- `req.path` — request path
-- `req.headers` — `Record<string, string | undefined>`
-- `req.query` — query string parameters
-- `req.params` — path parameters from `{param}` placeholders
-- `req.body` — parsed body (JSON auto-parsed)
-- `req.rawBody` — raw string body
-
-### defineApi — CQRS-style API
-
-Creates API Gateway route + single Lambda with GET routing and POST command handling. Deploys as a fat Lambda with a catch-all `{proxy+}` route — routing is done inside the function.
-
-Use `defineApi` when you need multiple routes under a shared base path with shared deps/config/setup. For single-method endpoints, use `defineHttp` instead.
+`defineApi` is the primary way to build HTTP APIs. It supports multiple GET routes and a POST command handler under a shared base path with shared deps/config/setup.
 
 ```typescript
 import { defineApi, defineTable, typed, param } from "effortless-aws";
@@ -162,13 +113,23 @@ export default defineApi({
 });
 ```
 
-**Key differences from `defineHttp`:**
-- `basePath` instead of `method` + `path` — single Lambda handles all routes
+**Key features:**
+- `basePath` — single Lambda handles all routes under this prefix
 - `get` — record of `{ path: handler }` for query routes with `{param}` extraction
 - `schema` + `post` — single POST handler with discriminated union for commands
 - Both `get` and `post` are optional (you can use just one)
 - Shared `deps`, `config`, `setup`, `static`, `onError` across all routes
 - Unmatched routes get a 404 automatically
+- Lambda Function URL with built-in CORS — no API Gateway overhead
+
+**`req` object (available in all route handlers):**
+- `req.method` — HTTP method
+- `req.path` — request path
+- `req.headers` — `Record<string, string | undefined>`
+- `req.query` — query string parameters
+- `req.params` — path parameters from `{param}` placeholders
+- `req.body` — parsed body (JSON auto-parsed)
+- `req.rawBody` — raw string body
 
 ### defineTable — DynamoDB table
 
@@ -297,9 +258,10 @@ export const orderQueue = defineFifoQueue({
 **Sending messages** (from another handler via `deps`):
 
 ```typescript
-export const createOrder = defineHttp({
+export const orders = defineApi({
+  basePath: "/orders",
   deps: { orderQueue },
-  onRequest: async ({ deps }) => {
+  post: async ({ deps }) => {
     await deps.orderQueue.send({
       body: { orderId: "123", action: "created" },
       messageGroupId: "order-123",
@@ -473,7 +435,7 @@ All AWS resources follow `${project}-${stage}-${handlerName}`:
 - Lambda: `my-service-dev-createUser`
 - DynamoDB: `my-service-dev-orders`
 - SQS FIFO: `my-service-dev-orderQueue.fifo`
-- API Gateway: `my-service-dev` (shared per project+stage)
+- Function URL: auto-created per Lambda (no separate name)
 
 ### Stage isolation
 
@@ -511,7 +473,7 @@ export const orders = defineTable({
 ### Callback args
 
 Handler callbacks receive a single object with relevant args. Args are conditionally present based on configuration:
-- `req` — HTTP request (defineHttp)
+- `req` — HTTP request (defineApi)
 - `data` — validated body (when schema is set)
 - `deps` — typed dep clients (when deps is set)
 - `config` — resolved SSM values (when config is set)

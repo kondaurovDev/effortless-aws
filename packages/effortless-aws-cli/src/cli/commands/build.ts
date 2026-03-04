@@ -3,7 +3,7 @@ import { Effect, Console, Option } from "effect";
 import * as path from "path";
 import * as fs from "fs";
 
-import { bundle, extractConfigs, extractTableConfigs, findHandlerFiles, discoverHandlers } from "~/build/bundle";
+import { bundle, extractApiConfigs, extractTableConfigs, findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { collectLayerPackages, readProductionDependencies } from "../../aws";
 import { verboseOption, outputOption, getPatternsFromConfig } from "~/cli/config";
 import { ProjectConfig } from "~/cli/project-config";
@@ -63,7 +63,7 @@ export const buildCommand = Command.make(
 
             let builtCount = 0;
 
-            for (const { file: handlerFile, exports } of discovered.httpHandlers) {
+            for (const { file: handlerFile, exports } of discovered.apiHandlers) {
               const relativePath = path.relative(projectDir, handlerFile);
               const baseName = path.basename(handlerFile, path.extname(handlerFile));
 
@@ -71,12 +71,13 @@ export const buildCommand = Command.make(
                 const outputName = exportName === "default" ? baseName : `${baseName}-${exportName}`;
                 const outputPath = path.join(outputDir, `${outputName}.mjs`);
 
-                yield* Console.log(`Building ${c.cyan("[http]")} ${c.bold(relativePath)}:${exportName}...`);
+                yield* Console.log(`Building ${c.cyan("[api]")} ${c.bold(relativePath)}:${exportName}...`);
 
                 const bundled = yield* bundle({
                   projectDir,
                   file: handlerFile,
                   exportName,
+                  type: "api",
                   ...(external.length > 0 ? { external } : {})
                 });
 
@@ -148,9 +149,9 @@ export const buildCommand = Command.make(
                 yield* Console.log(`  -> ${outputPath} ${c.dim(`(${size} KB)`)}`);
               }
             } else {
-              const configs = extractConfigs(source);
+              const configs = extractApiConfigs(source);
               if (configs.length === 0) {
-                yield* Console.error("No defineHttp handlers found in file");
+                yield* Console.error("No defineApi handlers found in file");
                 return;
               }
 
@@ -160,7 +161,7 @@ export const buildCommand = Command.make(
                 const outputName = exportName === "default" ? baseName : `${baseName}-${exportName}`;
                 const outputPath = path.join(outputDir, `${outputName}.mjs`);
 
-                yield* Console.log(`Building ${c.cyan("[http]")} ${c.bold(exportName)}...`);
+                yield* Console.log(`Building ${c.cyan("[api]")} ${c.bold(exportName)}...`);
 
                 const bundled = yield* bundle({
                   projectDir,

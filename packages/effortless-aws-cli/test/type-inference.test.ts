@@ -1,8 +1,8 @@
 import { describe, it, expectTypeOf } from "vitest";
-import { defineHttp } from "~aws/handlers/define-http";
+import { defineApi } from "~aws/handlers/define-api";
 import { defineTable } from "~aws/handlers/define-table";
 import { param } from "~aws/handlers/handler-options";
-import type { HttpRequest } from "~aws/handlers/define-http";
+import type { HttpRequest } from "~aws/handlers/shared";
 import type { TableRecord } from "~aws/handlers/define-table";
 import type { TableClient } from "~aws/runtime/table-client";
 import type { TableItem } from "~aws/handlers/handler-options";
@@ -20,37 +20,35 @@ type User = { name: string; email: string };
 
 const usersTable = defineTable<User>({});
 
-// ── defineHttp ────────────────────────────────────────────────
+// ── defineApi ─────────────────────────────────────────────────
 
-describe("defineHttp type inference", () => {
+describe("defineApi type inference", () => {
 
-  it("minimal handler — only req is present", () => {
-    defineHttp({
-      method: "GET",
-      path: "/hello",
-      onRequest: async (args) => {
-        type _req = Expect<Equal<typeof args.req, HttpRequest>>;
-        // @ts-expect-error — no data without schema
-        args.data;
-        // @ts-expect-error — no ctx without setup
-        args.ctx;
-        // @ts-expect-error — no deps without deps
-        args.deps;
-        // @ts-expect-error — no config without config
-        args.config;
-        // @ts-expect-error — no files without static
-        args.files;
-        return { status: 200 };
+  it("minimal GET handler — only req is present", () => {
+    defineApi({
+      basePath: "/hello",
+      get: {
+        "/": async (args) => {
+          type _req = Expect<Equal<typeof args.req, HttpRequest>>;
+          // @ts-expect-error — no ctx without setup
+          args.ctx;
+          // @ts-expect-error — no deps without deps
+          args.deps;
+          // @ts-expect-error — no config without config
+          args.config;
+          // @ts-expect-error — no files without static
+          args.files;
+          return { status: 200 };
+        },
       },
     });
   });
 
   it("schema → data is inferred from return type", () => {
-    defineHttp({
-      method: "POST",
-      path: "/users",
+    defineApi({
+      basePath: "/users",
       schema: (input): User => input as User,
-      onRequest: async (args) => {
+      post: async (args) => {
         type _data = Expect<Equal<typeof args.data, User>>;
         return { status: 201 };
       },
@@ -58,35 +56,36 @@ describe("defineHttp type inference", () => {
   });
 
   it("setup → ctx is inferred from return type", () => {
-    defineHttp({
-      method: "GET",
-      path: "/test",
+    defineApi({
+      basePath: "/test",
       setup: () => ({ db: "pg-pool" as const, ready: true }),
-      onRequest: async (args) => {
-        type _ctx = Expect<Equal<typeof args.ctx, { db: "pg-pool"; ready: boolean }>>;
-        return { status: 200 };
+      get: {
+        "/": async (args) => {
+          type _ctx = Expect<Equal<typeof args.ctx, { db: "pg-pool"; ready: boolean }>>;
+          return { status: 200 };
+        },
       },
     });
   });
 
   it("async setup → ctx is inferred (unwraps Promise)", () => {
-    defineHttp({
-      method: "GET",
-      path: "/test",
+    defineApi({
+      basePath: "/test",
       setup: async () => ({ pool: 42 }),
-      onRequest: async (args) => {
-        type _ctx = Expect<Equal<typeof args.ctx, { pool: number }>>;
-        return { status: 200 };
+      get: {
+        "/": async (args) => {
+          type _ctx = Expect<Equal<typeof args.ctx, { pool: number }>>;
+          return { status: 200 };
+        },
       },
     });
   });
 
   it("deps → deps is Record of TableClient", () => {
-    defineHttp({
-      method: "POST",
-      path: "/users",
+    defineApi({
+      basePath: "/users",
       deps: { usersTable },
-      onRequest: async (args) => {
+      post: async (args) => {
         type _deps = Expect<Equal<typeof args.deps.usersTable, TableClient<User>>>;
         return { status: 201 };
       },
@@ -94,25 +93,25 @@ describe("defineHttp type inference", () => {
   });
 
   it("config → config values are inferred", () => {
-    defineHttp({
-      method: "GET",
-      path: "/config",
+    defineApi({
+      basePath: "/config",
       config: {
         dbUrl: param("database-url"),
         maxRetries: param("max-retries", Number),
       },
-      onRequest: async (args) => {
-        type _dbUrl = Expect<Equal<typeof args.config.dbUrl, string>>;
-        type _retries = Expect<Equal<typeof args.config.maxRetries, number>>;
-        return { status: 200 };
+      get: {
+        "/": async (args) => {
+          type _dbUrl = Expect<Equal<typeof args.config.dbUrl, string>>;
+          type _retries = Expect<Equal<typeof args.config.maxRetries, number>>;
+          return { status: 200 };
+        },
       },
     });
   });
 
   it("config + setup → setup factory receives config", () => {
-    defineHttp({
-      method: "GET",
-      path: "/test",
+    defineApi({
+      basePath: "/test",
       config: {
         dbUrl: param("database-url"),
       },
@@ -120,36 +119,38 @@ describe("defineHttp type inference", () => {
         type _p = Expect<Equal<typeof config.dbUrl, string>>;
         return { pool: config.dbUrl };
       },
-      onRequest: async (args) => {
-        type _ctx = Expect<Equal<typeof args.ctx.pool, string>>;
-        type _cfg = Expect<Equal<typeof args.config.dbUrl, string>>;
-        return { status: 200 };
+      get: {
+        "/": async (args) => {
+          type _ctx = Expect<Equal<typeof args.ctx.pool, string>>;
+          type _cfg = Expect<Equal<typeof args.config.dbUrl, string>>;
+          return { status: 200 };
+        },
       },
     });
   });
 
   it("static → files is present", () => {
-    defineHttp({
-      method: "GET",
-      path: "/page",
+    defineApi({
+      basePath: "/page",
       static: ["src/templates/*.ejs"],
-      onRequest: async (args) => {
-        type _rs = Expect<Equal<typeof args.files, StaticFiles>>;
-        return { status: 200 };
+      get: {
+        "/": async (args) => {
+          type _rs = Expect<Equal<typeof args.files, StaticFiles>>;
+          return { status: 200 };
+        },
       },
     });
   });
 
   it("all features combined", () => {
-    defineHttp({
-      method: "POST",
-      path: "/users",
+    defineApi({
+      basePath: "/users",
       schema: (input): User => input as User,
       setup: () => ({ db: "pool" }),
       deps: { usersTable },
       config: { secret: param("api-secret") },
       static: ["templates/*.html"],
-      onRequest: async (args) => {
+      post: async (args) => {
         type _req = Expect<Equal<typeof args.req, HttpRequest>>;
         type _data = Expect<Equal<typeof args.data, User>>;
         type _ctx = Expect<Equal<typeof args.ctx, { db: string }>>;
@@ -161,13 +162,14 @@ describe("defineHttp type inference", () => {
     });
   });
 
-  it("return type is HttpHandler with correct brand", () => {
-    const handler = defineHttp({
-      method: "GET",
-      path: "/test",
-      onRequest: async () => ({ status: 200 }),
+  it("return type is ApiHandler with correct brand", () => {
+    const handler = defineApi({
+      basePath: "/test",
+      get: {
+        "/": async () => ({ status: 200 }),
+      },
     });
-    expectTypeOf(handler.__brand).toEqualTypeOf<"effortless-http">();
+    expectTypeOf(handler.__brand).toEqualTypeOf<"effortless-api">();
   });
 
 });

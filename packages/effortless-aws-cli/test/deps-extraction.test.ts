@@ -1,25 +1,24 @@
 import { describe, it, expect } from "vitest"
 
-import { extractConfigs, extractTableConfigs } from "~cli/build/bundle"
+import { extractApiConfigs, extractTableConfigs } from "~cli/build/bundle"
 
 describe("deps extraction", () => {
 
-  describe("extractConfigs (HTTP)", () => {
+  describe("extractApiConfigs", () => {
 
     it("should extract shorthand deps keys", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
         import { orders } from "./orders";
 
-        export const createOrder = defineHttp({
-          method: "POST",
-          path: "/orders",
+        export const createOrder = defineApi({
+          basePath: "/orders",
           deps: { orders },
-          onRequest: async ({ req, deps }) => ({ status: 201 })
+          post: async ({ req, deps }) => ({ status: 201 })
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.depsKeys).toEqual(["orders"]);
@@ -27,19 +26,18 @@ describe("deps extraction", () => {
 
     it("should extract multiple deps keys", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
         import { orders } from "./orders";
         import { users } from "./users";
 
-        export const api = defineHttp({
-          method: "POST",
-          path: "/api",
+        export const api = defineApi({
+          basePath: "/api",
           deps: { orders, users },
-          onRequest: async ({ req, deps }) => ({ status: 200 })
+          post: async ({ req, deps }) => ({ status: 200 })
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.depsKeys).toEqual(["orders", "users"]);
@@ -47,18 +45,17 @@ describe("deps extraction", () => {
 
     it("should extract explicit property assignment deps keys", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
         import { orders } from "./orders";
 
-        export const api = defineHttp({
-          method: "POST",
-          path: "/api",
+        export const api = defineApi({
+          basePath: "/api",
           deps: { orders: orders },
-          onRequest: async ({ req }) => ({ status: 200 })
+          post: async ({ req }) => ({ status: 200 })
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.depsKeys).toEqual(["orders"]);
@@ -66,16 +63,15 @@ describe("deps extraction", () => {
 
     it("should return empty depsKeys when no deps property", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
 
-        export const hello = defineHttp({
-          method: "GET",
-          path: "/hello",
-          onRequest: async ({ req }) => ({ status: 200 })
+        export const hello = defineApi({
+          basePath: "/hello",
+          get: { "/": async ({ req }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.depsKeys).toEqual([]);
@@ -83,18 +79,17 @@ describe("deps extraction", () => {
 
     it("should extract deps from default export", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
         import { orders } from "./orders";
 
-        export default defineHttp({
-          method: "POST",
-          path: "/orders",
+        export default defineApi({
+          basePath: "/orders",
           deps: { orders },
-          onRequest: async ({ req }) => ({ status: 201 })
+          post: async ({ req }) => ({ status: 201 })
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.exportName).toBe("default");
@@ -103,20 +98,19 @@ describe("deps extraction", () => {
 
     it("should not leak deps into static config", () => {
       const source = `
-        import { defineHttp } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
         import { orders } from "./orders";
 
-        export const api = defineHttp({
-          method: "POST",
-          path: "/orders",
+        export const api = defineApi({
+          basePath: "/orders",
           deps: { orders },
-          onRequest: async ({ req }) => ({ status: 201 })
+          post: async ({ req }) => ({ status: 201 })
         });
       `;
 
-      const configs = extractConfigs(source);
+      const configs = extractApiConfigs(source);
 
-      expect(configs[0]!.config).toEqual({ method: "POST", path: "/orders" });
+      expect(configs[0]!.config).toEqual({ basePath: "/orders" });
       expect(configs[0]!.config).not.toHaveProperty("deps");
     });
 

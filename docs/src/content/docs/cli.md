@@ -26,7 +26,7 @@ eff cleanup --handler createUser --all
 
 ### Typical workflow
 
-1. Write handlers using `defineHttp`, `defineTable`, etc.
+1. Write handlers using `defineApi`, `defineTable`, etc.
 2. If handlers use `param()` for secrets — run `eff config` to set missing values
 3. Run `eff deploy` — creates all AWS resources automatically (warns about missing parameters)
 4. Remove or rename a handler → run `eff deploy` again (stale API routes are cleaned up)
@@ -70,16 +70,16 @@ eff deploy createUser
 **What happens during deploy:**
 
 - Creates or updates Lambda functions, IAM roles, and related resources for each handler
-- Creates or updates API Gateway routes for HTTP and app handlers
+- Creates or updates Lambda Function URLs for API handlers
 - Creates or updates DynamoDB tables for table handlers
 - Creates or updates SQS queues for FIFO queue handlers
 - Uploads static sites to S3 + CloudFront
-- Removes stale API Gateway routes that no longer have a matching handler
+- Removes stale Lambda Function URLs that no longer have a matching handler
 - Creates a shared dependency layer from `dependencies` in `package.json`
 - Warns about missing SSM parameters declared via `param()` (see [`config`](#config))
 
 :::note
-If you remove a handler from your code, the API Gateway route will be cleaned up automatically on the next deploy. However, the Lambda function, IAM role, and other resources (DynamoDB tables, SQS queues, etc.) will remain in AWS. Use [`cleanup`](#cleanup) to remove orphaned resources.
+If you remove a handler from your code, the Lambda Function URL will be cleaned up automatically on the next deploy. However, the Lambda function, IAM role, and other resources (DynamoDB tables, SQS queues, etc.) will remain in AWS. Use [`cleanup`](#cleanup) to remove orphaned resources.
 :::
 
 ## status
@@ -99,12 +99,12 @@ Discovers handlers from your code and queries AWS resources by tags, then shows 
 ```
 Status for my-app/dev:
 
-  new       [http]   createUser    POST  /api/users
-  deployed  [http]   listExpenses  GET   /api/expenses  3m ago  256MB  30s
+  new       [api]    createUser    POST  /api/users
+  deployed  [api]    listExpenses  GET   /api/expenses  3m ago  256MB  30s
   deployed  [table]  expenses      1h ago
-  orphaned  [http]   oldHandler
+  orphaned  [api]    oldHandler
 
-API: https://xxx.execute-api.eu-central-1.amazonaws.com
+API: https://xxx.lambda-url.eu-central-1.on.aws
 Total: 1 new, 2 deployed, 1 orphaned
 ```
 

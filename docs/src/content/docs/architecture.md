@@ -11,7 +11,7 @@ description: How effortless works under the hood — build pipeline, deploy flow
 │                                                         │
 │  effortless.config.ts                                   │
 │  src/                                                   │
-│    ├── api.ts         → export getUsers = ...           │
+│    ├── api.ts         → export users = defineApi(...)    │
 │    ├── orders.ts      → export orders = ...             │
 │    ├── expenses.ts    → export processExpenses = ...    │
 │    └── site.ts        → export site = ...               │
@@ -23,7 +23,7 @@ description: How effortless works under the hood — build pipeline, deploy flow
 │                                                         │
 │  1. Load config (effortless.config.ts)                  │
 │  2. Analyze handlers (ts-morph)                         │
-│     - Find all defineHttp/defineTable/etc exports       │
+│     - Find all defineApi/defineTable/etc exports         │
 │     - Extract metadata from handler configs             │
 │  3. Bundle each handler (esbuild)                       │
 │     - Tree-shake, minify                                │
@@ -31,7 +31,7 @@ description: How effortless works under the hood — build pipeline, deploy flow
 │  4. Deploy to AWS (SDK direct calls)                    │
 │     - Create/update IAM roles                           │
 │     - Create/update Lambda functions                    │
-│     - Create/update triggers (API GW, SQS, streams)    │
+│     - Create/update triggers (Function URLs, SQS, etc)  │
 │     - Wire everything together                          │
 └─────────────────────────────────────────────────────────┘
                           │
@@ -40,8 +40,8 @@ description: How effortless works under the hood — build pipeline, deploy flow
 │                        AWS                              │
 │                                                         │
 │  Lambda: my-service-dev-getUsers                        │
-│    ← API Gateway: my-service-dev-api                    │
-│       Route: GET /api/users                             │
+│    ← Function URL: https://...lambda-url.../api/users   │
+│       Routes: GET /api/users, POST /api/users           │
 │                                                         │
 │  Lambda: my-service-dev-orders                          │
 │    ← DynamoDB Stream: my-service-dev-orders             │
@@ -50,7 +50,7 @@ description: How effortless works under the hood — build pipeline, deploy flow
 │    ← SQS FIFO: my-service-dev-processExpenses           │
 │                                                         │
 │  Lambda: my-service-dev-site                            │
-│    ← API Gateway: serves static files from ZIP          │
+│    ← CloudFront: serves static files from S3            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -69,13 +69,13 @@ Quick reference for navigating the codebase. All paths are relative to `src/`.
 | Modify runtime behavior                 | `runtime/handler-utils.ts` (shared logic), `runtime/wrap-*.ts` (per-type) |
 | Add a cross-cutting feature             | See [Adding a Feature](#adding-a-cross-cutting-feature) below           |
 | Change generated SDK wrappers           | `scripts/gen-aws-sdk.ts` → generates `aws/clients/*.ts`                 |
-| Understand handler type system          | `handlers/define-http.ts` (generics `T,C,D,P,S` + conditional intersections) |
+| Understand handler type system          | `handlers/define-api.ts` (generics `T,C,D,P,S` + conditional intersections) |
 
 ### Key directories
 
 | Directory            | Role                                                                      |
 |----------------------|---------------------------------------------------------------------------|
-| `handlers/`          | **User-facing API** — `defineHttp`, `defineTable`, `defineFifoQueue`, `defineApp`, `defineStaticSite`, `param` |
+| `handlers/`          | **User-facing API** — `defineApi`, `defineTable`, `defineFifoQueue`, `defineApp`, `defineStaticSite`, `param` |
 | `build/`             | **Build phase** — ts-morph AST parsing (`handler-registry.ts`) + esbuild bundling (`bundle.ts`) |
 | `deploy/`            | **Deploy phase** — orchestration (`deploy.ts`), core Lambda (`shared.ts`), per-type deployers |
 | `runtime/`           | **Runtime phase** — Lambda wrappers (`wrap-*.ts`), shared utils (`handler-utils.ts`), clients |
@@ -96,7 +96,7 @@ Quick reference for navigating the codebase. All paths are relative to `src/`.
 ┌─────────────────────────────────────────────────────────────┐
 │                    deploy/ (Orchestration)                  │
 │                                                             │
-│  deployAll() ─────┬─► deployLambda() ──► addRouteToApi()   │
+│  deployAll() ─────┬─► deployApiFunction()                  │
 │                    ├─► deployTableFunction()                │
 │                    ├─► deployFifoQueueFunction()            │
 │                    └─► deployAppLambda()                    │
@@ -106,7 +106,7 @@ Quick reference for navigating the codebase. All paths are relative to `src/`.
 ┌────────────────────┐ ┌────────────────┐ ┌────────────────┐
 │  build/            │ │  aws/          │ │  runtime/      │
 │                    │ │                │ │                │
-│  extractConfigs()  │ │  ensureLambda()│ │  wrapHttp()    │
+│  extractConfigs()  │ │  ensureLambda()│ │  wrapApi()     │
 │  bundle()          │ │  ensureRole()  │ │  wrapTable()   │
 │  zip()             │ │  ensureTable() │ │  wrapQueue()   │
 │                    │ │  ensureLayer() │ │  buildDeps()   │
@@ -132,31 +132,34 @@ The build system has two phases: **static analysis** (ts-morph) and **bundling**
 
 ```typescript
 // src/api.ts
-export const createUser = defineHttp({
-  method: "POST",           // ← static config (extracted by ts-morph)
-  path: "/users",           // ← static config
-  memory: 512,              // ← static config
+export const users = defineApi({
+  basePath: "/api",          // ← static config (extracted by ts-morph)
+  memory: 512,               // ← static config
   schema: S.decodeUnknownSync(UserSchema),  // ← runtime (bundled by esbuild)
   onError: (err, req) => ({ ... }),         // ← runtime
   setup: () => ({ db }),                    // ← runtime
-  onRequest: async ({ data, ctx }) => ...,  // ← runtime
+  get: {                                    // ← runtime
+    "/users": async ({ req, ctx }) => ...,
+    "/users/{id}": async ({ req, ctx }) => ...,
+  },
+  post: async ({ data, ctx }) => ...,       // ← runtime
 });
 ```
 
 ### Phase 1: Static analysis (ts-morph)
 
-`extractHandlerConfigs()` parses the source code as AST and extracts only the serializable config properties (method, path, memory, timeout, permissions). Runtime properties (functions, closures) are stripped via the `RUNTIME_PROPS` list.
+`extractHandlerConfigs()` parses the source code as AST and extracts only the serializable config properties (basePath, memory, timeout, permissions). Runtime properties (functions, closures) are stripped via the `RUNTIME_PROPS` list.
 
 ```
-RUNTIME_PROPS = ["onRequest", "onRecord", "onBatch", "onBatchComplete",
+RUNTIME_PROPS = ["get", "post", "onRecord", "onBatch", "onBatchComplete",
                  "onMessage", "setup", "schema", "onError", "deps", "config",
                  "static", "middleware"]
 ```
 
-This static config is used by the **deploy phase** to configure AWS resources (API Gateway routes, Lambda memory/timeout, etc.) without needing to execute user code.
+This static config is used by the **deploy phase** to configure AWS resources (Lambda Function URLs, Lambda memory/timeout, etc.) without needing to execute user code.
 
 ```
-Source code  →  ts-morph AST  →  { method: "POST", path: "/users", memory: 512 }
+Source code  →  ts-morph AST  →  { basePath: "/api", memory: 512 }
                                    (no functions, safe to serialize)
 ```
 
@@ -167,17 +170,17 @@ Source code  →  ts-morph AST  →  { method: "POST", path: "/users", memory: 5
 ```
 ┌─ Virtual entry point (generated in memory) ──────────────────────┐
 │                                                                   │
-│  import { createUser } from "/abs/path/to/src/api.ts";           │
-│  import { wrapHttp } from "/abs/path/to/dist/runtime/wrap-http"; │
-│  export const handler = wrapHttp(createUser);                    │
+│  import { users } from "/abs/path/to/src/api.ts";                │
+│  import { wrapApi } from "/abs/path/to/dist/runtime/wrap-api";   │
+│  export const handler = wrapApi(users);                          │
 │                                                                   │
 └───────────────────────────────────────────────────────────────────┘
          │                              │
          ▼                              ▼
    User's handler code           Framework runtime wrapper
-   (defineHttp + onRequest       (wrapHttp: parses Lambda event,
-    + schema + setup)             validates schema, calls handler,
-                                  formats response)
+   (defineApi + get/post         (wrapApi: parses Lambda event,
+    + schema + setup)             matches routes, validates schema,
+                                  calls handler, formats response)
          │                              │
          └──────────┬───────────────────┘
                     ▼
@@ -193,9 +196,9 @@ The handler registry defines wrapper paths with a `~/runtime/` prefix:
 
 ```typescript
 handlerRegistry = {
-  http: {
-    wrapperFn: "wrapHttp",
-    wrapperPath: "~/runtime/wrap-http",  // placeholder prefix
+  api: {
+    wrapperFn: "wrapApi",
+    wrapperPath: "~/runtime/wrap-api",  // placeholder prefix
   },
 }
 ```
@@ -219,14 +222,14 @@ This way esbuild can resolve imports from two different locations in a single bu
 User code                    Build system                      Output
 ─────────                    ────────────                      ──────
 
-defineHttp({          ┌─► ts-morph extracts static config ─► deploy phase
-  method: "POST",     │      { method, path, memory }        (API GW, Lambda)
-  path: "/users",     │
-  schema: ...,        │
-  onRequest: ...,  ───┤
-})                    │
-                      └─► esbuild bundles everything ──────► index.mjs
-                           (handler + wrapper + deps)         (uploaded to Lambda)
+defineApi({            ┌─► ts-morph extracts static config ─► deploy phase
+  basePath: "/api",    │      { basePath, memory }             (Function URL, Lambda)
+  schema: ...,         │
+  get: { ... },        │
+  post: ...,        ───┤
+})                     │
+                       └─► esbuild bundles everything ──────► index.mjs
+                            (handler + wrapper + deps)         (uploaded to Lambda)
 ```
 
 ---
@@ -371,14 +374,14 @@ All resources include project name and stage, ensuring no collisions:
 |---|---|
 | Lambda function | `${project}-${stage}-${handler}` |
 | IAM role | `${project}-${stage}-${handler}-role` |
-| API Gateway | `${project}-${stage}` |
+| Function URL | _(auto-created per Lambda, no separate name)_ |
 | DynamoDB table | `${project}-${stage}-${handler}` |
 | SQS FIFO queue | `${project}-${stage}-${handler}` |
 | Lambda layer | `${project}-${stage}-deps` |
 
 ### Stage isolation
 
-Each stage (`dev`, `staging`, `prod`) is a **fully independent set of resources**. No shared infrastructure between stages — separate API Gateways, separate Lambda functions, separate tables. Destroying `dev` never risks touching `prod`.
+Each stage (`dev`, `staging`, `prod`) is a **fully independent set of resources**. No shared infrastructure between stages — separate Lambda functions, separate Function URLs, separate tables. Destroying `dev` never risks touching `prod`.
 
 ### Deploy algorithm
 
@@ -388,7 +391,6 @@ deploy:
   2. prepare shared dependency layer (hash-based, skip if unchanged)
   3. create/update resources for each handler (5 concurrent)
   4. tag all resources
-  5. remove stale API Gateway routes
 
 cleanup:
   1. query AWS by tags → find all resources for project+stage
@@ -431,7 +433,7 @@ All deploy code uses [Effect](https://effect.website/) for composable, typed err
 
 ### Separate stages, no shared resources
 
-Each stage gets its own API Gateway, Lambda functions, tables, etc. AWS API Gateway V2 doesn't support stage variables in Lambda integrations, and sharing resources means shared rate limits and blast radius. Full isolation is simpler and safer.
+Each stage gets its own Lambda functions, Function URLs, tables, etc. Sharing resources means shared rate limits and blast radius. Full isolation is simpler and safer.
 
 ### No secrets in environment variables
 

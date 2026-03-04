@@ -158,14 +158,13 @@ describe("defineApp extraction", () => {
     expect(configs).toHaveLength(0);
   });
 
-  it("should not match defineHttp or defineTable calls", () => {
+  it("should not match other define* calls", () => {
     const source = `
-      import { defineHttp } from "effortless-aws";
+      import { defineApi } from "effortless-aws";
 
-      export const api = defineHttp({
-        method: "GET",
-        path: "/api",
-        onRequest: async ({ req }) => ({ status: 200 })
+      export const api = defineApi({
+        basePath: "/api",
+        get: { "/": async ({ req }) => ({ status: 200 }) }
       });
     `;
 

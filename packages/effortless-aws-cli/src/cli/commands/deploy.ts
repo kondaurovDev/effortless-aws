@@ -2,7 +2,7 @@ import { Args, Command } from "@effect/cli";
 import { Effect, Console, Logger, LogLevel, Option } from "effect";
 import * as path from "path";
 
-import { deploy, deployAll, deployTable, deployAllTables, deployProject, type DeployTableResult } from "~/deploy/deploy";
+import { deploy, deployTable, deployAllTables, deployProject, type DeployTableResult } from "~/deploy/deploy";
 import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
 import { Aws } from "../../aws";
 import { projectOption, stageOption, regionOption, verboseOption, noSitesOption, getPatternsFromConfig } from "~/cli/config";
@@ -37,7 +37,6 @@ export const deployCommand = Command.make(
       const clientsLayer = Aws.makeClients({
         lambda: { region: finalRegion },
         iam: { region: finalRegion },
-        apigatewayv2: { region: finalRegion },
         dynamodb: { region: finalRegion },
         resource_groups_tagging_api: { region: finalRegion },
         s3: { region: finalRegion },
@@ -67,28 +66,18 @@ export const deployCommand = Command.make(
               verbose,
             });
 
-            const total = results.httpResults.length + results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length;
+            const total = results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length;
             yield* Console.log(`\n${c.green(`Deployed ${total} handler(s):`)}`);
 
-            if (results.apiUrl) {
-              yield* Console.log(`\n  API: ${c.cyan(results.apiUrl)}`);
-            }
-
             const summaryLines: { name: string; line: string }[] = [];
-            for (const r of results.httpResults) {
-              const pathPart = results.apiUrl ? r.url.replace(results.apiUrl, "") : r.url;
-              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[http]")}  ${c.bold(r.exportName)}  ${c.dim(pathPart)}` });
-            }
             for (const r of results.appResults) {
-              const pathPart = results.apiUrl ? r.url.replace(results.apiUrl, "") : r.url;
-              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[app]")}   ${c.bold(r.exportName)}  ${c.dim(pathPart)}` });
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[app]")}   ${c.bold(r.exportName)}  ${c.dim(r.url)}` });
             }
             for (const r of results.tableResults) {
               summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[table]")} ${c.bold(r.exportName)}` });
             }
             for (const r of results.apiResults) {
-              const pathPart = results.apiUrl ? r.url.replace(results.apiUrl, "") : r.url;
-              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[api]")}   ${c.bold(r.exportName)}  ${c.dim(pathPart)}` });
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[api]")}   ${c.bold(r.exportName)}  ${c.dim(r.url)}` });
             }
             for (const r of results.staticSiteResults) {
               summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[site]")}  ${c.bold(r.exportName)}: ${c.cyan(r.url)}` });
@@ -112,13 +101,6 @@ export const deployCommand = Command.make(
                 region: finalRegion,
               };
 
-              const httpResult = yield* deployAll(input).pipe(
-                Effect.catchIf(
-                  e => e instanceof Error && e.message.includes("No defineHttp"),
-                  () => Effect.succeed(null)
-                )
-              );
-
               const tableResults = yield* deployAllTables(input).pipe(
                 Effect.catchIf(
                   e => e instanceof Error && e.message.includes("No defineTable"),
@@ -126,17 +108,9 @@ export const deployCommand = Command.make(
                 )
               );
 
-              if (!httpResult && tableResults.length === 0) {
+              if (tableResults.length === 0) {
                 yield* Console.error("No handlers found in file");
                 return;
-              }
-
-              if (httpResult) {
-                yield* Console.log(`\nAPI Gateway: ${c.cyan(httpResult.apiUrl)}`);
-                yield* Console.log(c.green(`Deployed ${httpResult.handlers.length} HTTP handler(s):`));
-                for (const r of httpResult.handlers) {
-                  yield* Console.log(`  ${c.bold(r.exportName)}: ${c.cyan(r.url)}`);
-                }
               }
 
               if (tableResults.length > 0) {

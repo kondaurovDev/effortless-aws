@@ -36,7 +36,7 @@ Effortless deploys standard AWS resources — Lambda, DynamoDB, API Gateway, SQS
 
 ### Does Effortless support multi-cloud?
 
-No. AWS only. This is intentional — by focusing on one cloud, Effortless provides deep integration with AWS-native features like DynamoDB Streams, SQS FIFO ordering, and CloudFront edge caching. Multi-cloud frameworks sacrifice these capabilities for portability. See [Why AWS?](/why-aws/).
+No. AWS only. This is intentional — by focusing on one cloud, Effortless provides deep integration with AWS-native features like DynamoDB Streams, SQS FIFO ordering, and CloudFront edge caching. Multi-cloud frameworks sacrifice these capabilities for portability. See [Why serverless?](/why-serverless/).
 
 ---
 
@@ -97,15 +97,15 @@ For most projects: **$0-5/month**. You pay only for AWS usage, not for Effortles
 AWS Free Tier (permanent, not trial):
 - **Lambda**: 1M requests/month free
 - **DynamoDB**: 25 GB storage + 25 read/write capacity units free
-- **API Gateway**: 1M requests/month free (first 12 months)
+- **Lambda Function URLs**: no additional cost (included in Lambda pricing)
 - **SQS**: 1M requests/month free
 - **CloudFront**: 1 TB transfer/month free (first 12 months)
 
-See [Why AWS? — Cost](/why-aws/#cost-almost-free) for details.
+See [Why serverless? — Why AWS](/why-serverless/#why-aws) for pricing details.
 
 ### What AWS credentials do I need?
 
-An IAM user or role with permissions to create Lambda functions, DynamoDB tables, API Gateway APIs, IAM roles, and SQS queues. See [Installation — AWS Credentials](/installation/#aws-credentials) for setup options including `~/.aws/credentials`, environment variables, and SSO.
+An IAM user or role with permissions to create Lambda functions, DynamoDB tables, IAM roles, and SQS queues. See [Installation — AWS Credentials](/installation/#aws-credentials) for setup options including `~/.aws/credentials`, environment variables, and SSO.
 
 ### What AWS region should I use?
 
@@ -222,12 +222,13 @@ Yes, via `deps`. This automatically wires IAM permissions:
 ```typescript
 import { orders } from "./db";
 
-export const listOrders = defineHttp({
-  method: "GET",
-  path: "/orders",
+export const api = defineApi({
+  basePath: "/orders",
   deps: { orders },
-  onRequest: async ({ deps }) => {
-    // deps.orders has typed .get(), .put(), .delete()
+  get: {
+    "/": async ({ deps }) => {
+      // deps.orders has typed .get(), .put(), .delete()
+    },
   },
 });
 ```
@@ -243,13 +244,18 @@ Use the `schema` option with any validation library (e.g. Zod):
 ```typescript
 import { z } from "zod";
 
-export const createUser = defineHttp({
-  method: "POST",
-  path: "/users",
-  schema: (input: unknown) =>
-    z.object({ email: z.string(), name: z.string() }).parse(input),
-  onRequest: async ({ data }) => {
-    // data.email and data.name are typed and validated
+const userSchema = (input: unknown) =>
+  z.object({ email: z.string(), name: z.string() }).parse(input);
+
+export const users = defineApi({
+  basePath: "/users",
+  post: {
+    "/": {
+      schema: userSchema,
+      handler: async ({ data }) => {
+        // data.email and data.name are typed and validated
+      },
+    },
   },
 });
 ```
@@ -261,11 +267,12 @@ Invalid requests get a 400 response before your handler runs. See [HTTP API — 
 They come from `req.params`:
 
 ```typescript
-export const getUser = defineHttp({
-  method: "GET",
-  path: "/users/{id}",
-  onRequest: async ({ req }) => {
-    const userId = req.params.id;
+export const users = defineApi({
+  basePath: "/users",
+  get: {
+    "/{id}": async ({ req }) => {
+      const userId = req.params.id;
+    },
   },
 });
 ```
@@ -277,11 +284,10 @@ Yes, via `param()` which reads from SSM Parameter Store:
 ```typescript
 import { param } from "effortless-aws";
 
-export const checkout = defineHttp({
-  method: "POST",
-  path: "/checkout",
+export const checkout = defineApi({
+  basePath: "/checkout",
   params: { stripeKey: param("stripe/secret-key") },
-  onRequest: async ({ params }) => {
+  post: async ({ params }) => {
     // params.stripeKey fetched once at cold start, cached after
   },
 });
@@ -311,11 +317,10 @@ Other AWS configuration services and why they're not used:
 If you need Secrets Manager for a specific use case (e.g., RDS credentials with rotation), you can call it directly from your handler code with the appropriate `permissions`:
 
 ```typescript
-export const dbHandler = defineHttp({
-  method: "GET",
-  path: "/data",
+export const data = defineApi({
+  basePath: "/data",
   permissions: ["secretsmanager:GetSecretValue"],
-  onRequest: async ({ req }) => {
+  get: async ({ req }) => {
     // Call Secrets Manager directly when you need rotation support
   },
 });

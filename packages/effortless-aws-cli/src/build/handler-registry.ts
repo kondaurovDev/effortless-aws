@@ -7,7 +7,7 @@ const parseSource = (source: string) => {
   return project.createSourceFile("input.ts", source);
 };
 
-const RUNTIME_PROPS = ["onRequest", "onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware", "routes", "get", "post"];
+const RUNTIME_PROPS = ["onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware", "routes", "get", "post"];
 
 const evalConfig = <T>(configText: string, exportName: string): T => {
   try {
@@ -204,12 +204,6 @@ export type HandlerDefinition = {
 };
 
 export const handlerRegistry = {
-  http: {
-    defineFn: "defineHttp",
-    handlerProps: ["onRequest"],
-    wrapperFn: "wrapHttp",
-    wrapperPath: "~/runtime/wrap-http",
-  },
   table: {
     defineFn: "defineTable",
     handlerProps: ["onRecord", "onBatch"],

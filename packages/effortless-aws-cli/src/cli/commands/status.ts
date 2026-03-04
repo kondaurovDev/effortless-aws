@@ -12,11 +12,11 @@ import { projectOption, stageOption, regionOption, verboseOption, getPatternsFro
 import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
-const { lambda, apigatewayv2: apigateway } = Aws;
+const { lambda } = Aws;
 
 // ============ Types ============
 
-type HandlerType = "http" | "table" | "app" | "site" | "queue" | "api";
+type HandlerType = "table" | "app" | "site" | "queue" | "api";
 
 type CodeHandler = {
   name: string;
@@ -46,11 +46,6 @@ const INTERNAL_HANDLERS = new Set(["api", "platform"]);
 
 const extractFunctionName = (arn: string): string | undefined => {
   const match = arn.match(/:function:([^:]+)$/);
-  return match?.[1];
-};
-
-const extractApiId = (arn: string): string | undefined => {
-  const match = arn.match(/\/apis\/([a-z0-9]+)$/);
   return match?.[1];
 };
 
@@ -86,14 +81,6 @@ const getLambdaDetails = (functionName: string) =>
     Effect.catchAll(() => Effect.succeed({} as LambdaDetails))
   );
 
-const getApiUrl = (apiId: string) =>
-  Effect.gen(function* () {
-    const api = yield* apigateway.make("get_api", { ApiId: apiId });
-    return api.ApiEndpoint;
-  }).pipe(
-    Effect.catchAll(() => Effect.succeed(undefined))
-  );
-
 // ============ Code discovery ============
 
 const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandler[] => {
@@ -111,7 +98,6 @@ type AwsHandler = {
   name: string;
   type: string;
   lambdaArn?: string;
-  apiArn?: string;
 };
 
 const discoverAwsHandlers = (
@@ -126,9 +112,6 @@ const discoverAwsHandlers = (
     const lambdaResource = handlerResources.find(r =>
       r.Tags?.find(t => t.Key === "effortless:type" && t.Value === "lambda")
     );
-    const apiResource = handlerResources.find(r =>
-      r.Tags?.find(t => t.Key === "effortless:type" && t.Value === "api-gateway")
-    );
     const typeTag = handlerResources[0]?.Tags?.find(t => t.Key === "effortless:type");
     const type = typeTag?.Value ?? "unknown";
 
@@ -136,7 +119,6 @@ const discoverAwsHandlers = (
       name,
       type,
       lambdaArn: lambdaResource?.ResourceARN ?? undefined,
-      apiArn: apiResource?.ResourceARN ?? undefined,
     });
   }
 
@@ -146,7 +128,6 @@ const discoverAwsHandlers = (
 // ============ Formatting ============
 
 const TYPE_LABELS: Record<string, string> = {
-  http: "http",
   table: "table",
   app: "app",
   api: "api",
@@ -220,7 +201,6 @@ export const statusCommand = Command.make(
 
       const clientsLayer = Aws.makeClients({
         lambda: { region: finalRegion },
-        apigatewayv2: { region: finalRegion },
         resource_groups_tagging_api: { region: finalRegion },
       });
 
@@ -238,29 +218,6 @@ export const statusCommand = Command.make(
         const resources = yield* getAllResourcesByTags(project, finalStage, finalRegion);
         const awsHandlers = discoverAwsHandlers(resources);
         const awsHandlerNames = new Set(awsHandlers.map(h => h.name));
-
-        // Find API URL
-        let apiUrl: string | undefined;
-        for (const handler of awsHandlers) {
-          if (handler.apiArn) {
-            const apiId = extractApiId(handler.apiArn);
-            if (apiId) {
-              apiUrl = yield* getApiUrl(apiId);
-              break;
-            }
-          }
-        }
-        // Also check internal "api" handler
-        const apiResource = resources.find(r =>
-          r.Tags?.find(t => t.Key === "effortless:handler" && t.Value === "api") &&
-          r.Tags?.find(t => t.Key === "effortless:type" && t.Value === "api-gateway")
-        );
-        if (!apiUrl && apiResource?.ResourceARN) {
-          const apiId = extractApiId(apiResource.ResourceARN);
-          if (apiId) {
-            apiUrl = yield* getApiUrl(apiId);
-          }
-        }
 
         const entries: StatusEntry[] = [];
 
@@ -329,10 +286,6 @@ export const statusCommand = Command.make(
 
         for (const entry of entries) {
           yield* Console.log(formatEntry(entry));
-        }
-
-        if (apiUrl) {
-          yield* Console.log(`\nAPI: ${c.cyan(apiUrl)}`);
         }
 
         const counts = {

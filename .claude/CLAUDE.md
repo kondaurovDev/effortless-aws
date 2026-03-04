@@ -16,6 +16,9 @@ Write all code, comments, commit messages, and documentation in English.
 ## Quality
 - Run `pnpm typecheck` before pushing to verify there are no type errors.
 
+## Protected files
+- Do NOT modify `CHANGELOG.md` files — they contain release history and are managed by changesets.
+
 ## AWS SDK
 - Always use the generated Effect wrappers from `src/aws/clients/` for AWS SDK calls. Never instantiate AWS SDK clients directly.
 - For calls to a different region, use `Effect.provide()` with the corresponding client's `.Default({ region })` layer.

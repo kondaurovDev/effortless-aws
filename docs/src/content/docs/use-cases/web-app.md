@@ -149,7 +149,7 @@ export const frontend = defineApp({
 
 ```typescript
 // src/api.ts
-import { defineHttp, defineTable, typed } from "effortless-aws";
+import { defineApi, defineTable, typed } from "effortless-aws";
 
 type Item = { id: string; name: string };
 
@@ -158,18 +158,19 @@ export const items = defineTable({
   schema: typed<Item>(),
 });
 
-export const listItems = defineHttp({
-  method: "GET",
-  path: "/api/items",
+export const api = defineApi({
+  basePath: "/api/items",
   deps: { items },
-  onRequest: async ({ deps }) => {
-    const result = await deps.items.query({});
-    return { status: 200, body: result };
+  get: {
+    "/": async ({ deps }) => {
+      const result = await deps.items.query({});
+      return { status: 200, body: result };
+    },
   },
 });
 ```
 
-The SSR app is served from CloudFront, and the API from API Gateway — each with its own URL. Use the SSR framework's built-in API routes or proxy to the API Gateway URL from the frontend.
+The SSR app is served from CloudFront, and the API from a Lambda Function URL — each with its own URL. Use the SSR framework's built-in API routes or proxy to the Function URL from the frontend.
 
 ---
 
@@ -177,7 +178,7 @@ The SSR app is served from CloudFront, and the API from API Gateway — each wit
 
 Your site is public-facing — a marketing page, blog, documentation — and you want fast load times worldwide.
 
-[CloudFront](/why-aws/#cloudfront--s3) is AWS's global CDN. Once cached, your files are served directly from the nearest edge location — no Lambda, no origin server.
+[CloudFront](/why-serverless/#cloudfront--s3) is AWS's global CDN. Once cached, your files are served directly from the nearest edge location — no Lambda, no origin server.
 
 The usual pain is the setup: create a private S3 bucket, configure Origin Access Control, set up URL rewriting for clean paths, handle SPA routing with custom error responses, and invalidate the cache on every deploy. `defineStaticSite` does all of this from one export.
 
@@ -278,7 +279,7 @@ export const app = defineStaticSite({
 
 With `routes`, requests to `/api/*` go directly to your API Gateway. Everything else is served from S3. Same domain, no CORS headers needed.
 
-The `api` value is a reference to a `defineHttp` handler — Effortless resolves the API Gateway domain automatically at deploy time.
+The `api` value is a reference to a `defineApi` handler — Effortless resolves the Function URL domain automatically at deploy time.
 
 ### Middleware — protect pages with auth
 

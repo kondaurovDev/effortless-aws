@@ -158,8 +158,8 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     if (routePatterns.length > 0 && !input.apiOriginDomain) {
       return yield* Effect.fail(
         new Error(
-          `Static site "${exportName}" has routes but no API Gateway exists. ` +
-          `Ensure defineHttp() handlers are included in the discovery patterns.`
+          `Static site "${exportName}" has routes but no API handler was deployed. ` +
+          `Ensure defineApi() handlers are included in the discovery patterns.`
         )
       );
     }

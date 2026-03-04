@@ -1,4 +1,4 @@
-import { defineHttp, defineTable, param } from "effortless-aws";
+import { defineApi, defineTable, param } from "effortless-aws";
 import { Effect, pipe } from "effect";
 import * as S from "effect/Schema";
 
@@ -10,16 +10,17 @@ export const sessions = defineTable<Session>({});
 
 // ── GET /hello (with params) ─────────────────────────────────
 
-export const hello = defineHttp({
-  method: "GET",
-  path: "/hello",
+export const hello = defineApi({
+  basePath: "/hello",
   config: {
     greeting: param("greeting-text"),
   },
-  onRequest: async ({ req, config }) => ({
-    status: 200,
-    body: { message: config.greeting, path: req.path }
-  })
+  get: {
+    "/": async ({ req, config }) => ({
+      status: 200,
+      body: { message: config.greeting, path: req.path }
+    }),
+  },
 });
 
 // ── POST /user (with schema + deps + params + context) ───────
@@ -43,9 +44,8 @@ const decodeUser = (input: unknown) =>
     Effect.runSync
   );
 
-export const user = defineHttp({
-  method: "POST",
-  path: "/user",
+export const user = defineApi({
+  basePath: "/user",
   deps: { sessions },
   config: {
     maxAge: param("session-max-age", Number),
@@ -54,7 +54,7 @@ export const user = defineHttp({
     sessionTtl: config.maxAge * 60,
   }),
   schema: (input) => decodeUser(input),
-  onRequest: async ({ data, deps, config, ctx }) => {
+  post: async ({ data, deps, config, ctx }) => {
     // deps.sessions is TableClient<Session>
     // config.maxAge is number
     // ctx.sessionTtl is number
@@ -66,5 +66,5 @@ export const user = defineHttp({
       status: 200,
       body: data
     };
-  }
+  },
 });
