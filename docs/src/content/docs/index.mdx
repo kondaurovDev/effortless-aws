@@ -9,131 +9,20 @@ import AnimatedHero from '../../components/AnimatedHero.astro';
 
 <AnimatedHero />
 
-## The problem
-
-Serverless services are simple individually. The hard part is wiring them into a product — CloudFormation stacks, IAM policies for every connection, event source mappings, environment variable plumbing, minutes-long deploys. You spend more time on infrastructure than on the product itself.
-
-<LinkButton href="/why-effortless/" variant="secondary" icon="right-arrow">Why Effortless?</LinkButton>
-
-## Build a todo app
-
-Each tab adds a layer — every export creates real AWS infrastructure.
-
-<Tabs>
-  <TabItem label="1. HTTP API">
-    One export — one API. Define routes with `get`/`post` under a `basePath`. Returns JSON automatically.
-
-    ```typescript
-    // src/api.ts
-    import { defineApi } from "effortless-aws";
-
-    export const hello = defineApi({
-      basePath: "/",
-      get: async () => ({
-        status: 200,
-        body: { message: "Todo API is running" },
-      }),
-    });
-    ```
-  </TabItem>
-  <TabItem label="2. Add a database">
-    Define a table with a type — get a typed client. Import it as `deps` in any handler — IAM permissions are wired automatically.
-
-    ```typescript
-    // src/db.ts — define the table
-    import { defineTable, typed } from "effortless-aws";
-
-    type Todo = { id: string; title: string; done: boolean };
-
-    export const todos = defineTable({
-      pk: { name: "id", type: "string" },
-      schema: typed<Todo>(),
-    });
-
-    // src/api.ts — use it as a typed dependency
-    import { defineApi } from "effortless-aws";
-    import { todos } from "./db";
-
-    export const todoApi = defineApi({
-      basePath: "/todos",
-      deps: { todos },
-      post: async ({ req, deps }) => {
-        await deps.todos.put({
-          id: crypto.randomUUID(),
-          title: req.body.title,
-          done: false,
-        });
-        return { status: 201, body: { ok: true } };
-      },
-    });
-    ```
-  </TabItem>
-  <TabItem label="3. Add secrets">
-    `param()` reads secrets from SSM Parameter Store at cold start and caches them. `setup` factory creates long-lived clients from those secrets — a built-in DI pattern.
-
-    ```typescript
-    // src/api.ts — add config and setup
-    import { defineApi, param } from "effortless-aws";
-    import { todos } from "./db";
-
-    export const todoApi = defineApi({
-      basePath: "/todos",
-      deps: { todos },
-      config: { slackUrl: param("slack/webhook") },
-      setup: async ({ config }) => ({
-        slack: createSlack(config.slackUrl),
-      }),
-      post: async ({ req, deps, ctx }) => {
-        await deps.todos.put({
-          id: crypto.randomUUID(),
-          title: req.body.title,
-          done: false,
-        });
-        await ctx.slack.send(`New todo: ${req.body.title}`);
-        return { status: 201, body: { ok: true } };
-      },
-    });
-    ```
-  </TabItem>
-  <TabItem label="4. Serve the frontend">
-    Deploy an SSR framework with CloudFront CDN — static assets from S3, server-side rendering from Lambda Function URL.
-
-    ```typescript
-    // src/app.ts
-    import { defineApp } from "effortless-aws";
-
-    export const frontend = defineApp({
-      server: ".output/server",
-      assets: ".output/public",
-      build: "nuxt build",
-    });
-    ```
-  </TabItem>
-</Tabs>
-
-### Deploy
-
-```bash
-$ eff deploy
-
-Deployed 3 handler(s) in 8s:
-  [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-dev-todos
-  [api]   todoApi  https://abc123.lambda-url.eu-west-1.on.aws/todos
-  [app]   frontend https://d1234567890.cloudfront.net
-```
-
-Need a separate environment? Add `--stage`:
-
-```bash
-$ eff deploy --stage prod
-
-Deployed 3 handler(s) in 8s:
-  [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-prod-todos
-  [api]   todoApi  https://xyz789.lambda-url.eu-west-1.on.aws/todos
-  [app]   frontend https://d1234567890.cloudfront.net
-```
-
-Fully isolated infrastructure — separate tables, Lambdas, Function URLs. No shared state between stages.
+<CardGrid>
+  <Card title="Ship the whole product">
+    API, database, queues, email, website — one project, one deploy, automatic IAM wiring.
+  </Card>
+  <Card title="Deploy in seconds">
+    Direct AWS API calls. No CloudFormation, no state files. Full deploy in ~5-10 seconds.
+  </Card>
+  <Card title="Type safety everywhere">
+    Define a table once — get typed clients, typed streams, and runtime validation automatically.
+  </Card>
+  <Card title="Serverless by default">
+    Pay per use, scale to zero, multi-AZ redundancy. Nothing runs when nobody is using your product.
+  </Card>
+</CardGrid>
 
 ## Everything a product needs
 
@@ -151,43 +40,112 @@ All in the same project, all deployed with one command, all with automatic IAM w
 
 <LinkButton href="/definitions/" variant="secondary" icon="right-arrow">All definitions</LinkButton>
 
-<CardGrid>
-  <Card title="Ship the whole product">
-    API, database, website, queues, email — define everything in TypeScript, deploy with one command.
+## Build a todo app
 
-    - Export handler — get Lambda, Function URL, DynamoDB, IAM
-    - Auto IAM wiring from `deps: { orders }`
-    - Secrets via `param("key")` — fetched from SSM at cold start
+Each tab adds a layer — every export creates real AWS infrastructure.
 
-    <LinkButton href="/why-effortless/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
-  </Card>
-  <Card title="Zero overhead deployment">
-    Direct AWS SDK calls instead of CloudFormation. No state files to manage. Deploy in seconds, not minutes.
+<Tabs>
+  <TabItem label="todo.ts">
+    Type and schema — shared across handlers.
 
-    - Deploy in ~5-10s — direct API calls, no CloudFormation
-    - No state files — AWS resource tags as source of truth
-    - Smart Lambda Layers with hash-based versioning
+    ```typescript
+    // src/todo.ts
+    import { z } from "zod";
 
-    <LinkButton href="/comparisons/#why-not-cloudformation" variant="secondary" icon="right-arrow">Learn more</LinkButton>
-  </Card>
-  <Card title="Type safety everywhere">
-    One `defineTable` call creates the table, generates typed clients, and validates data at runtime.
+    export type Todo = { id: string; title: string; done: boolean };
 
-    - Typed `.put()`, `.get()`, typed stream records
-    - Schema validation before your handler runs
-    - One definition — types flow to clients, streams, and deps
+    export const Command = z.discriminatedUnion("action", [
+      z.object({ action: z.literal("create"), title: z.string() }),
+      z.object({ action: z.literal("done"), id: z.string(), done: z.boolean() }),
+    ]);
+    ```
+  </TabItem>
+  <TabItem label="HTTP API">
+    One export — one API. `get` routes handle queries, `schema` + `post` handle commands.
 
-    <LinkButton href="/definitions/" variant="secondary" icon="right-arrow">Learn more</LinkButton>
-  </Card>
-  <Card title="Serverless by default">
-    Pay per use, scale to zero, multi-AZ availability. Nothing runs when nobody is using your product.
+    ```typescript
+    // src/api.ts
+    import { defineApi } from "effortless-aws";
+    import { todos } from "./db";
+    import { Command } from "./todo";
 
-    - Zero cost at rest — pay only when your product is used
-    - Scales from zero to thousands of concurrent requests
-    - Multi-AZ redundancy on every service, no configuration
+    export const todoApi = defineApi({
+      basePath: "/todos",
+      deps: { todos },
+      get: {
+        "/": async ({ deps }) => ({
+          status: 200,
+          body: await deps.todos.query({ pk: "TODO" }),
+        }),
+        "/{id}": async ({ req, deps }) => {
+          const todo = await deps.todos.get({ pk: "TODO", sk: req.params.id });
+          if (!todo) return { status: 404, body: { error: "Not found" } };
+          return { status: 200, body: todo.data };
+        },
+      },
+      schema: Command.parse,
+      post: async ({ data, deps }) => {
+        if (data.action === "create") {
+          const id = crypto.randomUUID();
+          await deps.todos.put({
+            pk: "TODO", sk: id,
+            data: { id, title: data.title, done: false },
+          });
+          return { status: 201, body: { id } };
+        }
+        await deps.todos.update(
+          { pk: "TODO", sk: data.id },
+          { set: { done: data.done } },
+        );
+        return { status: 200, body: { id: data.id, done: data.done } };
+      },
+    });
+    ```
+  </TabItem>
+  <TabItem label="Database + stream">
+    Define a table — get a typed client. `onRecord` fires a stream Lambda on every change. `config` reads secrets from SSM at cold start.
 
-    <LinkButton href="/why-serverless/" variant="secondary" icon="right-arrow">Why serverless?</LinkButton>
-  </Card>
-</CardGrid>
+    ```typescript
+    // src/db.ts
+    import { defineTable, typed, param } from "effortless-aws";
+    import type { Todo } from "./todo";
+
+    export const todos = defineTable({
+      schema: typed<Todo>(),
+      config: { slackUrl: param("slack/webhook") },
+      onRecord: async ({ record, config }) => {
+        if (record.eventName === "MODIFY" && record.new?.data.done) {
+          await fetch(config.slackUrl, {
+            method: "POST",
+            body: JSON.stringify({ text: `Done: ${record.new.data.title}` }),
+          });
+        }
+      },
+    });
+    ```
+  </TabItem>
+</Tabs>
+
+### Deploy
+
+```bash
+$ eff deploy
+
+Deployed 2 handler(s) in 6s:
+  [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-dev-todos
+  [api]   todoApi  https://abc123.lambda-url.eu-west-1.on.aws/todos
+```
+
+Need a separate environment? Add `--stage`:
+
+```bash
+$ eff deploy --stage prod
+
+Deployed 2 handler(s) in 6s:
+  [table] todos    arn:aws:dynamodb:eu-west-1:***:table/todo-app-prod-todos
+  [api]   todoApi  https://xyz789.lambda-url.eu-west-1.on.aws/todos
+```
+
+Fully isolated infrastructure — separate tables, Lambdas, Function URLs. No shared state between stages.
 
 See how Effortless compares to SST, Nitric, Serverless Framework, and others — [detailed comparisons](/comparisons/).

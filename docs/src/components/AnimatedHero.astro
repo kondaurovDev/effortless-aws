@@ -19,13 +19,17 @@ const phrases = [
     </span>
   </h1>
   <p class="tagline">Export handlers, deploy to AWS. No infrastructure files needed.</p>
-  <a class="cta" href="/installation/">Getting Started →</a>
+  <div class="hero-actions">
+    <a class="cta" href="/installation/">Getting Started →</a>
+  </div>
 </div>
 
 <style>
   .animated-hero {
     text-align: center;
     padding: 3rem 1rem 2rem;
+    max-width: 48rem;
+    margin: 0 auto;
   }
 
   .animated-hero h1 {
@@ -34,7 +38,7 @@ const phrases = [
 
   .title {
     display: block;
-    font-size: clamp(2.5rem, 6vw, 4rem);
+    font-size: clamp(2.5rem, 5vw, 3.5rem);
     font-weight: 800;
     line-height: 1.1;
     color: var(--sl-color-white);
@@ -46,7 +50,7 @@ const phrases = [
     position: relative;
     height: 1.5em;
     overflow: hidden;
-    font-size: clamp(1.3rem, 3vw, 2rem);
+    font-size: clamp(1.2rem, 2.5vw, 1.75rem);
     font-weight: 700;
     line-height: 1.5;
   }
@@ -63,18 +67,25 @@ const phrases = [
   }
 
   .tagline {
-    font-size: clamp(1rem, 2vw, 1.15rem);
+    font-size: clamp(0.95rem, 1.8vw, 1.1rem);
     color: var(--sl-color-gray-3);
     margin: 1rem 0 1.5rem;
   }
 
+  .hero-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: center;
+  }
+
   .cta {
     display: inline-block;
-    padding: 0.75rem 1.5rem;
+    padding: 0.7rem 1.4rem;
     background: var(--sl-color-accent);
     color: white !important;
     font-weight: 600;
-    font-size: 1.1rem;
+    font-size: 1rem;
     border-radius: 0.5rem;
     text-decoration: none;
     transition: opacity 0.2s;

@@ -11,7 +11,6 @@ A TypeScript framework for AWS Lambda. You export handler functions — Effortle
 
 ```typescript
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
 });
 ```
@@ -178,7 +177,6 @@ import { defineTable, typed } from "effortless-aws";
 type User = { id: string; email: string; name: string };
 
 export const users = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<User>(),
 });
 ```
@@ -191,8 +189,6 @@ Yes:
 
 ```typescript
 export const messages = defineTable({
-  pk: { name: "channelId", type: "string" },
-  sk: { name: "timestamp", type: "number" },
   schema: typed<Message>(),
 });
 ```
@@ -203,7 +199,6 @@ Add `onRecord` to process each change, or `onBatch` for batch processing:
 
 ```typescript
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
   onRecord: async ({ record }) => {
     if (record.eventName === "INSERT") {

@@ -154,7 +154,6 @@ import { defineApi, defineTable, typed } from "effortless-aws";
 type Item = { id: string; name: string };
 
 export const items = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Item>(),
 });
 

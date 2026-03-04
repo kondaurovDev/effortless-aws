@@ -111,7 +111,6 @@ import { z } from "zod";
 type User = { id: string; email: string; name: string; createdAt: string };
 
 export const users = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<User>(),
 });
 
@@ -158,7 +157,6 @@ import { defineTable, typed } from "effortless-aws";
 type Order = { id: string; product: string; amount: number; status: string };
 
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
   // Stream processor — runs on every insert/update/delete
   onRecord: async ({ record }) => {
@@ -173,7 +171,6 @@ export const orders = defineTable({
 type AnalyticsEvent = { id: string; event: string; timestamp: number };
 
 export const analytics = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<AnalyticsEvent>(),
   batchSize: 100,
   onBatch: async ({ records }) => {

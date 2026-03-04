@@ -71,7 +71,6 @@ import { defineTable, defineFifoQueue, typed } from "effortless-aws";
 type Order = { id: string; product: string; amount: number; status: string };
 
 export const orders = defineTable({
-  pk: { name: "id", type: "string" },
   schema: typed<Order>(),
 });
 

@@ -1,6 +1,4 @@
 ---
-import Default from '@astrojs/starlight/components/SocialIcons.astro';
-
 const REPO = 'kondaurovDev/effortless-aws';
 let stars = 0;
 try {
@@ -35,8 +33,6 @@ try {
   <span class="gh-stars-divider"></span>
   <span class="gh-stars-count">{stars}</span>
 </a>
-<Default {...Astro.props} />
-
 <script>
   const CACHE_KEY = 'gh-stars-cache';
   const CACHE_TTL = 3600_000; // 1 hour
