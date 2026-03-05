@@ -1,5 +1,35 @@
 # @effortless-aws/cli
 
+## 0.6.0
+
+### Minor Changes
+
+- [`ceee4a8`](https://github.com/kondaurovDev/effortless-aws/commit/ceee4a854593ab2fd1ac3e19b72e6fcaf0a1ca18) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Lambda settings (`memory`, `timeout`, `logLevel`, `permissions`) moved from top-level handler options into a nested `lambda` object. Global config `defaults` renamed to `lambda`.
+
+  ```typescript
+  // Before
+  defineFifoQueue({ memory: 512, timeout: "1m", delay: "2s" });
+  defineConfig({ defaults: { memory: 256 } });
+
+  // After
+  defineFifoQueue({ lambda: { memory: 512, timeout: "1m" }, delay: "2s" });
+  defineConfig({ lambda: { memory: 256 } });
+  ```
+
+- [`ceee4a8`](https://github.com/kondaurovDev/effortless-aws/commit/ceee4a854593ab2fd1ac3e19b72e6fcaf0a1ca18) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - feat: QueueClient — FIFO queues as deps for typed message sending
+
+  - `QueueClient<T>` with `send()` and `sendBatch()` methods
+  - FIFO queue handlers can now be used in `deps: { myQueue }` declarations
+  - `ResolveDeps` maps `FifoQueueHandler<T>` to `QueueClient<T>` with full type inference
+  - Deploy resolves queue deps to `EFF_DEP_<key>=queue:<name>` env vars with SQS IAM permissions
+  - Runtime lazily resolves queue URL via `getQueueUrl` (cached after first call)
+  - Deploy now applies `delay` (DelaySeconds) when creating/updating FIFO queues
+
+### Patch Changes
+
+- Updated dependencies [[`ceee4a8`](https://github.com/kondaurovDev/effortless-aws/commit/ceee4a854593ab2fd1ac3e19b72e6fcaf0a1ca18), [`ceee4a8`](https://github.com/kondaurovDev/effortless-aws/commit/ceee4a854593ab2fd1ac3e19b72e6fcaf0a1ca18)]:
+  - effortless-aws@0.22.0
+
 ## 0.5.0
 
 ### Minor Changes
