@@ -1,5 +1,23 @@
 # @effortless-aws/cli
 
+## 0.5.0
+
+### Minor Changes
+
+- [`796324c`](https://github.com/kondaurovDev/effortless-aws/commit/796324cfb0c57da8fb41a0a15b9460937d6c93cb) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - feat: binary response support and response streaming for defineApi
+
+  - Add `binary` flag to `HttpResponse` for returning binary data (images, PDFs, etc.) with automatic `isBase64Encoded` handling
+  - Add `result` helpers (`result.json()`, `result.binary()`) for convenient response construction
+  - Add `stream: true` option to `defineApi` for Lambda response streaming and SSE support
+  - Add `ResponseStream` type with `write()`, `end()`, `sse()`, `event()` helpers injected into route args
+  - Deploy sets `InvokeMode: RESPONSE_STREAM` on Function URL when `stream: true`
+  - Backward compatible: streaming routes can still `return { status, body }` as before
+
+### Patch Changes
+
+- Updated dependencies [[`796324c`](https://github.com/kondaurovDev/effortless-aws/commit/796324cfb0c57da8fb41a0a15b9460937d6c93cb)]:
+  - effortless-aws@0.21.0
+
 ## 0.4.0
 
 ### Minor Changes
