@@ -266,7 +266,7 @@ export const createTableClient = <T = Record<string, unknown>>(tableName: string
       if (removeClauses.length) parts.push(`REMOVE ${removeClauses.join(", ")}`);
       if (!parts.length) return;
 
-      await getClient().updateItem({
+      const request = {
         TableName: tableName,
         Key: marshallKey(key),
         UpdateExpression: parts.join(" "),
@@ -274,7 +274,49 @@ export const createTableClient = <T = Record<string, unknown>>(tableName: string
         ...(Object.keys(values).length
           ? { ExpressionAttributeValues: marshall(values, { removeUndefinedValues: true }) }
           : {}),
-      });
+      };
+
+      try {
+        await getClient().updateItem(request);
+      } catch (err: unknown) {
+        // `data` map doesn't exist yet — set it as a whole with all fields (2 IO worst case)
+        if (needsDataAlias && (err as { name?: string }).name === "ValidationException") {
+          const dataMap: Record<string, unknown> = {};
+          if (actions.set) Object.assign(dataMap, actions.set);
+          if (actions.append) Object.assign(dataMap, actions.append);
+
+          const retryNames: Record<string, string> = { "#data": "data" };
+          const retryValues: Record<string, unknown> = { ":fullData": dataMap };
+          const retrySets: string[] = ["#data = :fullData"];
+
+          if (actions.tag !== undefined) {
+            retryNames["#tag"] = "tag";
+            retryValues[":tagVal"] = actions.tag;
+            retrySets.push("#tag = :tagVal");
+          }
+          if (actions.ttl !== undefined && actions.ttl !== null) {
+            retryNames["#ttl"] = "ttl";
+            retryValues[":ttlVal"] = actions.ttl;
+            retrySets.push("#ttl = :ttlVal");
+          }
+
+          const retryParts: string[] = [`SET ${retrySets.join(", ")}`];
+          if (actions.ttl === null) {
+            retryNames["#ttl"] = "ttl";
+            retryParts.push("REMOVE #ttl");
+          }
+
+          await getClient().updateItem({
+            TableName: tableName,
+            Key: marshallKey(key),
+            UpdateExpression: retryParts.join(" "),
+            ExpressionAttributeNames: retryNames,
+            ExpressionAttributeValues: marshall(retryValues, { removeUndefinedValues: true }),
+          });
+        } else {
+          throw err;
+        }
+      }
     },
 
     async query(params: QueryParams) {

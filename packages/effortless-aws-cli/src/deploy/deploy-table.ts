@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { toSeconds } from "effortless-aws";
 import { extractTableConfigs, type ExtractedTableFunction } from "~/build/bundle";
 import {
   Aws,
@@ -60,9 +61,9 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       handlerName,
       defaultPermissions: TABLE_DEFAULT_PERMISSIONS,
       bundleType: "table",
-      ...(config.permissions ? { permissions: config.permissions } : {}),
-      ...(config.memory ? { memory: config.memory } : {}),
-      ...(config.timeout ? { timeout: config.timeout } : {}),
+      ...(config.lambda?.permissions ? { permissions: config.lambda.permissions } : {}),
+      ...(config.lambda?.memory ? { memory: config.lambda.memory } : {}),
+      ...(config.lambda?.timeout ? { timeout: toSeconds(config.lambda.timeout) } : {}),
       ...(layerArn ? { layerArn } : {}),
       ...(external ? { external } : {}),
       depsEnv: selfEnv,
@@ -75,7 +76,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       functionArn,
       streamArn,
       batchSize: config.batchSize ?? 100,
-      batchWindow: config.batchWindow ?? 2,
+      batchWindow: toSeconds(config.batchWindow ?? 2),
       startingPosition: config.startingPosition ?? "LATEST"
     });
 

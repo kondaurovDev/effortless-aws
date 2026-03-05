@@ -10,3 +10,4 @@ feat: QueueClient — FIFO queues as deps for typed message sending
 - `ResolveDeps` maps `FifoQueueHandler<T>` to `QueueClient<T>` with full type inference
 - Deploy resolves queue deps to `EFF_DEP_<key>=queue:<name>` env vars with SQS IAM permissions
 - Runtime lazily resolves queue URL via `getQueueUrl` (cached after first call)
+- Deploy now applies `delay` (DelaySeconds) when creating/updating FIFO queues

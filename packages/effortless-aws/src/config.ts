@@ -58,12 +58,12 @@ export type EffortlessConfig = {
   handlers?: string | string[];
 
   /**
-   * Default settings applied to all handlers unless overridden.
+   * Default Lambda settings applied to all handlers unless overridden.
    *
    * All Lambdas run on ARM64 (Graviton2) architecture — ~20% cheaper than x86_64
    * with better price-performance for most workloads.
    */
-  defaults?: {
+  lambda?: {
     /**
      * Lambda memory in MB. AWS allocates proportional CPU —
      * 1769 MB gives one full vCPU.

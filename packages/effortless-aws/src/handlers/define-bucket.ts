@@ -6,7 +6,9 @@ import type { BucketClient } from "../runtime/bucket-client";
 /**
  * Configuration options for defineBucket.
  */
-export type BucketConfig = LambdaWithPermissions & {
+export type BucketConfig = {
+  /** Lambda function settings (memory, timeout, permissions, etc.) */
+  lambda?: LambdaWithPermissions;
   /** S3 key prefix filter for event notifications (e.g., "uploads/") */
   prefix?: string;
   /** S3 key suffix filter for event notifications (e.g., ".jpg") */

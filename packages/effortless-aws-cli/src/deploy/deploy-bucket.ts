@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { toSeconds } from "effortless-aws";
 import type { ExtractedBucketFunction } from "~/build/bundle";
 import {
   ensureBucket,
@@ -75,9 +76,9 @@ export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, d
       handlerName,
       defaultPermissions: BUCKET_DEFAULT_PERMISSIONS,
       bundleType: "bucket",
-      ...(config.permissions ? { permissions: config.permissions } : {}),
-      ...(config.memory ? { memory: config.memory } : {}),
-      ...(config.timeout ? { timeout: config.timeout } : {}),
+      ...(config.lambda?.permissions ? { permissions: config.lambda.permissions } : {}),
+      ...(config.lambda?.memory ? { memory: config.lambda.memory } : {}),
+      ...(config.lambda?.timeout ? { timeout: toSeconds(config.lambda.timeout) } : {}),
       ...(layerArn ? { layerArn } : {}),
       ...(external ? { external } : {}),
       depsEnv: selfEnv,

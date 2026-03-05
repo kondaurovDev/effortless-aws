@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { toSeconds } from "effortless-aws";
 import { extractApiConfigs, type ExtractedApiFunction } from "~/build/bundle";
 import {
   Aws,
@@ -39,9 +40,9 @@ export const deployApiFunction = ({ input, fn, layerArn, external, depsEnv, deps
       exportName,
       handlerName,
       bundleType: "api",
-      ...(config.permissions ? { permissions: config.permissions } : {}),
-      ...(config.memory ? { memory: config.memory } : {}),
-      ...(config.timeout ? { timeout: config.timeout } : {}),
+      ...(config.lambda?.permissions ? { permissions: config.lambda.permissions } : {}),
+      ...(config.lambda?.memory ? { memory: config.lambda.memory } : {}),
+      ...(config.lambda?.timeout ? { timeout: toSeconds(config.lambda.timeout) } : {}),
       ...(layerArn ? { layerArn } : {}),
       ...(external ? { external } : {}),
       ...(depsEnv ? { depsEnv } : {}),

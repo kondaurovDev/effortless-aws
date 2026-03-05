@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, Duration } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
 
@@ -33,15 +33,19 @@ export type FifoQueueMessage<T = unknown> = {
 /**
  * Configuration options for a FIFO queue handler
  */
-export type FifoQueueConfig = LambdaWithPermissions & {
+export type FifoQueueConfig = {
+  /** Lambda function settings (memory, timeout, permissions, etc.) */
+  lambda?: LambdaWithPermissions;
   /** Number of messages per Lambda invocation (1-10 for FIFO, default: 10) */
   batchSize?: number;
-  /** Maximum time in seconds to gather messages before invoking (0-300, default: 0) */
-  batchWindow?: number;
-  /** Visibility timeout in seconds (default: max of timeout or 30) */
-  visibilityTimeout?: number;
-  /** Message retention period in seconds (60-1209600, default: 345600 = 4 days) */
-  retentionPeriod?: number;
+  /** Maximum time to gather messages before invoking (default: 0). Accepts `"5s"`, `"1m"`, etc. */
+  batchWindow?: Duration;
+  /** Visibility timeout (default: max of timeout or 30s). Accepts `"30s"`, `"5m"`, etc. */
+  visibilityTimeout?: Duration;
+  /** Message retention period (default: `"4d"`). Accepts `"1h"`, `"7d"`, etc. */
+  retentionPeriod?: Duration;
+  /** Delivery delay for all messages in the queue (default: 0). Accepts `"30s"`, `"5m"`, etc. */
+  delay?: Duration;
   /** Enable content-based deduplication (default: true) */
   contentBasedDeduplication?: boolean;
 };

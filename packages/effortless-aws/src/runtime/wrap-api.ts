@@ -104,7 +104,7 @@ const notFound = () => ({
 // ============ Wrapper ============
 
 export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
-  const rt = createHandlerRuntime(handler, "api", handler.__spec.logLevel ?? "info");
+  const rt = createHandlerRuntime(handler, "api", handler.__spec.lambda?.logLevel ?? "info");
   const basePath = handler.__spec.basePath;
   const isStream = handler.__spec.stream === true;
 

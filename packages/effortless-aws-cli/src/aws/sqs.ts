@@ -6,6 +6,7 @@ export type EnsureFifoQueueInput = {
   name: string;
   visibilityTimeout?: number;
   retentionPeriod?: number;
+  delay?: number;
   contentBasedDeduplication?: boolean;
   tags?: Record<string, string>;
 };
@@ -21,6 +22,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
       name,
       visibilityTimeout = 30,
       retentionPeriod = 345600,
+      delay = 0,
       contentBasedDeduplication = true,
       tags
     } = input;
@@ -49,6 +51,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
           ContentBasedDeduplication: String(contentBasedDeduplication),
           VisibilityTimeout: String(visibilityTimeout),
           MessageRetentionPeriod: String(retentionPeriod),
+          DelaySeconds: String(delay),
         },
         ...(tags ? { tags } : {}),
       });
@@ -64,6 +67,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
           ContentBasedDeduplication: String(contentBasedDeduplication),
           VisibilityTimeout: String(visibilityTimeout),
           MessageRetentionPeriod: String(retentionPeriod),
+          DelaySeconds: String(delay),
         },
       });
 

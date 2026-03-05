@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { ExtractedFifoQueueFunction } from "~/build/bundle";
+import { toSeconds } from "effortless-aws";
 import {
   ensureFifoQueue,
   ensureSqsEventSourceMapping,
@@ -47,11 +48,12 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
     // Create SQS FIFO queue
     yield* Effect.logDebug("Creating SQS FIFO queue...");
     const queueName = `${input.project}-${tagCtx.stage}-${handlerName}`;
-    const timeout = config.timeout ?? 30;
+    const timeout = toSeconds(config.lambda?.timeout ?? 30);
     const { queueUrl, queueArn } = yield* ensureFifoQueue({
       name: queueName,
-      visibilityTimeout: Math.max(config.visibilityTimeout ?? timeout, timeout),
-      retentionPeriod: config.retentionPeriod,
+      visibilityTimeout: Math.max(config.visibilityTimeout ? toSeconds(config.visibilityTimeout) : timeout, timeout),
+      retentionPeriod: config.retentionPeriod ? toSeconds(config.retentionPeriod) : undefined,
+      delay: config.delay ? toSeconds(config.delay) : undefined,
       contentBasedDeduplication: config.contentBasedDeduplication ?? true,
       tags: makeTags(tagCtx, "sqs"),
     });
@@ -70,9 +72,9 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       handlerName,
       defaultPermissions: FIFO_QUEUE_DEFAULT_PERMISSIONS,
       bundleType: "fifoQueue",
-      ...(config.permissions ? { permissions: config.permissions } : {}),
-      ...(config.memory ? { memory: config.memory } : {}),
-      ...(config.timeout ? { timeout: config.timeout } : {}),
+      ...(config.lambda?.permissions ? { permissions: config.lambda.permissions } : {}),
+      ...(config.lambda?.memory ? { memory: config.lambda.memory } : {}),
+      ...(config.lambda?.timeout ? { timeout: toSeconds(config.lambda.timeout) } : {}),
       ...(layerArn ? { layerArn } : {}),
       ...(external ? { external } : {}),
       depsEnv: queueEnv,
@@ -86,7 +88,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       functionArn,
       queueArn,
       batchSize: config.batchSize ?? 10,
-      batchWindow: config.batchWindow,
+      batchWindow: config.batchWindow ? toSeconds(config.batchWindow) : undefined,
     });
 
     yield* Effect.logDebug(`FIFO queue deployment complete! Queue: ${queueUrl}`);

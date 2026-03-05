@@ -4,7 +4,9 @@ import type { LambdaWithPermissions } from "./handler-options";
  * Configuration for deploying an SSR framework (Nuxt, Astro, etc.)
  * via CloudFront + S3 (static assets) + Lambda Function URL (server-side rendering).
  */
-export type AppConfig = LambdaWithPermissions & {
+export type AppConfig = {
+  /** Lambda function settings (memory, timeout, permissions, etc.) */
+  lambda?: LambdaWithPermissions;
   /** Directory containing the Lambda server handler (e.g., ".output/server").
    *  Must contain an `index.mjs` (or `index.js`) that exports a `handler` function. */
   server: string;
@@ -49,7 +51,7 @@ export type AppHandler = {
  *   build: "nuxt build",
  *   server: ".output/server",
  *   assets: ".output/public",
- *   memory: 1024,
+ *   lambda: { memory: 1024 },
  * });
  * ```
  */

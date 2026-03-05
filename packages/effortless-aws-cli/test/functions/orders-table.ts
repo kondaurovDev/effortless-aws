@@ -38,7 +38,7 @@ const notificationService = {
 export const orders = defineTable({
   streamView: "NEW_AND_OLD_IMAGES",
   batchSize: 10,
-  memory: 256,
+  lambda: { memory: 256 },
 
   schema: (input): Order => input as Order,
   deps: { customers },

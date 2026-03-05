@@ -18,6 +18,36 @@ type AwsService =
 
 export type Permission = `${AwsService}:${string}` | (string & {});
 
+// ============ Duration ============
+
+/**
+ * Human-readable duration. Accepts a plain number (seconds) or a string
+ * with a unit suffix: `"30s"`, `"5m"`, `"1h"`, `"2d"`.
+ *
+ * @example
+ * ```typescript
+ * timeout: 30        // 30 seconds
+ * timeout: "30s"     // 30 seconds
+ * timeout: "5m"      // 300 seconds
+ * timeout: "1h"      // 3600 seconds
+ * retentionPeriod: "4d"  // 345600 seconds
+ * ```
+ */
+export type Duration = number | `${number}s` | `${number}m` | `${number}h` | `${number}d`;
+
+/** Convert a Duration to seconds. */
+export const toSeconds = (d: Duration): number => {
+  if (typeof d === "number") return d;
+  const match = d.match(/^(\d+(?:\.\d+)?)(s|m|h|d)$/);
+  if (!match) throw new Error(`Invalid duration: "${d}"`);
+  const n = Number(match[1]);
+  const unit = match[2];
+  if (unit === "d") return n * 86400;
+  if (unit === "h") return n * 3600;
+  if (unit === "m") return n * 60;
+  return n;
+};
+
 // ============ Lambda config ============
 
 /** Logging verbosity level for Lambda handlers */
@@ -29,8 +59,8 @@ export type LogLevel = "error" | "info" | "debug";
 export type LambdaConfig = {
   /** Lambda memory in MB (default: 256) */
   memory?: number;
-  /** Lambda timeout in seconds (default: 30) */
-  timeout?: number;
+  /** Lambda timeout (default: 30s). Accepts seconds or duration string: `"30s"`, `"5m"` */
+  timeout?: Duration;
   /** Logging verbosity: "error" (errors only), "info" (+ execution summary), "debug" (+ input/output). Default: "info" */
   logLevel?: LogLevel;
 };

@@ -34,7 +34,7 @@ describe("defineTable", () => {
         export const orders = defineTable({
           streamView: "NEW_AND_OLD_IMAGES",
           batchSize: 50,
-          memory: 512,
+          lambda: { memory: 512 },
           onRecord: async ({ record }) => {
             console.log(record);
           }
@@ -48,7 +48,7 @@ describe("defineTable", () => {
       expect(first.exportName).toBe("orders");
       expect(first.config.streamView).toBe("NEW_AND_OLD_IMAGES");
       expect(first.config.batchSize).toBe(50);
-      expect(first.config.memory).toBe(512);
+      expect(first.config.lambda?.memory).toBe(512);
       expect(first.hasHandler).toBe(true);
       // pk/sk should not be in config
       expect((first.config as any).pk).toBeUndefined();

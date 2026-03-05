@@ -89,7 +89,7 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
     return selfClient;
   };
 
-  const rt = createHandlerRuntime(handler, "table", handler.__spec.logLevel ?? "info", () => {
+  const rt = createHandlerRuntime(handler, "table", handler.__spec.lambda?.logLevel ?? "info", () => {
     const table = getSelfClient();
     return table ? { table } : {};
   });

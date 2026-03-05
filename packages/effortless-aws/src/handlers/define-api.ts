@@ -46,7 +46,9 @@ type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
   ) => C | Promise<C>;
 
 /** Static config extracted by AST (no runtime callbacks) */
-export type ApiConfig = LambdaWithPermissions & {
+export type ApiConfig = {
+  /** Lambda function settings (memory, timeout, permissions, etc.) */
+  lambda?: LambdaWithPermissions;
   /** Base path prefix for all routes (e.g., "/api") */
   basePath: string;
   /** Enable response streaming. When true, the Lambda Function URL uses RESPONSE_STREAM invoke mode. */
@@ -66,7 +68,9 @@ export type DefineApiOptions<
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined,
   ST extends boolean | undefined = undefined
-> = LambdaWithPermissions & {
+> = {
+  /** Lambda function settings (memory, timeout, permissions, etc.) */
+  lambda?: LambdaWithPermissions;
   /** Base path prefix for all routes (e.g., "/api") */
   basePath: string;
   /** Enable response streaming. When true, routes receive a `stream` arg for SSE. Routes can still return HttpResponse normally. */

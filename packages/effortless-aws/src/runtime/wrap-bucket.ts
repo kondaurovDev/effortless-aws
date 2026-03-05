@@ -36,7 +36,7 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
     return selfClient;
   };
 
-  const rt = createHandlerRuntime(handler, "bucket", handler.__spec.logLevel ?? "info", () => {
+  const rt = createHandlerRuntime(handler, "bucket", handler.__spec.lambda?.logLevel ?? "info", () => {
     const bucket = getSelfClient();
     return bucket ? { bucket } : {};
   });

@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableItem } from "./handler-options";
+import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableItem, Duration } from "./handler-options";
 import type { TableClient } from "../runtime/table-client";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
@@ -25,15 +25,17 @@ export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEY
  * Tables always use `pk (S)` + `sk (S)` keys, `tag (S)` discriminator,
  * `data (M)` for domain fields, and `ttl (N)` for optional expiration.
  */
-export type TableConfig = LambdaWithPermissions & {
+export type TableConfig = {
+  /** Lambda function settings (memory, timeout, permissions, etc.) */
+  lambda?: LambdaWithPermissions;
   /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
   /** Stream view type - what data to include in stream records (default: "NEW_AND_OLD_IMAGES") */
   streamView?: StreamView;
   /** Number of records to process in each Lambda invocation (1-10000, default: 100) */
   batchSize?: number;
-  /** Maximum time in seconds to gather records before invoking (0-300, default: 2) */
-  batchWindow?: number;
+  /** Maximum time to gather records before invoking (default: `"2s"`). Accepts `"5s"`, `"1m"`, etc. */
+  batchWindow?: Duration;
   /** Where to start reading the stream (default: "LATEST") */
   startingPosition?: "LATEST" | "TRIM_HORIZON";
   /**

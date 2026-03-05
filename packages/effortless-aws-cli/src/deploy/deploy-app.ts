@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { toSeconds } from "effortless-aws";
 import { execSync } from "child_process";
 import * as path from "path";
 import type { ExtractedAppFunction } from "~/build/bundle";
@@ -89,7 +90,7 @@ export const deployApp = (input: DeployAppInput) =>
     const code = yield* zipDirectory(serverDir);
 
     // 3. Create IAM role
-    const permissions = config.permissions ?? [];
+    const permissions = config.lambda?.permissions ?? [];
     const roleArn = yield* ensureRole(
       project, stage, handlerName,
       permissions.length > 0 ? permissions : undefined,
@@ -105,8 +106,8 @@ export const deployApp = (input: DeployAppInput) =>
       roleArn,
       code,
       handler: "index.handler",
-      memory: config.memory ?? 1024,
-      timeout: config.timeout ?? 30,
+      memory: config.lambda?.memory ?? 1024,
+      timeout: toSeconds(config.lambda?.timeout ?? 30),
       tags: makeTags(tagCtx, "lambda"),
       environment: {
         EFF_PROJECT: project,
