@@ -1,6 +1,6 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
-import type { StaticFiles } from "./shared";
+import type { StaticFiles, ResponseStream } from "./shared";
 import type { HttpRequest, HttpResponse } from "./shared";
 
 /** GET route handler — no schema, no data */
@@ -8,14 +8,16 @@ export type ApiGetHandlerFn<
   C = undefined,
   D = undefined,
   P = undefined,
-  S extends string[] | undefined = undefined
+  S extends string[] | undefined = undefined,
+  ST extends boolean | undefined = undefined
 > =
   (args: { req: HttpRequest }
     & ([C] extends [undefined] ? {} : { ctx: C })
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { files: StaticFiles })
-  ) => Promise<HttpResponse> | HttpResponse;
+    & ([ST] extends [true] ? { stream: ResponseStream } : {})
+  ) => Promise<HttpResponse | void> | HttpResponse | void;
 
 /** POST handler — with typed data from schema */
 export type ApiPostHandlerFn<
@@ -23,7 +25,8 @@ export type ApiPostHandlerFn<
   C = undefined,
   D = undefined,
   P = undefined,
-  S extends string[] | undefined = undefined
+  S extends string[] | undefined = undefined,
+  ST extends boolean | undefined = undefined
 > =
   (args: { req: HttpRequest }
     & ([T] extends [undefined] ? {} : { data: T })
@@ -31,7 +34,8 @@ export type ApiPostHandlerFn<
     & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
     & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
     & ([S] extends [undefined] ? {} : { files: StaticFiles })
-  ) => Promise<HttpResponse> | HttpResponse;
+    & ([ST] extends [true] ? { stream: ResponseStream } : {})
+  ) => Promise<HttpResponse | void> | HttpResponse | void;
 
 /** Setup factory — receives deps/config/files when declared */
 type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
@@ -45,6 +49,8 @@ type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
 export type ApiConfig = LambdaWithPermissions & {
   /** Base path prefix for all routes (e.g., "/api") */
   basePath: string;
+  /** Enable response streaming. When true, the Lambda Function URL uses RESPONSE_STREAM invoke mode. */
+  stream?: boolean;
 };
 
 /**
@@ -58,10 +64,13 @@ export type DefineApiOptions<
   C = undefined,
   D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
-  S extends string[] | undefined = undefined
+  S extends string[] | undefined = undefined,
+  ST extends boolean | undefined = undefined
 > = LambdaWithPermissions & {
   /** Base path prefix for all routes (e.g., "/api") */
   basePath: string;
+  /** Enable response streaming. When true, routes receive a `stream` arg for SSE. Routes can still return HttpResponse normally. */
+  stream?: ST;
   /**
    * Factory function to initialize shared state.
    * Called once on cold start, result is cached and reused across invocations.
@@ -77,7 +86,7 @@ export type DefineApiOptions<
   onError?: (error: unknown, req: HttpRequest) => HttpResponse;
 
   /** GET routes — query handlers keyed by relative path (e.g., "/users/{id}") */
-  get?: Record<string, ApiGetHandlerFn<C, D, P, S>>;
+  get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST>>;
 
   /**
    * Schema for POST body validation. Use with discriminated unions:
@@ -88,7 +97,7 @@ export type DefineApiOptions<
    */
   schema?: (input: unknown) => T;
   /** POST handler — single entry point for commands */
-  post?: ApiPostHandlerFn<T, C, D, P, S>;
+  post?: ApiPostHandlerFn<T, C, D, P, S, ST>;
 };
 
 /** Internal handler object created by defineApi */
@@ -97,7 +106,8 @@ export type ApiHandler<
   C = undefined,
   D = undefined,
   P = undefined,
-  S extends string[] | undefined = undefined
+  S extends string[] | undefined = undefined,
+  ST extends boolean | undefined = undefined
 > = {
   readonly __brand: "effortless-api";
   readonly __spec: ApiConfig;
@@ -108,8 +118,8 @@ export type ApiHandler<
   readonly deps?: D;
   readonly config?: P;
   readonly static?: string[];
-  readonly get?: Record<string, ApiGetHandlerFn<C, D, P, S>>;
-  readonly post?: ApiPostHandlerFn<T, C, D, P, S>;
+  readonly get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST>>;
+  readonly post?: ApiPostHandlerFn<T, C, D, P, S, ST>;
 };
 
 /**
@@ -151,10 +161,11 @@ export const defineApi = <
   C = undefined,
   D extends Record<string, AnyDepHandler> | undefined = undefined,
   P extends Record<string, AnyParamRef> | undefined = undefined,
-  S extends string[] | undefined = undefined
+  S extends string[] | undefined = undefined,
+  ST extends boolean | undefined = undefined
 >(
-  options: DefineApiOptions<T, C, D, P, S>
-): ApiHandler<T, C, D, P, S> => {
+  options: DefineApiOptions<T, C, D, P, S, ST>
+): ApiHandler<T, C, D, P, S, ST> => {
   const { get, post, schema, onError, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-api",
@@ -167,5 +178,5 @@ export const defineApi = <
     ...(deps ? { deps } : {}),
     ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
-  } as ApiHandler<T, C, D, P, S>;
+  } as ApiHandler<T, C, D, P, S, ST>;
 };

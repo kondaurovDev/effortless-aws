@@ -12,6 +12,7 @@ export { defineMailer } from "./handlers/define-mailer"
 export { defineApi } from "./handlers/define-api"
 export { param } from "./handlers/handler-options"
 export { typed } from "./handlers/handler-options"
+export { result } from "./handlers/shared"
 
 // Types
 export type { HttpRequest, HttpResponse, HttpMethod, ContentType } from "./handlers/shared"
@@ -26,7 +27,7 @@ export type { TableClient, QueryParams, QueryByTagParams, SkCondition, UpdateAct
 export type { BucketClient } from "./runtime/bucket-client"
 export type { EmailClient, SendEmailOptions } from "./runtime/email-client"
 export type { ParamRef, ResolveConfig, TableKey, TableItem, PutInput } from "./handlers/handler-options"
-export type { StaticFiles } from "./handlers/shared"
+export type { StaticFiles, ResponseStream } from "./handlers/shared"
 export type { ResolveDeps } from "./handlers/handler-deps"
 
 // Shared types

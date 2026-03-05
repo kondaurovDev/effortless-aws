@@ -46,6 +46,38 @@ export type HttpResponse = {
   contentType?: ContentType;
   /** Response headers (use for custom content-types not covered by contentType) */
   headers?: Record<string, string>;
+  /**
+   * Set to `true` to return binary data.
+   * When enabled, `body` must be a base64-encoded string and the response
+   * will include `isBase64Encoded: true` so Lambda Function URLs / API Gateway
+   * decode it back to binary for the client.
+   */
+  binary?: boolean;
+};
+
+/** Response helpers for defineApi handlers */
+export const result = {
+  /** Return a JSON response */
+  json: (body: unknown, status: number = 200): HttpResponse => ({ status, body }),
+  /** Return a binary response. Accepts a Buffer and converts to base64 automatically. */
+  binary: (body: Buffer, contentType: string, headers?: Record<string, string>): HttpResponse => ({
+    status: 200,
+    body: body.toString("base64"),
+    binary: true,
+    headers: { "content-type": contentType, ...headers },
+  }),
+};
+
+/** Stream helper injected into route args when `stream: true` is set on defineApi */
+export type ResponseStream = {
+  /** Write a raw string chunk to the response stream */
+  write(chunk: string): void;
+  /** End the response stream */
+  end(): void;
+  /** Switch to SSE mode: sets Content-Type to text/event-stream */
+  sse(): void;
+  /** Write an SSE event: `data: JSON.stringify(data)\n\n` */
+  event(data: unknown): void;
 };
 
 /** Service for reading static files bundled into the Lambda ZIP */

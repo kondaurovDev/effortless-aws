@@ -89,7 +89,7 @@ export const deploy = (input: DeployInput) =>
 
     // Setup Function URL
     const lambdaName = `${input.project}-${tagCtx.stage}-${handlerName}`;
-    const { functionUrl } = yield* ensureFunctionUrl(lambdaName);
+    const { functionUrl } = yield* ensureFunctionUrl(lambdaName, fn.config.stream ? "RESPONSE_STREAM" : undefined);
     yield* addFunctionUrlPublicAccess(lambdaName);
 
     yield* Effect.logDebug(`Deployment complete! URL: ${functionUrl}`);

@@ -212,8 +212,10 @@ const DEFAULT_CORS = {
   AllowHeaders: ["*"],
 };
 
-export const ensureFunctionUrl = (functionName: string) =>
+export const ensureFunctionUrl = (functionName: string, invokeMode?: "BUFFERED" | "RESPONSE_STREAM") =>
   Effect.gen(function* () {
+    const mode = invokeMode ?? "BUFFERED";
+
     // Check if Function URL already exists
     const existing = yield* lambda.make("get_function_url_config", {
       FunctionName: functionName,
@@ -228,6 +230,7 @@ export const ensureFunctionUrl = (functionName: string) =>
       yield* lambda.make("update_function_url_config", {
         FunctionName: functionName,
         AuthType: "NONE",
+        InvokeMode: mode,
         Cors: DEFAULT_CORS,
       });
       return { functionUrl: existing.FunctionUrl! };
@@ -237,7 +240,7 @@ export const ensureFunctionUrl = (functionName: string) =>
     const result = yield* lambda.make("create_function_url_config", {
       FunctionName: functionName,
       AuthType: "NONE",
-      InvokeMode: "BUFFERED",
+      InvokeMode: mode,
       Cors: DEFAULT_CORS,
     });
 

@@ -1,5 +1,5 @@
 import type { ApiHandler } from "../handlers/define-api";
-import type { ContentType } from "../handlers/shared";
+import type { ContentType, ResponseStream } from "../handlers/shared";
 import { createHandlerRuntime } from "./handler-utils";
 
 const CONTENT_TYPE_MAP: Record<ContentType, string> = {
@@ -79,10 +79,10 @@ const matchRoute = (
 
 // ============ Response helpers ============
 
-const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string> }) => {
+const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string>; binary?: boolean }) => {
   const resolved = r.contentType ? CONTENT_TYPE_MAP[r.contentType] : undefined;
   const customContentType = resolved ?? r.headers?.["content-type"] ?? r.headers?.["Content-Type"];
-  const isJson = !customContentType || customContentType === "application/json";
+  const isJson = !r.binary && (!customContentType || customContentType === "application/json");
   return {
     statusCode: r.status,
     headers: {
@@ -90,7 +90,8 @@ const toResult = (r: { status: number; body?: unknown; contentType?: ContentType
       ...r.headers,
       ...(resolved ? { "Content-Type": resolved } : {}),
     },
-    body: isJson ? JSON.stringify(r.body) : String(r.body ?? ""),
+    body: r.binary ? String(r.body ?? "") : isJson ? JSON.stringify(r.body) : String(r.body ?? ""),
+    ...(r.binary ? { isBase64Encoded: true } : {}),
   };
 };
 
@@ -105,6 +106,7 @@ const notFound = () => ({
 export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
   const rt = createHandlerRuntime(handler, "api", handler.__spec.logLevel ?? "info");
   const basePath = handler.__spec.basePath;
+  const isStream = handler.__spec.stream === true;
 
   // Build GET route matchers at cold start
   const getMatchers = handler.get ? buildGetMatchers(handler.get, basePath) : [];
@@ -121,7 +123,8 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
     };
   };
 
-  return async (event: LambdaEvent) => {
+  // Core handler logic shared between buffered and streaming modes
+  const handleRequest = async (event: LambdaEvent, streamCtx?: { rawStream: any; httpStream: any; stream: ResponseStream }) => {
     const startTime = Date.now();
     rt.patchConsole();
 
@@ -151,12 +154,18 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
 
         // Merge matched path params into req
         req.params = { ...req.params, ...matched.params };
-        const args = { req, ...sharedArgs };
+        const args: Record<string, unknown> = { req, ...sharedArgs };
+        if (streamCtx) args.stream = streamCtx.stream;
 
         try {
           const response = await (matched.handler as any)(args);
-          rt.logExecution(startTime, input, response.body);
-          return toResult(response);
+          if (response) {
+            rt.logExecution(startTime, input, response.body);
+            return toResult(response);
+          }
+          // void return — handler wrote to stream directly
+          rt.logExecution(startTime, input, "[stream]");
+          return undefined;
         } catch (error) {
           rt.logError(startTime, input, error);
           return handler.onError
@@ -168,6 +177,7 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
       // POST handling
       if (req.method === "POST" && handler.post) {
         const args: Record<string, unknown> = { req, ...sharedArgs };
+        if (streamCtx) args.stream = streamCtx.stream;
 
         if (handler.schema) {
           try {
@@ -182,8 +192,13 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
 
         try {
           const response = await (handler.post as any)(args);
-          rt.logExecution(startTime, input, response.body);
-          return toResult(response);
+          if (response) {
+            rt.logExecution(startTime, input, response.body);
+            return toResult(response);
+          }
+          // void return — handler wrote to stream directly
+          rt.logExecution(startTime, input, "[stream]");
+          return undefined;
         } catch (error) {
           rt.logError(startTime, input, error);
           return handler.onError
@@ -198,5 +213,83 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
     } finally {
       rt.restoreConsole();
     }
+  };
+
+  // Streaming mode: wrap with awslambda.streamifyResponse
+  if (isStream) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const streamify = (globalThis as any).awslambda?.streamifyResponse;
+    if (!streamify) {
+      // Fallback for local dev / non-Lambda environments
+      return async (event: LambdaEvent) => handleRequest(event);
+    }
+
+    return streamify(async (event: LambdaEvent, rawStream: any) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const HttpResponseStream = (globalThis as any).awslambda?.HttpResponseStream;
+
+      // Check if handler uses SSE by running the route — we need to create the stream first
+      // We start with a deferred approach: create stream helper, run handler, then decide
+      let streamUsed = false;
+      let sseMode = false;
+      let httpStream: any = null;
+
+      const ensureHttpStream = (contentType?: string) => {
+        if (!httpStream) {
+          httpStream = HttpResponseStream
+            ? HttpResponseStream.from(rawStream, {
+                statusCode: 200,
+                headers: { "Content-Type": contentType ?? "text/plain; charset=utf-8" },
+              })
+            : rawStream;
+        }
+        return httpStream;
+      };
+
+      const stream: ResponseStream = {
+        write: (chunk: string) => {
+          streamUsed = true;
+          const s = ensureHttpStream(sseMode ? "text/event-stream" : undefined);
+          s.write(chunk);
+        },
+        end: () => {
+          streamUsed = true;
+          const s = ensureHttpStream();
+          s.end();
+        },
+        sse: () => {
+          sseMode = true;
+          streamUsed = true;
+          ensureHttpStream("text/event-stream");
+        },
+        event: (data: unknown) => {
+          streamUsed = true;
+          const s = ensureHttpStream("text/event-stream");
+          sseMode = true;
+          s.write(`data: ${JSON.stringify(data)}\n\n`);
+        },
+      };
+
+      const result = await handleRequest(event, { rawStream, httpStream, stream });
+
+      if (result && !streamUsed) {
+        // Handler returned HttpResponse — write it to stream
+        const hs = HttpResponseStream
+          ? HttpResponseStream.from(rawStream, { statusCode: result.statusCode, headers: result.headers })
+          : rawStream;
+        hs.write(result.body);
+        hs.end();
+      } else if (!streamUsed) {
+        // No result and no stream usage — shouldn't happen, but close stream
+        rawStream.end();
+      }
+      // If streamUsed is true, the handler already wrote to and closed the stream
+    });
+  }
+
+  // Buffered mode (default)
+  return async (event: LambdaEvent) => {
+    const result = await handleRequest(event);
+    return result ?? notFound();
   };
 };
