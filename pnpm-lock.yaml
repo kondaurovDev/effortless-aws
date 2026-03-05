@@ -37,7 +37,7 @@ catalogs:
       specifier: ^3.994.0
       version: 3.994.0
     '@aws-sdk/client-sqs':
-      specifier: ^3.989.0
+      specifier: 3.989.0
       version: 3.989.0
     '@aws-sdk/client-ssm':
       specifier: ^3.985.0
@@ -80,6 +80,9 @@ importers:
       '@aws-sdk/client-sesv2':
         specifier: 'catalog:'
         version: 3.994.0
+      '@aws-sdk/client-sqs':
+        specifier: 'catalog:'
+        version: 3.989.0
       '@aws-sdk/client-ssm':
         specifier: 'catalog:'
         version: 3.985.0

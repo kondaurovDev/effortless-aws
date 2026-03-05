@@ -188,6 +188,12 @@ const SES_PERMISSIONS = [
   "ses:SendRawEmail",
 ] as const;
 
+const QUEUE_CLIENT_PERMISSIONS = [
+  "sqs:SendMessage",
+  "sqs:SendMessageBatch",
+  "sqs:GetQueueUrl",
+] as const;
+
 /**
  * Build a map of all mailer handler export names to their domains.
  */
@@ -242,6 +248,24 @@ const buildBucketNameMap = (
 };
 
 /**
+ * Build a map of all FIFO queue handler export names to their resolved queue names.
+ * Queue names are deterministic: ${project}-${stage}-${handlerName}
+ */
+const buildQueueNameMap = (
+  fifoQueueHandlers: DiscoveredHandlers["fifoQueueHandlers"],
+  project: string,
+  stage: string,
+): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const { exports } of fifoQueueHandlers) {
+    for (const fn of exports) {
+      map.set(fn.exportName, `${project}-${stage}-${fn.exportName}`);
+    }
+  }
+  return map;
+};
+
+/**
  * Validate that all handler deps reference a discovered table, bucket, or mailer.
  * Returns a list of human-readable error strings (empty = all valid).
  */
@@ -250,6 +274,7 @@ const validateDeps = (
   tableNameMap: Map<string, string>,
   bucketNameMap: Map<string, string>,
   mailerDomainMap: Map<string, string>,
+  queueNameMap: Map<string, string>,
 ): string[] => {
   const errors: string[] = [];
   const allGroups = [
@@ -264,9 +289,9 @@ const validateDeps = (
   for (const { exports } of allGroups) {
     for (const fn of exports) {
       for (const key of fn.depsKeys) {
-        if (!tableNameMap.has(key) && !bucketNameMap.has(key) && !mailerDomainMap.has(key)) {
+        if (!tableNameMap.has(key) && !bucketNameMap.has(key) && !mailerDomainMap.has(key) && !queueNameMap.has(key)) {
           errors.push(
-            `Handler "${fn.exportName}" depends on "${key}", but no matching table, bucket, or mailer handler was found. Make sure it is exported.`
+            `Handler "${fn.exportName}" depends on "${key}", but no matching table, bucket, mailer, or queue handler was found. Make sure it is exported.`
           );
         }
       }
@@ -284,6 +309,7 @@ const resolveDeps = (
   tableNameMap: Map<string, string>,
   bucketNameMap: Map<string, string>,
   mailerDomainMap: Map<string, string>,
+  queueNameMap: Map<string, string>,
 ): { depsEnv: Record<string, string>; depsPermissions: readonly string[] } | undefined => {
   if (depsKeys.length === 0) return undefined;
 
@@ -291,6 +317,7 @@ const resolveDeps = (
   let hasTable = false;
   let hasBucket = false;
   let hasMailer = false;
+  let hasQueue = false;
 
   for (const key of depsKeys) {
     const tableName = tableNameMap.get(key);
@@ -309,6 +336,12 @@ const resolveDeps = (
     if (mailerDomain) {
       depsEnv[`EFF_DEP_${key}`] = `mailer:${mailerDomain}`;
       hasMailer = true;
+      continue;
+    }
+    const queueName = queueNameMap.get(key);
+    if (queueName) {
+      depsEnv[`EFF_DEP_${key}`] = `queue:${queueName}`;
+      hasQueue = true;
     }
   }
 
@@ -318,6 +351,7 @@ const resolveDeps = (
   if (hasTable) permissions.push(...TABLE_CLIENT_PERMISSIONS);
   if (hasBucket) permissions.push(...BUCKET_CLIENT_PERMISSIONS);
   if (hasMailer) permissions.push(...SES_PERMISSIONS);
+  if (hasQueue) permissions.push(...QUEUE_CLIENT_PERMISSIONS);
 
   return { depsEnv, depsPermissions: permissions };
 };
@@ -375,6 +409,7 @@ type DeployTaskCtx = {
   tableNameMap: Map<string, string>;
   bucketNameMap: Map<string, string>;
   mailerDomainMap: Map<string, string>;
+  queueNameMap: Map<string, string>;
   logComplete: (name: string, type: string, status: StepStatus) => Effect.Effect<void>;
 };
 
@@ -392,7 +427,7 @@ const resolveHandlerEnv = (
   ctx: DeployTaskCtx,
 ) => {
   const resolved = mergeResolved(
-    resolveDeps(depsKeys, ctx.tableNameMap, ctx.bucketNameMap, ctx.mailerDomainMap),
+    resolveDeps(depsKeys, ctx.tableNameMap, ctx.bucketNameMap, ctx.mailerDomainMap, ctx.queueNameMap),
     resolveParams(paramEntries, ctx.input.project, ctx.stage)
   );
   return {
@@ -694,9 +729,10 @@ export const deployProject = (input: DeployProjectInput) =>
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
     const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
     const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
+    const queueNameMap = buildQueueNameMap(fifoQueueHandlers, input.project, stage);
 
     // Validate deps references before deploying anything
-    const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap);
+    const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap);
     if (depsErrors.length > 0) {
       yield* Console.log("");
       for (const err of depsErrors) {
@@ -745,7 +781,7 @@ export const deployProject = (input: DeployProjectInput) =>
     manifest.sort((a, b) => a.name.localeCompare(b.name));
     const logComplete = createLiveProgress(manifest);
     const ctx: DeployTaskCtx = {
-      input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, logComplete,
+      input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, logComplete,
     };
 
     const tableResults: DeployTableResult[] = [];

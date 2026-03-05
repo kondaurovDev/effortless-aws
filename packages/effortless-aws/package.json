@@ -42,12 +42,13 @@
     "@aws-sdk/client-dynamodb": "catalog:",
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/client-sesv2": "catalog:",
+    "@aws-sdk/client-sqs": "catalog:",
     "@aws-sdk/client-ssm": "catalog:",
     "@aws-sdk/util-dynamodb": "catalog:",
     "@types/aws-lambda": "^8.10.144",
     "@types/node": "catalog:",
-    "type-fest": "catalog:",
     "tsup": "catalog:",
+    "type-fest": "catalog:",
     "typescript": "catalog:"
   }
 }
