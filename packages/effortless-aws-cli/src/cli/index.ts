@@ -11,6 +11,7 @@ import { cleanupCommand } from "./commands/cleanup";
 import { logsCommand } from "./commands/logs";
 import { layerCommand } from "./commands/layer";
 import { configCommand } from "./commands/config";
+import { checkForUpdate } from "./update-check";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json");
@@ -25,8 +26,11 @@ const cli = Command.run(mainCommand, {
   version,
 });
 
+const updateCheck = checkForUpdate(version);
+
 cli(process.argv).pipe(
   Effect.provide(NodeContext.layer),
   Effect.provide(CliConfig.layer({ showBuiltIns: false, showTypes: false })),
+  Effect.tap(() => Effect.promise(() => updateCheck)),
   NodeRuntime.runMain
 );
