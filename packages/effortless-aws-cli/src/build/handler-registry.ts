@@ -1,4 +1,4 @@
-import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type CallExpression, type ArrowFunction, type ParenthesizedExpression, type Node } from "ts-morph";
+import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type ShorthandPropertyAssignment, type CallExpression, type ArrowFunction, type ParenthesizedExpression, type Node } from "ts-morph";
 
 // ============ Shared AST helpers ============
 
@@ -13,12 +13,19 @@ const bareName = (expr: string): string => {
   return dot === -1 ? expr : expr.slice(dot + 1);
 };
 
-/** Get initializer of a named property from an object literal */
-const getProp = (obj: ObjectLiteralExpression, name: string): Node | undefined =>
-  obj.getProperties()
-    .find(p => p.getKind() === SyntaxKind.PropertyAssignment && (p as PropertyAssignment).getName() === name)
-    ?.asKindOrThrow(SyntaxKind.PropertyAssignment)
-    .getInitializer();
+/** Get initializer of a named property from an object literal.
+ *  Handles both `key: value` (PropertyAssignment) and shorthand `key,` (ShorthandPropertyAssignment). */
+const getProp = (obj: ObjectLiteralExpression, name: string): Node | undefined => {
+  for (const p of obj.getProperties()) {
+    if (p.getKind() === SyntaxKind.PropertyAssignment && (p as PropertyAssignment).getName() === name) {
+      return (p as PropertyAssignment).getInitializer();
+    }
+    if (p.getKind() === SyntaxKind.ShorthandPropertyAssignment && (p as ShorthandPropertyAssignment).getName() === name) {
+      return (p as ShorthandPropertyAssignment).getNameNode();
+    }
+  }
+  return undefined;
+};
 
 /** Find all exported `defineFn(...)` calls, returning { exportName, args } */
 const findDefineCalls = (sourceFile: ReturnType<typeof parseSource>, defineFn: string) => {
@@ -247,7 +254,7 @@ const extractAuthConfig = (obj: ObjectLiteralExpression, sourceFile: ReturnType<
     return extractAuthConfigFromCall(init as CallExpression);
   }
 
-  // Identifier reference: auth: protect
+  // Identifier reference: auth: protect  OR  shorthand: auth,
   if (init.getKind() === SyntaxKind.Identifier) {
     const varInit = sourceFile.getVariableDeclaration(init.getText())?.getInitializer();
     if (varInit?.getKind() === SyntaxKind.CallExpression) {

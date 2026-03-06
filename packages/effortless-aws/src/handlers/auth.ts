@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import type { Duration } from "./handler-options";
 import { toSeconds } from "./handler-options";
 
@@ -97,10 +98,6 @@ export type AuthRuntime = {
  * @internal
  */
 export const createAuthRuntime = (secret: string, defaultExpiresIn: number): AuthRuntime => {
-  // Dynamic import to avoid bundling crypto in non-auth handlers
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const crypto = require("crypto") as typeof import("crypto");
-
   const sign = (payload: string): string =>
     crypto.createHmac("sha256", secret).update(payload).digest("base64url");
 
