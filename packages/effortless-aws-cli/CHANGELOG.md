@@ -1,5 +1,13 @@
 # @effortless-aws/cli
 
+## 0.9.1
+
+### Patch Changes
+
+- [`415eda6`](https://github.com/kondaurovDev/effortless-aws/commit/415eda65221f151068d023214292606c016cf7c0) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - fix: add `createRequire` banner to ESM bundles for CJS compatibility
+
+  CJS packages bundled into ESM output (e.g. `follow-redirects`) use `require()` for Node.js builtins, which doesn't exist in ESM context on Lambda. Adds `createRequire(import.meta.url)` banner so bundled CJS code can call `require()` without crashing.
+
 ## 0.9.0
 
 ### Minor Changes
