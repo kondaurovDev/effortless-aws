@@ -20,6 +20,10 @@ Write all code, comments, commit messages, and documentation in English.
 ## Protected files
 - Do NOT modify `CHANGELOG.md` files — they contain release history and are managed by changesets.
 
+## Public API (`effortless-aws`)
+- Only export types from `index.ts` that users need directly. Do NOT export internal types (callback fn types like `TableRecordFn`, options types like `DefineTableOptions`, utility types like `ResolveDeps`, `ResolveConfig`, `AnyParamRef`).
+- Handler return types (`TableHandler`, `FifoQueueHandler`, etc.) should only carry generics needed externally (e.g. `T` for schema). Internal generics (`D`, `P`, `S` for deps/config/static) must stay local to the `define*` function — never leak into the return type.
+
 ## AWS SDK
 - Always use the generated Effect wrappers from `src/aws/clients/` for AWS SDK calls. Never instantiate AWS SDK clients directly.
 - For calls to a different region, use `Effect.provide()` with the corresponding client's `.Default({ region })` layer.

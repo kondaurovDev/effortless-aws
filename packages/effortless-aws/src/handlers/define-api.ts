@@ -80,8 +80,8 @@ export type DefineApiOptions<
    * Called once on cold start, result is cached and reused across invocations.
    */
   setup?: SetupFactory<C, D, P, S>;
-  /** Dependencies on other handlers (tables, queues, etc.) */
-  deps?: D;
+  /** Dependencies on other handlers (tables, queues, etc.): `deps: () => ({ users })` */
+  deps?: () => D & {};
   /** SSM Parameter Store parameters */
   config?: P;
   /** Static file glob patterns to bundle into the Lambda ZIP */
@@ -108,22 +108,17 @@ export type DefineApiOptions<
 export type ApiHandler<
   T = undefined,
   C = undefined,
-  D = undefined,
-  P = undefined,
-  S extends string[] | undefined = undefined,
-  ST extends boolean | undefined = undefined
 > = {
   readonly __brand: "effortless-api";
   readonly __spec: ApiConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (error: unknown, req: HttpRequest) => HttpResponse;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly setup?: (...args: any[]) => C | Promise<C>;
-  readonly deps?: D;
-  readonly config?: P;
+  readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
+  readonly config?: Record<string, unknown>;
   readonly static?: string[];
-  readonly get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST>>;
-  readonly post?: ApiPostHandlerFn<T, C, D, P, S, ST>;
+  readonly get?: Record<string, (...args: any[]) => any>;
+  readonly post?: (...args: any[]) => any;
 };
 
 /**
@@ -169,7 +164,7 @@ export const defineApi = <
   ST extends boolean | undefined = undefined
 >(
   options: DefineApiOptions<T, C, D, P, S, ST>
-): ApiHandler<T, C, D, P, S, ST> => {
+): ApiHandler<T, C> => {
   const { get, post, schema, onError, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-api",
@@ -182,5 +177,5 @@ export const defineApi = <
     ...(deps ? { deps } : {}),
     ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
-  } as ApiHandler<T, C, D, P, S, ST>;
+  } as ApiHandler<T, C>;
 };

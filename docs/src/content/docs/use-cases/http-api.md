@@ -73,13 +73,13 @@ With Effortless, you define the table and reference it in your API handler via `
 
 ```typescript
 // src/tasks.ts
-import { defineTable, defineApi, typed } from "effortless-aws";
+import { defineTable, defineApi, unsafeAs } from "effortless-aws";
 import { z } from "zod";
 
 type Task = { tag: string; title: string; done: boolean; createdAt: string };
 
 export const tasks = defineTable({
-  schema: typed<Task>(),
+  schema: unsafeAs<Task>(),
 });
 
 const Command = z.discriminatedUnion("action", [
@@ -90,7 +90,7 @@ const Command = z.discriminatedUnion("action", [
 
 export default defineApi({
   basePath: "/tasks",
-  deps: { tasks },
+  deps: () => ({ tasks }),
 
   get: {
     "/": async ({ deps }) => ({

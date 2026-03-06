@@ -97,7 +97,7 @@ describe("params runtime injection", () => {
           capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       const response = await wrapped(makeHttpEvent());
@@ -131,7 +131,7 @@ describe("params runtime injection", () => {
           capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
@@ -160,7 +160,7 @@ describe("params runtime injection", () => {
           capturedCtx = args.ctx;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, any, any, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
@@ -190,7 +190,7 @@ describe("params runtime injection", () => {
           capturedArgs = args;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
@@ -212,7 +212,7 @@ describe("params runtime injection", () => {
         post: async (args: any) => {
           return { status: 200, body: {} };
         },
-      } as unknown as ApiHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
 
@@ -257,7 +257,7 @@ describe("params runtime injection", () => {
         post: async (args: any) => {
           return { status: 200, body: { url: args.config.dbUrl } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
@@ -290,7 +290,7 @@ describe("params runtime injection", () => {
         onRecord: async (args: any) => {
           capturedConfig = args.config;
         },
-      } as unknown as TableHandler<any, any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -325,7 +325,7 @@ describe("params runtime injection", () => {
         onBatch: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -361,7 +361,7 @@ describe("params runtime injection", () => {
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -386,7 +386,7 @@ describe("params runtime injection", () => {
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([

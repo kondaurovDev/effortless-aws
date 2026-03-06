@@ -72,7 +72,7 @@ const collectFailures = (records: TableRecord<any>[], sequenceNumbers: Map<Table
 
 const ENV_DEP_SELF = "EFF_DEP_SELF";
 
-export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
+export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
   if (!handler.onRecord && !handler.onBatch) {
     throw new Error("wrapTableStream requires a handler with onRecord or onBatch defined");
   }
@@ -125,7 +125,7 @@ export const wrapTableStream = <T, C, R>(handler: TableHandler<T, C, R>) => {
         }
       } else {
         // Per-record mode
-        const results: R[] = [];
+        const results: any[] = [];
         const failures: FailedRecord<T>[] = [];
         const onRecord = handler.onRecord as any;
 

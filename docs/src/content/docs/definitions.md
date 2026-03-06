@@ -26,7 +26,7 @@ Resource-only definitions are useful when you need the infrastructure but handle
 ```typescript
 // Just a table — no Lambda, no stream
 export const users = defineTable({
-  schema: typed<User>(),
+  schema: unsafeAs<User>(),
 });
 
 // Just a bucket — no Lambda, no event notifications
@@ -35,7 +35,7 @@ export const uploads = defineBucket({});
 // API that writes to the table and bucket
 export const api = defineApi({
   basePath: "/users",
-  deps: { users, uploads },
+  deps: () => ({ users, uploads }),
   post: async ({ req, deps }) => {
     await deps.users.put({
       pk: "USER#1", sk: "PROFILE",
@@ -53,28 +53,46 @@ export const api = defineApi({
 
 Every handler function (`defineApi`, `defineTable`, `defineFifoQueue`) uses TypeScript generics internally to connect types across `schema`, `setup`, `deps`, `config`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
 
-Use `schema` to provide the data type. For type-only schemas (no runtime validation), use the `typed<T>()` helper:
+Always use `schema` to provide the data type. Data in DynamoDB streams, SQS messages, and HTTP request bodies is external input — even if you wrote the producer yourself. Schemas evolve, fields get renamed, old records linger in streams after a migration, and a queue may contain messages sent before your latest deploy. A `schema` function is the single place that catches these mismatches at runtime instead of letting bad data silently flow through your logic.
+
+For **runtime validation** (recommended), pass a real validation function — Zod, Effect Schema, or plain TypeScript:
 
 ```typescript
-import { defineTable, defineApi, defineFifoQueue, typed, param } from "effortless-aws";
+import { z } from "zod";
 
-type Order = { tag: string; amount: number; status: string };
+const Order = z.object({
+  tag: z.string(),
+  amount: z.number(),
+  status: z.enum(["pending", "paid", "shipped"]),
+});
 
 export const orders = defineTable({
-  schema: typed<Order>(),            // T = Order — inferred from schema
+  schema: (input) => Order.parse(input), // validates + infers T = { tag, amount, status }
+  deps: () => ({ users }),
   config: {
     threshold: param("threshold", Number),
   },
-  setup: async ({ config }) => ({    // C = { db: Pool } — inferred from return type
+  setup: async ({ config }) => ({
     db: createPool(config.threshold),
   }),
-  deps: { users },                   // D — inferred from deps object
   onRecord: async ({ record, ctx, deps, config }) => {
-    // record.new?.data is Order | undefined
+    // record.new?.data is z.infer<typeof Order> | undefined
     // ctx is { db: Pool }
     // deps.users is TableClient<User>
     // config.threshold is number
-    // Everything is typed — no manual generics needed
+  },
+});
+```
+
+For **prototyping** or when you trust the data shape, use `unsafeAs<T>()` — it provides type inference without runtime validation:
+
+```typescript
+type Order = { tag: string; amount: number; status: string };
+
+export const orders = defineTable({
+  schema: unsafeAs<Order>(),  // T = Order, no runtime check
+  onRecord: async ({ record }) => {
+    // record.new?.data is Order | undefined
   },
 });
 ```
@@ -82,23 +100,6 @@ export const orders = defineTable({
 :::caution[Avoid explicit generics]
 Don't write `defineTable<Order>(...)` or `defineFifoQueue<Event>(...)`. When you specify even one generic parameter explicitly, TypeScript stops inferring the rest — `setup`, `deps`, and `config` lose their types. Always use `schema` instead.
 :::
-
-For runtime validation (e.g., stream records or message bodies), pass a real validation function:
-
-```typescript
-export const payments = defineFifoQueue({
-  schema: (input: unknown) => {
-    const obj = input as Record<string, unknown>;
-    if (typeof obj?.paymentId !== "string") throw new Error("paymentId required");
-    if (typeof obj?.amount !== "number") throw new Error("amount required");
-    return { paymentId: obj.paymentId, amount: obj.amount };
-  },
-  // T inferred as { paymentId: string; amount: number }
-  onMessage: async ({ message }) => {
-    // message.body is validated at runtime AND typed at compile time
-  },
-});
-```
 
 ---
 
@@ -110,7 +111,13 @@ These options are available on all Lambda-backed handlers (`defineApi`, `defineT
 
 Decode/validate function for incoming data (request body, stream record, or queue message). When provided, the handler receives a typed `data` / `record` / `message.body`. If the function throws, the framework returns an error automatically (400 for HTTP, batch item failure for streams/queues).
 
+A real validation function is recommended — data in streams, queues, and HTTP bodies is external input that can change independently from your code:
+
 ```typescript
+// With Zod
+schema: (input) => OrderSchema.parse(input),
+
+// Plain TypeScript
 schema: (input: unknown) => {
   const obj = input as any;
   if (!obj?.name) throw new Error("name required");
@@ -118,10 +125,10 @@ schema: (input: unknown) => {
 },
 ```
 
-For type-only inference (no runtime validation), use the `typed<T>()` helper:
+For prototyping (no runtime validation), use `unsafeAs<T>()`:
 
 ```typescript
-schema: typed<Order>(),
+schema: unsafeAs<Order>(),
 ```
 
 ### `setup`
@@ -147,7 +154,7 @@ import { orders } from "./orders.js";
 import { uploads } from "./uploads.js";
 import { mailer } from "./mailer.js";
 
-deps: { orders, uploads, mailer },
+deps: () => ({ orders, uploads, mailer }),
 // → deps.orders is TableClient<Order>
 // → deps.uploads is BucketClient
 // → deps.mailer is EmailClient
@@ -262,7 +269,7 @@ import { orders } from "./orders.js";
 
 export const api = defineApi({
   basePath: "/orders",
-  deps: { orders },
+  deps: () => ({ orders }),
   post: async ({ req, deps }) => {
     // deps.orders is TableClient<Order> — typed from the table's generic
     await deps.orders.put({
@@ -281,12 +288,12 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 The `schema` + `post` pattern works great with discriminated unions — one POST endpoint handles all commands:
 
 ```typescript
-import { defineApi, defineTable, typed } from "effortless-aws";
+import { defineApi, defineTable, unsafeAs } from "effortless-aws";
 import { z } from "zod";
 
 type User = { tag: string; name: string; email: string };
 
-export const users = defineTable({ schema: typed<User>() });
+export const users = defineTable({ schema: unsafeAs<User>() });
 
 const Action = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create"), name: z.string(), email: z.string() }),
@@ -295,7 +302,7 @@ const Action = z.discriminatedUnion("action", [
 
 export default defineApi({
   basePath: "/api",
-  deps: { users },
+  deps: () => ({ users }),
 
   get: {
     "/users": async ({ deps }) => ({
@@ -355,7 +362,7 @@ Your domain type `T` is what goes inside `data`. The envelope (`pk`, `sk`, `tag`
 ```typescript
 export const orders = defineTable({
   // Optional — type inference
-  schema?: (input: unknown) => T,     // infers record type T (or use typed<T>())
+  schema?: (input: unknown) => T,     // infers record type T (or use unsafeAs<T>())
 
   // Optional — table
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED",  // default: PAY_PER_REQUEST
@@ -385,16 +392,16 @@ export const orders = defineTable({
 });
 ```
 
-Use `schema` or `typed<T>()` to provide the data type. `T` is the domain data stored inside the `data` attribute — not the full DynamoDB item. TypeScript infers all generic parameters from the options object.
+Use `schema` or `unsafeAs<T>()` to provide the data type. `T` is the domain data stored inside the `data` attribute — not the full DynamoDB item. TypeScript infers all generic parameters from the options object.
 
 ```typescript
-import { defineTable, typed } from "effortless-aws";
+import { defineTable, unsafeAs } from "effortless-aws";
 
 type Order = { tag: string; amount: number; status: string };
 
-// Option 1: typed<T>() — type-only, no runtime validation
+// Option 1: unsafeAs<T>() — type-only, no runtime validation
 export const orders = defineTable({
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
 });
 
 // Option 2: schema function — with runtime validation
@@ -416,7 +423,7 @@ type Order = { type: "order"; amount: number };
 
 export const orders = defineTable({
   tagField: "type",  // → extracts data.type as the DynamoDB tag attribute
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
 });
 ```
 
@@ -448,7 +455,7 @@ record.keys           // { pk: string; sk: string }
 
 ```typescript
 export const orders = defineTable({
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
   onRecord: async ({ record, table }) => {
     if (record.eventName === "INSERT" && record.new) {
       console.log(`New order: $${record.new.data.amount}`);
@@ -463,7 +470,7 @@ Each record is processed individually. If one fails, only that record is retried
 
 ```typescript
 export const events = defineTable({
-  schema: typed<ClickEvent>(),
+  schema: unsafeAs<ClickEvent>(),
   batchSize: 100,
   onBatch: async ({ records }) => {
     const inserts = records
@@ -559,8 +566,8 @@ const recent = await table.query({
 import { users } from "./users.js";
 
 export const orders = defineTable({
-  schema: typed<Order>(),
-  deps: { users },
+  schema: unsafeAs<Order>(),
+  deps: () => ({ users }),
   onRecord: async ({ record, deps }) => {
     const userId = record.new?.data.userId;
     if (userId) {
@@ -575,7 +582,7 @@ export const orders = defineTable({
 
 ```typescript
 export const ordersWithBatch = defineTable({
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
   onRecord: async ({ record }) => {
     return { amount: record.new?.data.amount ?? 0 };
   },
@@ -591,14 +598,14 @@ export const ordersWithBatch = defineTable({
 ```typescript
 // Just creates the DynamoDB table — no stream, no Lambda
 export const users = defineTable({
-  schema: typed<User>(),
+  schema: unsafeAs<User>(),
 });
 ```
 
 **Built-in best practices**:
 - **Single-table design** — fixed `pk`/`sk`/`tag`/`data`/`ttl` structure. Flexible access patterns via composite keys, no schema migrations needed.
 - **Partial batch failures** — each record is processed individually. If one fails, only that record is retried via `PartialBatchResponse`. The rest of the batch succeeds.
-- **Typed records** — use `schema: typed<Order>()` for type inference, or a validation function for runtime checks. `schema` validates the `data` portion of stream records.
+- **Typed records** — use `schema: unsafeAs<Order>()` for type inference, or a validation function for runtime checks. `schema` validates the `data` portion of stream records.
 - **Table self-client** — `table` arg provides a typed `TableClient<T>` for the handler's own table, auto-injected with no config.
 - **Smart updates** — `update()` auto-prefixes `data.` for domain fields, so you can do partial updates without reading the full item.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for other tables with auto-wired IAM and env vars.
@@ -947,7 +954,7 @@ The `FifoQueueMessage<T>` object:
 type OrderEvent = { orderId: string; action: string };
 
 export const orderQueue = defineFifoQueue({
-  schema: typed<OrderEvent>(),
+  schema: unsafeAs<OrderEvent>(),
   onMessage: async ({ message }) => {
     console.log(`Order ${message.body.orderId}: ${message.body.action}`);
     await processOrder(message.body);
@@ -961,7 +968,7 @@ Each message is processed individually. If one fails, only that message is retri
 
 ```typescript
 export const notifications = defineFifoQueue({
-  schema: typed<Notification>(),
+  schema: unsafeAs<Notification>(),
   batchSize: 5,
   onBatch: async ({ messages }) => {
     await sendAll(messages.map(m => m.body));
@@ -994,8 +1001,8 @@ When `schema` throws, the message is reported as a batch item failure automatica
 import { orders } from "./orders.js";
 
 export const orderProcessor = defineFifoQueue({
-  schema: typed<OrderEvent>(),
-  deps: { orders },
+  schema: unsafeAs<OrderEvent>(),
+  deps: () => ({ orders }),
   onMessage: async ({ message, deps }) => {
     // deps.orders is TableClient<Order>
     await deps.orders.put({
@@ -1012,7 +1019,7 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 - **Partial batch failures** — each message is processed individually (`onMessage` mode). If one fails, only that message is retried via `batchItemFailures`. The rest of the batch succeeds.
 - **FIFO ordering** — messages within the same `messageGroupId` are delivered in order. Use message groups to partition work while maintaining ordering guarantees.
 - **Content-based deduplication** — enabled by default. SQS uses the message body hash to prevent duplicates within the 5-minute deduplication interval.
-- **Typed messages** — use `schema: typed<OrderEvent>()` or a validation function for typed `message.body` with automatic JSON parsing.
+- **Typed messages** — use `schema: unsafeAs<OrderEvent>()` or a validation function for typed `message.body` with automatic JSON parsing.
 - **Schema validation** — when `schema` is set, each message body is validated before your handler runs. Invalid messages are automatically reported as failures.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for DynamoDB tables with auto-wired IAM and env vars.
 - **Cold start optimization** — the `setup` factory runs once and is cached across invocations.
@@ -1194,7 +1201,7 @@ export const uploads = defineBucket({
 import { orders } from "./orders.js";
 
 export const invoices = defineBucket({
-  deps: { orders },
+  deps: () => ({ orders }),
   onObjectCreated: async ({ event, deps }) => {
     // deps.orders is TableClient<Order>
     await deps.orders.put({
@@ -1219,7 +1226,7 @@ import { assets } from "./assets.js";
 
 export const api = defineApi({
   basePath: "/uploads",
-  deps: { assets },
+  deps: () => ({ assets }),
   post: async ({ req, deps }) => {
     // deps.assets is BucketClient
     await deps.assets.put("uploads/file.txt", req.body);
@@ -1263,7 +1270,7 @@ import { mailer } from "./mailer.js";
 
 export const api = defineApi({
   basePath: "/welcome",
-  deps: { mailer },
+  deps: () => ({ mailer }),
   post: async ({ req, deps }) => {
     await deps.mailer.send({
       from: "hello@myapp.com",

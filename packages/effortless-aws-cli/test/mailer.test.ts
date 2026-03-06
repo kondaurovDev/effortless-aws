@@ -170,7 +170,7 @@ describe("mailer as dep in HTTP handler", () => {
         });
         return { status: 200, body: { ok: true } };
       },
-    } as unknown as ApiHandler<undefined, undefined, any>;
+    } as unknown as ApiHandler;
 
     const wrapped = wrapApi(handler);
     const response = await wrapped(makeHttpEvent());
@@ -201,7 +201,7 @@ describe("mailer as dep in HTTP handler", () => {
         capturedDeps = args.deps;
         return { status: 200, body: { ok: true } };
       },
-    } as unknown as ApiHandler<undefined, undefined, any>;
+    } as unknown as ApiHandler;
 
     const wrapped = wrapApi(handler);
     await wrapped(makeHttpEvent());

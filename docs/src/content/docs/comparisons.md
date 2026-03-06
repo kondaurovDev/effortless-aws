@@ -146,7 +146,7 @@ const tableName = Resource.Orders.name;
 ```typescript
 // Effortless — infrastructure IS the code
 export const orders = defineTable({
-  schema: typed<{ id: string; amount: number }>(),
+  schema: unsafeAs<{ id: string; amount: number }>(),
   primaryKey: "id",
   onInsert: async ({ newItem }) => {
     // typed: newItem.amount is number
@@ -194,7 +194,7 @@ api("main").post("/orders", async (ctx) => {
 ```typescript
 // Effortless — AWS-native, schema-driven
 export const orders = defineTable({
-  schema: typed<{ id: string; amount: number }>(),
+  schema: unsafeAs<{ id: string; amount: number }>(),
   primaryKey: "id",
 });
 // orders.put() is typed, validated, auto-IAM'd
@@ -253,13 +253,13 @@ const worker = await Worker("api", {
 ```typescript
 // Effortless — infrastructure IS the code
 export const orders = defineTable({
-  schema: typed<{ id: string; amount: number }>(),
+  schema: unsafeAs<{ id: string; amount: number }>(),
   primaryKey: "id",
 });
 
 export const api = defineApi({
   basePath: "/orders",
-  deps: { orders },  // ← auto IAM, typed client
+  deps: () => ({ orders }),  // ← auto IAM, typed client
   get: {
     "/": async ({ deps }) => {
       const items = await deps.orders.query(/* fully typed */);

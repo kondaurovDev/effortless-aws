@@ -13,12 +13,12 @@ You want to process order events asynchronously. Each message contains an order 
 
 ```typescript
 // src/order-queue.ts
-import { defineFifoQueue, typed } from "effortless-aws";
+import { defineFifoQueue, unsafeAs } from "effortless-aws";
 
 type OrderEvent = { orderId: string; action: "created" | "shipped" | "cancelled" };
 
 export const orderQueue = defineFifoQueue({
-  schema: typed<OrderEvent>(),
+  schema: unsafeAs<OrderEvent>(),
   onMessage: async ({ message }) => {
     console.log(`Order ${message.body.orderId}: ${message.body.action}`);
     // Process the order event...
@@ -66,19 +66,19 @@ Most queue processors need to read or write data. Define a table and reference i
 
 ```typescript
 // src/fulfillment.ts
-import { defineTable, defineFifoQueue, typed } from "effortless-aws";
+import { defineTable, defineFifoQueue, unsafeAs } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number; status: string };
 
 export const orders = defineTable({
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
 });
 
 type FulfillmentEvent = { orderId: string; warehouse: string };
 
 export const fulfillment = defineFifoQueue({
-  schema: typed<FulfillmentEvent>(),
-  deps: { orders },
+  schema: unsafeAs<FulfillmentEvent>(),
+  deps: () => ({ orders }),
   onMessage: async ({ message, deps }) => {
     // deps.orders is TableClient<Order> — typed from the table's generic
     const order = await deps.orders.get({ id: message.body.orderId });
@@ -101,12 +101,12 @@ Use `onBatch` instead of `onMessage`:
 
 ```typescript
 // src/analytics.ts
-import { defineFifoQueue, typed } from "effortless-aws";
+import { defineFifoQueue, unsafeAs } from "effortless-aws";
 
 type ClickEvent = { page: string; userId: string; timestamp: string };
 
 export const clickEvents = defineFifoQueue({
-  schema: typed<ClickEvent>(),
+  schema: unsafeAs<ClickEvent>(),
   batchSize: 10,
   onBatch: async ({ messages }) => {
     const events = messages.map(m => m.body);
@@ -122,12 +122,12 @@ With `onBatch`, if the handler throws, all messages in the batch are reported as
 Your queue processor calls an external API that requires authentication. Use `param()` to reference an SSM Parameter Store key — Effortless fetches the value once on cold start, caches it, and injects it as a typed argument.
 
 ```typescript
-import { defineFifoQueue, typed, param } from "effortless-aws";
+import { defineFifoQueue, unsafeAs, param } from "effortless-aws";
 
 type WebhookEvent = { url: string; payload: Record<string, unknown> };
 
 export const webhookQueue = defineFifoQueue({
-  schema: typed<WebhookEvent>(),
+  schema: unsafeAs<WebhookEvent>(),
   params: {
     apiKey: param("webhook/api-key"),
   },
@@ -165,7 +165,7 @@ FIFO queues have several knobs you can adjust:
 
 ```typescript
 export const importQueue = defineFifoQueue({
-  schema: typed<ImportEvent>(),
+  schema: unsafeAs<ImportEvent>(),
   batchSize: 5,           // messages per Lambda invocation (1-10, default: 10)
   batchWindow: 10,        // seconds to wait gathering messages (0-300, default: 0)
   visibilityTimeout: 120, // seconds before retry (default: max of timeout or 30)

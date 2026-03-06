@@ -13,7 +13,7 @@ describe("deps extraction", () => {
 
         export const createOrder = defineApi({
           basePath: "/orders",
-          deps: { orders },
+          deps: () => ({ orders }),
           post: async ({ req, deps }) => ({ status: 201 })
         });
       `;
@@ -32,7 +32,7 @@ describe("deps extraction", () => {
 
         export const api = defineApi({
           basePath: "/api",
-          deps: { orders, users },
+          deps: () => ({ orders, users }),
           post: async ({ req, deps }) => ({ status: 200 })
         });
       `;
@@ -50,7 +50,7 @@ describe("deps extraction", () => {
 
         export const api = defineApi({
           basePath: "/api",
-          deps: { orders: orders },
+          deps: () => ({ orders: orders }),
           post: async ({ req }) => ({ status: 200 })
         });
       `;
@@ -84,7 +84,7 @@ describe("deps extraction", () => {
 
         export default defineApi({
           basePath: "/orders",
-          deps: { orders },
+          deps: () => ({ orders }),
           post: async ({ req }) => ({ status: 201 })
         });
       `;
@@ -103,7 +103,7 @@ describe("deps extraction", () => {
 
         export const api = defineApi({
           basePath: "/orders",
-          deps: { orders },
+          deps: () => ({ orders }),
           post: async ({ req }) => ({ status: 201 })
         });
       `;
@@ -125,7 +125,7 @@ describe("deps extraction", () => {
 
         export const orders = defineTable({
           name: "orders",
-          deps: { users },
+          deps: () => ({ users }),
           onRecord: async ({ record, deps }) => {}
         });
       `;
@@ -158,7 +158,7 @@ describe("deps extraction", () => {
         import { users } from "./users";
 
         export const orders = defineTable({
-          deps: { users },
+          deps: () => ({ users }),
           onRecord: async ({ record }) => {}
         });
       `;

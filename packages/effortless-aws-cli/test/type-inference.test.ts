@@ -84,7 +84,7 @@ describe("defineApi type inference", () => {
   it("deps → deps is Record of TableClient", () => {
     defineApi({
       basePath: "/users",
-      deps: { usersTable },
+      deps: () => ({ usersTable }),
       post: async (args) => {
         type _deps = Expect<Equal<typeof args.deps.usersTable, TableClient<User>>>;
         return { status: 201 };
@@ -147,7 +147,7 @@ describe("defineApi type inference", () => {
       basePath: "/users",
       schema: (input): User => input as User,
       setup: () => ({ db: "pool" }),
-      deps: { usersTable },
+      deps: () => ({ usersTable }),
       config: { secret: param("api-secret") },
       static: ["templates/*.html"],
       post: async (args) => {
@@ -207,7 +207,7 @@ describe("defineTable type inference", () => {
     defineTable({
       schema: (input): User => input as User,
       setup: () => ({ notifier: "sns" as const }),
-      deps: { usersTable },
+      deps: () => ({ usersTable }),
       config: { webhookUrl: param("webhook-url") },
       onRecord: async (args) => {
         type _ctx = Expect<Equal<typeof args.ctx, { notifier: "sns" }>>;

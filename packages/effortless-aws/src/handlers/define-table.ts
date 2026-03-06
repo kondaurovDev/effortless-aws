@@ -45,9 +45,8 @@ export type TableConfig = {
    *
    * @example
    * ```typescript
-   * export const orders = defineTable({
+   * export const orders = defineTable<{ type: "order"; amount: number }>({
    *   tagField: "type",
-   *   schema: typed<{ type: "order"; amount: number }>(),
    *   onRecord: async ({ record }) => { ... }
    * });
    * ```
@@ -159,8 +158,9 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
+   * Pass a function returning the deps object: `deps: () => ({ orders })`.
    */
-  deps?: D;
+  deps?: () => D & {};
   /**
    * SSM Parameter Store parameters.
    * Declare with `param()` helper. Values are fetched and cached at cold start.
@@ -211,19 +211,18 @@ export type DefineTableOptions<
  * Internal handler object created by defineTable
  * @internal
  */
-export type TableHandler<T = Record<string, unknown>, C = undefined, R = void, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
+export type TableHandler<T = Record<string, unknown>, C = any> = {
   readonly __brand: "effortless-table";
   readonly __spec: TableConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (error: unknown) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly setup?: (...args: any[]) => C | Promise<C>;
-  readonly deps?: D;
-  readonly config?: P;
+  readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
+  readonly config?: Record<string, unknown>;
   readonly static?: string[];
-  readonly onRecord?: TableRecordFn<T, C, R, D, P, S>;
-  readonly onBatchComplete?: TableBatchCompleteFn<T, C, R, D, P, S>;
-  readonly onBatch?: TableBatchFn<T, C, D, P, S>;
+  readonly onRecord?: (...args: any[]) => any;
+  readonly onBatchComplete?: (...args: any[]) => any;
+  readonly onBatch?: (...args: any[]) => any;
 };
 
 /**
@@ -232,12 +231,11 @@ export type TableHandler<T = Record<string, unknown>, C = undefined, R = void, D
  * Creates a table with fixed key schema: `pk (S)` + `sk (S)`, plus `tag (S)`,
  * `data (M)`, and `ttl (N)` attributes. TTL is always enabled.
  *
- * @example Table with stream handler (typed)
+ * @example Table with stream handler
  * ```typescript
  * type OrderData = { amount: number; status: string };
  *
- * export const orders = defineTable({
- *   schema: typed<OrderData>(),
+ * export const orders = defineTable<OrderData>({
  *   streamView: "NEW_AND_OLD_IMAGES",
  *   batchSize: 10,
  *   onRecord: async ({ record }) => {
@@ -262,7 +260,7 @@ export const defineTable = <
   S extends string[] | undefined = undefined
 >(
   options: DefineTableOptions<T, C, R, D, P, S>
-): TableHandler<T, C, R, D, P, S> => {
+): TableHandler<T, C> => {
   const { onRecord, onBatchComplete, onBatch, onError, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-table",
@@ -276,5 +274,5 @@ export const defineTable = <
     ...(onRecord ? { onRecord } : {}),
     ...(onBatchComplete ? { onBatchComplete } : {}),
     ...(onBatch ? { onBatch } : {})
-  } as TableHandler<T, C, R, D, P, S>;
+  } as TableHandler<T, C>;
 };

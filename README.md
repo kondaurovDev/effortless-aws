@@ -46,14 +46,14 @@ One file. One command. Lambda + Function URL + IAM role created automatically.
 ## A more real example
 
 ```typescript
-import { defineTable, defineApi, typed } from "effortless-aws";
+import { defineTable, defineApi, unsafeAs } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number };
 
 // Creates a DynamoDB table + stream processor Lambda
 export const orders = defineTable({
   pk: { name: "id", type: "string" },
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
   onRecord: async ({ record }) => {
     console.log("New order:", record.new!.product);
   },
@@ -62,7 +62,7 @@ export const orders = defineTable({
 // Creates an HTTP Lambda with DynamoDB write permissions
 export const api = defineApi({
   basePath: "/orders",
-  deps: { orders },
+  deps: () => ({ orders }),
   post: async ({ req, deps }) => {
     await deps.orders.put({           // typed client — knows Order shape
       id: crypto.randomUUID(),
@@ -86,7 +86,7 @@ This creates: DynamoDB table, stream processor Lambda, HTTP Lambda, Function URL
 - **`defineMailer`** — SES email sending
 - **`defineStaticSite`** — CloudFront + S3 static sites
 
-**Cross-handler deps** — `deps: { orders }` auto-wires IAM and injects a typed `TableClient`.
+**Cross-handler deps** — `deps: () => ({ orders })` auto-wires IAM and injects a typed `TableClient`.
 
 **SSM params** — `param("stripe-key")` fetches secrets from Parameter Store at cold start. Auto IAM, auto caching.
 

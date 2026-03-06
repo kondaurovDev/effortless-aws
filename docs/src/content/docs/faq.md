@@ -11,7 +11,7 @@ A TypeScript framework for AWS Lambda. You export handler functions — Effortle
 
 ```typescript
 export const orders = defineTable({
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
 });
 ```
 
@@ -172,12 +172,12 @@ Yes. Effortless automatically bundles your code and `node_modules` with esbuild.
 Export a `defineTable` call. That's it.
 
 ```typescript
-import { defineTable, typed } from "effortless-aws";
+import { defineTable, unsafeAs } from "effortless-aws";
 
 type User = { id: string; email: string; name: string };
 
 export const users = defineTable({
-  schema: typed<User>(),
+  schema: unsafeAs<User>(),
 });
 ```
 
@@ -189,7 +189,7 @@ Yes:
 
 ```typescript
 export const messages = defineTable({
-  schema: typed<Message>(),
+  schema: unsafeAs<Message>(),
 });
 ```
 
@@ -199,7 +199,7 @@ Add `onRecord` to process each change, or `onBatch` for batch processing:
 
 ```typescript
 export const orders = defineTable({
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
   onRecord: async ({ record }) => {
     if (record.eventName === "INSERT") {
       console.log("New order:", record.new!.id);
@@ -219,7 +219,7 @@ import { orders } from "./db";
 
 export const api = defineApi({
   basePath: "/orders",
-  deps: { orders },
+  deps: () => ({ orders }),
   get: {
     "/": async ({ deps }) => {
       // deps.orders has typed .get(), .put(), .delete()

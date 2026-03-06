@@ -46,7 +46,7 @@ import { mailer } from "./mailer";
 
 export const signup = defineApi({
   basePath: "/signup",
-  deps: { mailer },
+  deps: () => ({ mailer }),
   post: async ({ req, deps }) => {
     // ... create user ...
 
@@ -98,18 +98,18 @@ await deps.mailer.send({
 Mailers compose with tables, buckets, and queues — just add them all to `deps`:
 
 ```typescript
-import { defineApi, defineTable, typed } from "effortless-aws";
+import { defineApi, defineTable, unsafeAs } from "effortless-aws";
 import { mailer } from "./mailer";
 
 type User = { tag: string; name: string; email: string };
 
 export const users = defineTable({
-  schema: typed<User>(),
+  schema: unsafeAs<User>(),
 });
 
 export const invite = defineApi({
   basePath: "/invite",
-  deps: { users, mailer },
+  deps: () => ({ users, mailer }),
   post: {
     "/{userId}": async ({ req, deps }) => {
       const user = await deps.users.get({
@@ -138,14 +138,14 @@ Each Lambda gets only the permissions it needs — DynamoDB for the table, SES f
 Email sending works from any handler type. Use a FIFO queue for reliable, ordered email delivery:
 
 ```typescript
-import { defineFifoQueue, typed } from "effortless-aws";
+import { defineFifoQueue, unsafeAs } from "effortless-aws";
 import { mailer } from "./mailer";
 
 type EmailJob = { to: string; subject: string; html: string };
 
 export const emailQueue = defineFifoQueue({
-  schema: typed<EmailJob>(),
-  deps: { mailer },
+  schema: unsafeAs<EmailJob>(),
+  deps: () => ({ mailer }),
   onMessage: async ({ message, deps }) => {
     await deps.mailer.send({
       from: "no-reply@myapp.com",
@@ -164,14 +164,14 @@ If SES returns an error, the message stays in the queue and is retried automatic
 React to database changes and send emails:
 
 ```typescript
-import { defineTable, typed } from "effortless-aws";
+import { defineTable, unsafeAs } from "effortless-aws";
 import { mailer } from "./mailer";
 
 type Order = { tag: string; email: string; amount: number; status: string };
 
 export const orders = defineTable({
-  schema: typed<Order>(),
-  deps: { mailer },
+  schema: unsafeAs<Order>(),
+  deps: () => ({ mailer }),
   onRecord: async ({ record, deps }) => {
     if (record.eventName === "INSERT" && record.new) {
       await deps.mailer.send({
@@ -195,7 +195,7 @@ import { mailer } from "./mailer";
 
 export const sendInvoice = defineApi({
   basePath: "/send-invoice",
-  deps: { mailer },
+  deps: () => ({ mailer }),
   static: ["src/templates/invoice.html"],
   post: async ({ req, deps, files }) => {
     const template = files.read("src/templates/invoice.html");

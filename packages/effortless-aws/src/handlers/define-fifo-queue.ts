@@ -106,8 +106,9 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
+   * Pass a function returning the deps object: `deps: () => ({ orders })`.
    */
-  deps?: D;
+  deps?: () => D & {};
   /**
    * SSM Parameter Store parameters.
    * Declare with `param()` helper. Values are fetched and cached at cold start.
@@ -146,18 +147,17 @@ export type DefineFifoQueueOptions<
  * Internal handler object created by defineFifoQueue
  * @internal
  */
-export type FifoQueueHandler<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
+export type FifoQueueHandler<T = unknown, C = any> = {
   readonly __brand: "effortless-fifo-queue";
   readonly __spec: FifoQueueConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (error: unknown) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly setup?: (...args: any[]) => C | Promise<C>;
-  readonly deps?: D;
-  readonly config?: P;
+  readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
+  readonly config?: Record<string, unknown>;
   readonly static?: string[];
-  readonly onMessage?: FifoQueueMessageFn<T, C, D, P, S>;
-  readonly onBatch?: FifoQueueBatchFn<T, C, D, P, S>;
+  readonly onMessage?: (...args: any[]) => any;
+  readonly onBatch?: (...args: any[]) => any;
 };
 
 /**
@@ -198,7 +198,7 @@ export const defineFifoQueue = <
   S extends string[] | undefined = undefined
 >(
   options: DefineFifoQueueOptions<T, C, D, P, S>
-): FifoQueueHandler<T, C, D, P, S> => {
+): FifoQueueHandler<T, C> => {
   const { onMessage, onBatch, onError, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-fifo-queue",
@@ -211,5 +211,5 @@ export const defineFifoQueue = <
     ...(staticFiles ? { static: staticFiles } : {}),
     ...(onMessage ? { onMessage } : {}),
     ...(onBatch ? { onBatch } : {})
-  } as FifoQueueHandler<T, C, D, P, S>;
+  } as FifoQueueHandler<T, C>;
 };

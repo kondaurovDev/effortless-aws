@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import type { AnyParamRef, LogLevel } from "../handlers/handler-options";
+import type { LogLevel } from "../handlers/handler-options";
 import { createTableClient } from "./table-client";
 import { createBucketClient } from "./bucket-client";
 import { createEmailClient } from "./email-client";
@@ -47,7 +47,13 @@ export const parseDepValue = (raw: string): { type: string; name: string } => {
  * Build resolved deps object from handler.deps and EFF_DEP_* env vars.
  * Shared by all runtime wrappers.
  */
-export const buildDeps = (deps: Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
+type DepsInput = Record<string, unknown> | (() => Record<string, unknown>) | undefined;
+
+const resolveDepsInput = (deps: DepsInput): Record<string, unknown> | undefined =>
+  typeof deps === "function" ? deps() : deps;
+
+export const buildDeps = (rawDeps: DepsInput): Record<string, unknown> | undefined => {
+  const deps = resolveDepsInput(rawDeps);
   if (!deps) return undefined;
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(deps)) {
@@ -66,7 +72,7 @@ export const buildDeps = (deps: Record<string, unknown> | undefined): Record<str
  * Fetches all parameter values in batch, applies transforms from handler.params.
  */
 export const buildParams = async (
-  params: Record<string, AnyParamRef> | undefined
+  params: Record<string, unknown> | undefined
 ): Promise<Record<string, unknown> | undefined> => {
   if (!params) return undefined;
 
@@ -90,7 +96,10 @@ export const buildParams = async (
   for (const { propName, ssmPath } of entries) {
     const raw = values.get(ssmPath) ?? "";
     const ref = params[propName];
-    result[propName] = typeof ref === "object" && ref?.transform ? ref.transform(raw) : raw;
+    const transform = typeof ref === "object" && ref !== null && "transform" in ref && typeof (ref as Record<string, unknown>).transform === "function"
+      ? (ref as { transform: (v: string) => unknown }).transform
+      : undefined;
+    result[propName] = transform ? transform(raw) : raw;
   }
 
   return result;
@@ -119,7 +128,7 @@ const staticFiles = {
 };
 
 export const createHandlerRuntime = (
-  handler: { setup?: (...args: any[]) => any; deps?: any; config?: any; static?: string[] },
+  handler: { setup?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[] },
   handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket" | "api",
   logLevel: LogLevel = "info",
   extraSetupArgs?: () => Record<string, unknown>

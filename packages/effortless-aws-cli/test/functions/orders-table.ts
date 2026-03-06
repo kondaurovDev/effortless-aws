@@ -41,7 +41,7 @@ export const orders = defineTable({
   lambda: { memory: 256 },
 
   schema: (input): Order => input as Order,
-  deps: { customers },
+  deps: () => ({ customers }),
   config: {
     highValueThreshold: param("high-value-threshold", Number),
   },

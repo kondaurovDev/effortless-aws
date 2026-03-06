@@ -149,17 +149,17 @@ export const frontend = defineApp({
 
 ```typescript
 // src/api.ts
-import { defineApi, defineTable, typed } from "effortless-aws";
+import { defineApi, defineTable, unsafeAs } from "effortless-aws";
 
 type Item = { id: string; name: string };
 
 export const items = defineTable({
-  schema: typed<Item>(),
+  schema: unsafeAs<Item>(),
 });
 
 export const api = defineApi({
   basePath: "/api/items",
-  deps: { items },
+  deps: () => ({ items }),
   get: {
     "/": async ({ deps }) => {
       const result = await deps.items.query({});

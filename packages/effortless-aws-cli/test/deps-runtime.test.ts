@@ -72,7 +72,7 @@ describe("deps runtime injection", () => {
           capturedDeps = args.deps;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       const response = await wrapped(makeApiEvent());
@@ -101,7 +101,7 @@ describe("deps runtime injection", () => {
           capturedArgs = args;
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, any, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeApiEvent());
@@ -128,7 +128,7 @@ describe("deps runtime injection", () => {
           capturedArgs = args;
           return { status: 201 };
         },
-      } as unknown as ApiHandler<any, undefined, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeApiEvent({ body: JSON.stringify({ item: "book" }) }));
@@ -152,7 +152,7 @@ describe("deps runtime injection", () => {
           await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { __tag: "Order", amount: 42 } });
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeApiEvent());
@@ -178,7 +178,7 @@ describe("deps runtime injection", () => {
           await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { tag: "Order", amount: 42 } });
           return { status: 200, body: { ok: true } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeApiEvent());
@@ -198,7 +198,7 @@ describe("deps runtime injection", () => {
         post: async (args: any) => {
           return { status: 200, body: { table: args.deps.orders.tableName } };
         },
-      } as unknown as ApiHandler<undefined, undefined, any>;
+      } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
 
@@ -244,7 +244,7 @@ describe("deps runtime injection", () => {
             hasPut: typeof args.deps.users.put === "function",
           });
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       const response = await wrapped(makeStreamEvent([
@@ -274,7 +274,7 @@ describe("deps runtime injection", () => {
         onBatch: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       const response = await wrapped(makeStreamEvent([
@@ -311,7 +311,7 @@ describe("deps runtime injection", () => {
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -336,7 +336,7 @@ describe("deps runtime injection", () => {
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -366,7 +366,7 @@ describe("deps runtime injection", () => {
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -397,7 +397,7 @@ describe("deps runtime injection", () => {
         onBatch: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -431,7 +431,7 @@ describe("deps runtime injection", () => {
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([
@@ -460,7 +460,7 @@ describe("deps runtime injection", () => {
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
-      } as unknown as TableHandler<any, any, any, any>;
+      } as unknown as TableHandler;
 
       const wrapped = wrapTableStream(handler);
       await wrapped(makeStreamEvent([

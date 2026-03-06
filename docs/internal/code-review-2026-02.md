@@ -358,6 +358,6 @@ Net effect: ~175 fewer lines, clearer errors, consistent DX, one extension point
 - Effect.js for deploy orchestration — concurrent deploys, composable errors
 - Deterministic ZIPs with `FIXED_DATE`
 - `helpers.ts` has zero heavy imports — protects public API bundle size
-- `typed()` solves partial generic inference elegantly
+- `unsafeAs()` solves partial generic inference elegantly
 - `DEP_FACTORIES` registry — adding a new dep type is one line
 - Progress UI with TTY detection and ANSI cursor manipulation is polished

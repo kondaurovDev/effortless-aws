@@ -1,5 +1,5 @@
 // Public helpers — this file must have ZERO heavy imports (no effect, no AWS SDK, no deploy code).
-// It is the source of truth for param(), typed(), and related types used by the public API.
+// It is the source of truth for param(), unsafeAs(), and related types used by the public API.
 
 // ============ Permissions ============
 
@@ -180,39 +180,21 @@ export type PutInput<T> = {
   ttl?: number;
 };
 
-// ============ Typed helper ============
-
 /**
- * Type-only schema helper for handlers.
+ * Create a schema function that casts input to T without runtime validation.
+ * Use when you need T inference alongside other generics (deps, config).
+ * For handlers without deps/config, prefer `defineTable<Order>({...})`.
+ * For untrusted input, prefer a real parser (Zod, Effect Schema).
  *
- * Use this instead of explicit generic parameters like `defineTable<Order>(...)`.
- * It enables TypeScript to infer all generic types from the options object,
- * avoiding the partial-inference problem where specifying one generic
- * forces all others to their defaults.
- *
- * At runtime this is a no-op identity function — it simply returns the input unchanged.
- * The type narrowing happens entirely at the TypeScript level.
- *
- * @example Resource-only table
- * ```typescript
- * type User = { id: string; email: string };
- *
- * export const users = defineTable({
- *   schema: typed<User>(),
- * });
- * ```
- *
- * @example Table with stream handler
+ * @example
  * ```typescript
  * export const orders = defineTable({
- *   schema: typed<Order>(),
- *   setup: async () => ({ db: createClient() }),
- *   onRecord: async ({ record, ctx }) => {
- *     // record.new.data is Order, ctx is { db: Client } — all inferred
- *   },
+ *   schema: unsafeAs<Order>(),
+ *   deps: () => ({ notifications }),
+ *   onRecord: async ({ record, deps }) => { ... }
  * });
  * ```
  */
-export function typed<T>(): (input: unknown) => T {
+export function unsafeAs<T>(): (input: unknown) => T {
   return (input: unknown) => input as T;
 }

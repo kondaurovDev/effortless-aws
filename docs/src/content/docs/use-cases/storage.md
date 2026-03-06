@@ -27,7 +27,7 @@ import { uploads } from "./uploads";
 
 export const uploadFile = defineApi({
   basePath: "/upload",
-  deps: { uploads },
+  deps: () => ({ uploads }),
   post: {
     "/{filename}": async ({ req, deps }) => {
       await deps.uploads.put(req.params.filename, req.body);
@@ -38,7 +38,7 @@ export const uploadFile = defineApi({
 
 export const getFile = defineApi({
   basePath: "/files",
-  deps: { uploads },
+  deps: () => ({ uploads }),
   get: {
     "/{filename}": async ({ req, deps }) => {
       const file = await deps.uploads.get(req.params.filename);
@@ -141,17 +141,17 @@ Most file processors need to read or write data. Define a table and reference it
 
 ```typescript
 // src/invoices.ts
-import { defineTable, defineBucket, typed } from "effortless-aws";
+import { defineTable, defineBucket, unsafeAs } from "effortless-aws";
 
 type Invoice = { tag: string; key: string; size: number; uploadedAt: string };
 
 export const invoiceRecords = defineTable({
-  schema: typed<Invoice>(),
+  schema: unsafeAs<Invoice>(),
 });
 
 export const invoices = defineBucket({
   prefix: "invoices/",
-  deps: { invoiceRecords },
+  deps: () => ({ invoiceRecords }),
   onObjectCreated: async ({ event, deps }) => {
     await deps.invoiceRecords.put({
       pk: "INVOICE",
@@ -174,15 +174,15 @@ Each Lambda gets only the IAM permissions it needs — S3 for its own bucket, Dy
 Buckets compose with any handler type, not just HTTP. A table stream handler can write to a bucket via `deps`:
 
 ```typescript
-import { defineTable, defineBucket, typed } from "effortless-aws";
+import { defineTable, defineBucket, unsafeAs } from "effortless-aws";
 
 export const reports = defineBucket({});
 
 type Order = { tag: string; amount: number; status: string };
 
 export const orders = defineTable({
-  schema: typed<Order>(),
-  deps: { reports },
+  schema: unsafeAs<Order>(),
+  deps: () => ({ reports }),
   onRecord: async ({ record, deps }) => {
     if (record.eventName === "INSERT" && record.new) {
       const csv = `${record.new.pk},${record.new.data.amount},${record.new.data.status}\n`;

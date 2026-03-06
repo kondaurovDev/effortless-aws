@@ -27,12 +27,12 @@ You have users and you want to store them in DynamoDB. Define the table with a t
 
 ```typescript
 // src/users.ts
-import { defineTable, typed } from "effortless-aws";
+import { defineTable, unsafeAs } from "effortless-aws";
 
 type User = { tag: string; email: string; name: string; createdAt: string };
 
 export const users = defineTable({
-  schema: typed<User>(),
+  schema: unsafeAs<User>(),
 });
 ```
 
@@ -66,7 +66,7 @@ type Order = { type: "order"; amount: number; status: string };
 
 export const orders = defineTable({
   tagField: "type",  // → extracts data.type as the DynamoDB tag attribute
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
 });
 ```
 
@@ -117,12 +117,12 @@ Add `onRecord` and your function runs for every change.
 
 ```typescript
 // src/orders.ts
-import { defineTable, typed } from "effortless-aws";
+import { defineTable, unsafeAs } from "effortless-aws";
 
 type Order = { tag: string; product: string; amount: number; status: string };
 
 export const orders = defineTable({
-  schema: typed<Order>(),
+  schema: unsafeAs<Order>(),
   onRecord: async ({ record }) => {
     if (record.eventName === "INSERT" && record.new) {
       console.log(`New order: ${record.new.data.product} — $${record.new.data.amount}`);
@@ -154,12 +154,12 @@ Use `onBatch` to receive all records at once.
 
 ```typescript
 // src/analytics.ts
-import { defineTable, typed } from "effortless-aws";
+import { defineTable, unsafeAs } from "effortless-aws";
 
 type ClickEvent = { tag: string; page: string; userId: string; timestamp: string };
 
 export const clickEvents = defineTable({
-  schema: typed<ClickEvent>(),
+  schema: unsafeAs<ClickEvent>(),
   batchSize: 100,
   onBatch: async ({ records }) => {
     const inserts = records
@@ -177,7 +177,7 @@ You can also combine `onRecord` with `onBatchComplete` for a process-then-summar
 
 ```typescript
 export const payments = defineTable({
-  schema: typed<Payment>(),
+  schema: unsafeAs<Payment>(),
   onRecord: async ({ record }) => {
     await processPayment(record.new!.data);
     return { amount: record.new!.data.amount };
@@ -272,7 +272,7 @@ import { users } from "./users";
 
 export const getUser = defineApi({
   basePath: "/users",
-  deps: { users },
+  deps: () => ({ users }),
   get: {
     "/{id}": async ({ req, deps }) => {
       const user = await deps.users.get({
@@ -294,7 +294,7 @@ Sometimes you need a table but don't need stream processing — it's just a data
 
 ```typescript
 export const cache = defineTable({
-  schema: typed<CacheEntry>(),
+  schema: unsafeAs<CacheEntry>(),
 });
 // No onRecord — just a table. Reference it with deps from other handlers.
 ```

@@ -7,22 +7,14 @@ import type { BucketClient } from "../runtime/bucket-client";
 import type { EmailClient } from "../runtime/email-client";
 import type { QueueClient } from "../runtime/queue-client";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyTableHandler = TableHandler<any, any, any, any, any, any>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyBucketHandler = BucketHandler<any, any, any, any>;
-export type AnyMailerHandler = MailerHandler;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyFifoQueueHandler = FifoQueueHandler<any, any, any, any, any>;
-
 /** Dep value types supported by the deps declaration */
-export type AnyDepHandler = AnyTableHandler | AnyBucketHandler | AnyMailerHandler | AnyFifoQueueHandler;
+export type AnyDepHandler = TableHandler<any, any> | BucketHandler<any> | MailerHandler | FifoQueueHandler<any, any>;
 
 /** Maps a deps declaration to resolved runtime client types */
 export type ResolveDeps<D> = {
-  [K in keyof D]: D[K] extends TableHandler<infer T, any, any, any, any> ? TableClient<T>
-    : D[K] extends BucketHandler<any, any, any, any> ? BucketClient
+  [K in keyof D]: D[K] extends TableHandler<infer T> ? TableClient<T>
+    : D[K] extends BucketHandler ? BucketClient
     : D[K] extends MailerHandler ? EmailClient
-    : D[K] extends FifoQueueHandler<infer T, any, any, any, any> ? QueueClient<T>
+    : D[K] extends FifoQueueHandler<infer T> ? QueueClient<T>
     : never;
 };

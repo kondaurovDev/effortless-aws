@@ -84,8 +84,9 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
   /**
    * Dependencies on other handlers (tables, buckets, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
+   * Pass a function returning the deps object: `deps: () => ({ uploads })`.
    */
-  deps?: D;
+  deps?: () => D & {};
   /**
    * SSM Parameter Store parameters.
    * Declare with `param()` helper. Values are fetched and cached at cold start.
@@ -123,17 +124,16 @@ export type DefineBucketOptions<
  * Internal handler object created by defineBucket
  * @internal
  */
-export type BucketHandler<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = {
+export type BucketHandler<C = any> = {
   readonly __brand: "effortless-bucket";
   readonly __spec: BucketConfig;
   readonly onError?: (error: unknown) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly setup?: (...args: any[]) => C | Promise<C>;
-  readonly deps?: D;
-  readonly config?: P;
+  readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
+  readonly config?: Record<string, unknown>;
   readonly static?: string[];
-  readonly onObjectCreated?: BucketObjectCreatedFn<C, D, P, S>;
-  readonly onObjectRemoved?: BucketObjectRemovedFn<C, D, P, S>;
+  readonly onObjectCreated?: (...args: any[]) => any;
+  readonly onObjectRemoved?: (...args: any[]) => any;
 };
 
 /**
@@ -178,7 +178,7 @@ export const defineBucket = <
   S extends string[] | undefined = undefined
 >(
   options: DefineBucketOptions<C, D, P, S>
-): BucketHandler<C, D, P, S> => {
+): BucketHandler<C> => {
   const { onObjectCreated, onObjectRemoved, onError, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-bucket",
@@ -190,5 +190,5 @@ export const defineBucket = <
     ...(staticFiles ? { static: staticFiles } : {}),
     ...(onObjectCreated ? { onObjectCreated } : {}),
     ...(onObjectRemoved ? { onObjectRemoved } : {}),
-  } as BucketHandler<C, D, P, S>;
+  } as BucketHandler<C>;
 };

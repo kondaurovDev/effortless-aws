@@ -1,4 +1,4 @@
-import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type CallExpression, type ArrayLiteralExpression } from "ts-morph";
+import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type CallExpression, type ArrayLiteralExpression, type ArrowFunction, type ParenthesizedExpression } from "ts-morph";
 
 // ============ Shared utilities ============
 
@@ -52,8 +52,8 @@ const extractPropertyFromObject = (obj: ObjectLiteralExpression, propName: strin
 
 /**
  * Extract dependency key names from the deps property of a handler config.
- * Handles: deps: { orders, users } (ShorthandPropertyAssignment)
- * And:     deps: { orders: orders } (PropertyAssignment)
+ * Handles: deps: { orders, users } (object literal)
+ * And:     deps: () => ({ orders, users }) (arrow function returning object)
  */
 const extractDepsKeys = (obj: ObjectLiteralExpression): string[] => {
   const depsProp = obj.getProperties().find(p => {
@@ -65,7 +65,17 @@ const extractDepsKeys = (obj: ObjectLiteralExpression): string[] => {
 
   if (!depsProp || depsProp.getKind() !== SyntaxKind.PropertyAssignment) return [];
 
-  const init = (depsProp as PropertyAssignment).getInitializer();
+  let init = (depsProp as PropertyAssignment).getInitializer();
+  if (!init) return [];
+
+  // Unwrap arrow function: deps: () => ({ ... })
+  if (init.getKind() === SyntaxKind.ArrowFunction) {
+    const body = (init as ArrowFunction).getBody();
+    if (body.getKind() === SyntaxKind.ParenthesizedExpression) {
+      init = (body as ParenthesizedExpression).getExpression();
+    }
+  }
+
   if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return [];
 
   const depsObj = init as ObjectLiteralExpression;

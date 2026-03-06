@@ -84,7 +84,7 @@ describe("extractFifoQueueConfigs", () => {
       import { defineFifoQueue } from "effortless-aws";
       import { orders } from "./orders";
       export const q = defineFifoQueue({
-        deps: { orders },
+        deps: () => ({ orders }),
         onMessage: async ({ message, deps }) => {}
       });
     `;

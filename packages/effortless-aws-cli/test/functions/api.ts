@@ -46,7 +46,7 @@ const decodeUser = (input: unknown) =>
 
 export const user = defineApi({
   basePath: "/user",
-  deps: { sessions },
+  deps: () => ({ sessions }),
   config: {
     maxAge: param("session-max-age", Number),
   },

@@ -83,7 +83,7 @@ describe("defineApi", () => {
 
         export default defineApi({
           basePath: "/api",
-          deps: { users },
+          deps: () => ({ users }),
           config: { dbUrl: param("database-url") },
           get: {
             "/users": async ({ req }) => ({ status: 200, body: [] }),

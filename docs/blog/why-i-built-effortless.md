@@ -106,7 +106,7 @@ export const orders = defineTable({
 
 export const api = defineApi({
   basePath: "/orders",
-  deps: { orders },
+  deps: () => ({ orders }),
   get: {
     "/": async ({ deps }) => {
       const items = await deps.orders.scan();
