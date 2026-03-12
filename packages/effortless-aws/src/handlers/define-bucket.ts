@@ -69,6 +69,8 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
    * If not provided, defaults to `console.error`.
    */
   onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
+  /** Called after each invocation completes, right before Lambda freezes the process */
+  onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
   /**
    * Factory function to initialize shared state for callbacks.
    * Called once on cold start, result is cached and reused across invocations.
@@ -123,6 +125,7 @@ export type BucketHandler<C = any> = {
   readonly __brand: "effortless-bucket";
   readonly __spec: BucketConfig;
   readonly onError?: (...args: any[]) => any;
+  readonly onAfterInvoke?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
@@ -174,11 +177,12 @@ export const defineBucket = <
 >(
   options: DefineBucketOptions<C, D, P, S>
 ): BucketHandler<C> => {
-  const { onObjectCreated, onObjectRemoved, onError, setup, deps, config, static: staticFiles, ...__spec } = options;
+  const { onObjectCreated, onObjectRemoved, onError, onAfterInvoke, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-bucket",
     __spec,
     ...(onError ? { onError } : {}),
+    ...(onAfterInvoke ? { onAfterInvoke } : {}),
     ...(setup ? { setup } : {}),
     ...(deps ? { deps } : {}),
     ...(config ? { config } : {}),

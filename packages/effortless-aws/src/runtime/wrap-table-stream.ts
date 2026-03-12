@@ -98,12 +98,13 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
   return async (event: DynamoDBStreamEvent) => {
     const startTime = Date.now();
     rt.patchConsole();
+    let shared: (Awaited<ReturnType<typeof rt.commonArgs>> & { table: ReturnType<typeof getSelfClient> }) | undefined;
 
     try {
       const rawRecords = event.Records ?? [];
       const input = { recordCount: rawRecords.length };
 
-      const shared = { ...await rt.commonArgs(), table: getSelfClient() };
+      shared = { ...await rt.commonArgs(), table: getSelfClient() };
 
       let records: TableRecord<T>[];
       let sequenceNumbers: Map<TableRecord<T>, string>;
@@ -166,6 +167,10 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
 
       return { batchItemFailures };
     } finally {
+      if (handler.onAfterInvoke && shared) {
+        try { await handler.onAfterInvoke(shared); }
+        catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
+      }
       rt.restoreConsole();
     }
   };

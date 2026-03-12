@@ -92,6 +92,8 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
    * If not provided, defaults to `console.error`.
    */
   onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
+  /** Called after each invocation completes, right before Lambda freezes the process */
+  onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
   /**
    * Factory function to initialize shared state for the handler.
    * Called once on cold start, result is cached and reused across invocations.
@@ -147,6 +149,7 @@ export type FifoQueueHandler<T = unknown, C = any> = {
   readonly __spec: FifoQueueConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (...args: any[]) => any;
+  readonly onAfterInvoke?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
@@ -194,12 +197,13 @@ export const defineFifoQueue = <
 >(
   options: DefineFifoQueueOptions<T, C, D, P, S>
 ): FifoQueueHandler<T, C> => {
-  const { onMessage, onBatch, onError, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
+  const { onMessage, onBatch, onError, onAfterInvoke, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-fifo-queue",
     __spec,
     ...(schema ? { schema } : {}),
     ...(onError ? { onError } : {}),
+    ...(onAfterInvoke ? { onAfterInvoke } : {}),
     ...(setup ? { setup } : {}),
     ...(deps ? { deps } : {}),
     ...(config ? { config } : {}),

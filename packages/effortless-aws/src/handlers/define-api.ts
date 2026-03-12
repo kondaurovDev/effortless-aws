@@ -94,6 +94,8 @@ export type DefineApiOptions<
   static?: S;
   /** Error handler called when schema validation or handler throws */
   onError?: (args: { error: unknown; req: HttpRequest } & HandlerArgs<C, D, P, S>) => HttpResponse;
+  /** Called after each invocation completes, right before Lambda freezes the process */
+  onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
 
   /** GET routes — query handlers keyed by relative path (e.g., "/users/{id}") */
   get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST, A>>;
@@ -119,6 +121,7 @@ export type ApiHandler<
   readonly __spec: ApiConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (...args: any[]) => any;
+  readonly onAfterInvoke?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
@@ -173,7 +176,7 @@ export const defineApi = <
 >(
   options: DefineApiOptions<T, C, D, P, S, ST, A>
 ): ApiHandler<T, C> => {
-  const { get, post, schema, onError, setup, deps, config, auth: authConfig, static: staticFiles, ...__spec } = options;
+  const { get, post, schema, onError, onAfterInvoke, setup, deps, config, auth: authConfig, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-api",
     __spec,
@@ -181,6 +184,7 @@ export const defineApi = <
     ...(post ? { post } : {}),
     ...(schema ? { schema } : {}),
     ...(onError ? { onError } : {}),
+    ...(onAfterInvoke ? { onAfterInvoke } : {}),
     ...(setup ? { setup } : {}),
     ...(deps ? { deps } : {}),
     ...(config ? { config } : {}),

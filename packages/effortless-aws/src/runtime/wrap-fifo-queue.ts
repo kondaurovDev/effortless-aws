@@ -69,12 +69,13 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
   return async (event: SQSEvent) => {
     const startTime = Date.now();
     rt.patchConsole();
+    let shared: Awaited<ReturnType<typeof rt.commonArgs>> | undefined;
 
     try {
       const rawRecords = event.Records ?? [];
       const input = { messageCount: rawRecords.length };
 
-      const shared = await rt.commonArgs();
+      shared = await rt.commonArgs();
 
       let messages: FifoQueueMessage<T>[];
       try {
@@ -118,6 +119,10 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
 
       return { batchItemFailures };
     } finally {
+      if (handler.onAfterInvoke && shared) {
+        try { await handler.onAfterInvoke(shared); }
+        catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
+      }
       rt.restoreConsole();
     }
   };

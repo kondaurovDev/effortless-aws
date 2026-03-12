@@ -140,6 +140,8 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
    * Receives the error. If not provided, defaults to `console.error`.
    */
   onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
+  /** Called after each invocation completes, right before Lambda freezes the process */
+  onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
   /**
    * Factory function to initialize shared state for callbacks.
    * Called once on cold start, result is cached and reused across invocations.
@@ -208,6 +210,7 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
   readonly __spec: TableConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (...args: any[]) => any;
+  readonly onAfterInvoke?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
@@ -253,12 +256,13 @@ export const defineTable = <
 >(
   options: DefineTableOptions<T, C, R, D, P, S>
 ): TableHandler<T, C> => {
-  const { onRecord, onBatchComplete, onBatch, onError, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
+  const { onRecord, onBatchComplete, onBatch, onError, onAfterInvoke, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-table",
     __spec,
     ...(schema ? { schema } : {}),
     ...(onError ? { onError } : {}),
+    ...(onAfterInvoke ? { onAfterInvoke } : {}),
     ...(setup ? { setup } : {}),
     ...(deps ? { deps } : {}),
     ...(config ? { config } : {}),

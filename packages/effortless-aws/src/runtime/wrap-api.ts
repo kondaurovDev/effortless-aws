@@ -127,6 +127,7 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
   const handleRequest = async (event: LambdaEvent, streamCtx?: { rawStream: any; httpStream: any; stream: ResponseStream }) => {
     const startTime = Date.now();
     rt.patchConsole();
+    let sharedArgs: Awaited<ReturnType<typeof rt.commonArgs>> | undefined;
 
     try {
       const req = {
@@ -150,7 +151,7 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
       }
 
       // Resolve shared args (ctx, deps, config, files)
-      const sharedArgs = await rt.commonArgs(authCookie);
+      sharedArgs = await rt.commonArgs(authCookie);
 
       // GET / HEAD routing
       if (req.method === "GET" || req.method === "HEAD") {
@@ -219,6 +220,10 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
       rt.logExecution(startTime, input, { status: 404 });
       return notFound();
     } finally {
+      if (handler.onAfterInvoke && sharedArgs) {
+        try { await handler.onAfterInvoke(sharedArgs); }
+        catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
+      }
       rt.restoreConsole();
     }
   };

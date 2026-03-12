@@ -61,7 +61,7 @@ const findDefineCalls = (sourceFile: ReturnType<typeof parseSource>, defineFn: s
 
 // ============ Config evaluation ============
 
-const RUNTIME_PROPS = ["onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "deps", "config", "static", "middleware", "auth", "routes", "get", "post"];
+const RUNTIME_PROPS = ["onRecord", "onBatchComplete", "onBatch", "onMessage", "onObjectCreated", "onObjectRemoved", "setup", "schema", "onError", "onAfterInvoke", "deps", "config", "static", "middleware", "auth", "routes", "get", "post"];
 
 const evalConfig = <T>(configText: string, exportName: string): T => {
   try {
