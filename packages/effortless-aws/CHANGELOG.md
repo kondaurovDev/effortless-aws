@@ -1,5 +1,22 @@
 # effortless-aws
 
+## 0.25.0
+
+### Minor Changes
+
+- [`bab8e7a`](https://github.com/kondaurovDev/effortless-aws/commit/bab8e7a7ab4b2eb8dbdb8524d127217e4415bf1e) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add ctx/deps/config/files to onError callbacks in defineTable, defineFifoQueue, defineBucket, and defineApi. Extract shared `HandlerArgs` utility type to reduce duplication across callback types.
+
+  **Breaking**: `onError` now receives a single object argument instead of positional args.
+
+  Before: `onError: (error) => { ... }`
+  After: `onError: ({ error }) => { ... }`
+
+  For defineApi, `req` is also included: `onError: ({ error, req }) => { ... }`
+
+### Patch Changes
+
+- [`9e03702`](https://github.com/kondaurovDev/effortless-aws/commit/9e03702ce75bd66638208a427c5435675a82d717) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add `increment` action to TableClient.update() for atomic numeric field increments/decrements
+
 ## 0.24.1
 
 ### Patch Changes
