@@ -3,6 +3,7 @@ import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles, ResponseStream } from "./shared";
 import type { HttpRequest, HttpResponse } from "./shared";
 import type { CookieAuth, AuthHelpers } from "./auth";
+import type { HandlerArgs } from "./handler-args";
 
 /** Extract session type T from CookieAuth<T> */
 type SessionOf<A> = A extends CookieAuth<infer T> ? T : undefined;
@@ -17,10 +18,7 @@ export type ApiGetHandlerFn<
   A extends CookieAuth<any> | undefined = undefined
 > =
   (args: { req: HttpRequest }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
     & ([ST] extends [true] ? { stream: ResponseStream } : {})
     & ([A] extends [undefined] ? {} : { auth: AuthHelpers<SessionOf<A>> })
   ) => Promise<HttpResponse | void> | HttpResponse | void;
@@ -37,10 +35,7 @@ export type ApiPostHandlerFn<
 > =
   (args: { req: HttpRequest }
     & ([T] extends [undefined] ? {} : { data: T })
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
     & ([ST] extends [true] ? { stream: ResponseStream } : {})
     & ([A] extends [undefined] ? {} : { auth: AuthHelpers<SessionOf<A>> })
   ) => Promise<HttpResponse | void> | HttpResponse | void;
@@ -98,7 +93,7 @@ export type DefineApiOptions<
   /** Static file glob patterns to bundle into the Lambda ZIP */
   static?: S;
   /** Error handler called when schema validation or handler throws */
-  onError?: (error: unknown, req: HttpRequest) => HttpResponse;
+  onError?: (args: { error: unknown; req: HttpRequest } & HandlerArgs<C, D, P, S>) => HttpResponse;
 
   /** GET routes — query handlers keyed by relative path (e.g., "/users/{id}") */
   get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST, A>>;
@@ -123,7 +118,7 @@ export type ApiHandler<
   readonly __brand: "effortless-api";
   readonly __spec: ApiConfig;
   readonly schema?: (input: unknown) => T;
-  readonly onError?: (error: unknown, req: HttpRequest) => HttpResponse;
+  readonly onError?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;

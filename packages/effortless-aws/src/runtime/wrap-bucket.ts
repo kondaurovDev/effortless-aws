@@ -40,7 +40,7 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
     const bucket = getSelfClient();
     return bucket ? { bucket } : {};
   });
-  const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
+  const handleError = handler.onError ?? (({ error }: { error: unknown }) => console.error(`[effortless:${rt.handlerName}]`, error));
 
   // S3 event notifications are fire-and-forget — no partial batch failure support,
   // so unlike table/queue wrappers we don't return batchItemFailures.
@@ -72,7 +72,7 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
             await (handler.onObjectRemoved as any)({ event: bucketEvent, ...shared });
           }
         } catch (error) {
-          handleError(error);
+          handleError({ error, ...shared });
           errorCount++;
         }
       }

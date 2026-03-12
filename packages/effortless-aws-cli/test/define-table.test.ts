@@ -220,7 +220,7 @@ describe("defineTable", () => {
 
         export default defineTable({
           name: "events",
-          onError: (error) => {
+          onError: ({ error }) => {
             globalThis.__test_onBatchError.push(error.message);
           },
           onBatch: async ({ records }) => {

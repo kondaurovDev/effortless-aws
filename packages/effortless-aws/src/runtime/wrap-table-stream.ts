@@ -93,7 +93,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
     const table = getSelfClient();
     return table ? { table } : {};
   });
-  const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
+  const handleError = handler.onError ?? (({ error }: { error: unknown }) => console.error(`[effortless:${rt.handlerName}]`, error));
 
   return async (event: DynamoDBStreamEvent) => {
     const startTime = Date.now();
@@ -103,24 +103,25 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
       const rawRecords = event.Records ?? [];
       const input = { recordCount: rawRecords.length };
 
+      const shared = { ...await rt.commonArgs(), table: getSelfClient() };
+
       let records: TableRecord<T>[];
       let sequenceNumbers: Map<TableRecord<T>, string>;
       try {
         ({ records, sequenceNumbers } = parseRecords<T>(rawRecords, handler.schema));
       } catch (error) {
-        handleError(error);
+        handleError({ error, ...shared });
         rt.logError(startTime, input, error);
         return { batchItemFailures: rawRecords.map(r => r.dynamodb?.SequenceNumber).filter((s): s is string => !!s).map(seq => ({ itemIdentifier: seq })) };
       }
 
-      const shared = { ...await rt.commonArgs(), table: getSelfClient() };
       const batchItemFailures: BatchItemFailure[] = [];
 
       if (handler.onBatch) {
         try {
           await (handler.onBatch as any)({ records, ...shared });
         } catch (error) {
-          handleError(error);
+          handleError({ error, ...shared });
           batchItemFailures.push(...collectFailures(records, sequenceNumbers));
         }
       } else {
@@ -134,7 +135,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
             const result = await onRecord({ record, ...shared });
             if (result !== undefined) results.push(result);
           } catch (error) {
-            handleError(error);
+            handleError({ error, ...shared });
             failures.push({ record, error });
             const seq = sequenceNumbers.get(record);
             if (seq) batchItemFailures.push({ itemIdentifier: seq });
@@ -145,7 +146,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
           try {
             await (handler.onBatchComplete as any)({ results, failures, ...shared });
           } catch (error) {
-            handleError(error);
+            handleError({ error, ...shared });
             // Mark all non-failed records as failed too
             for (const record of records) {
               const seq = sequenceNumbers.get(record);

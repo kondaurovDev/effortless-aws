@@ -2,6 +2,7 @@ import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableItem, Dura
 import type { TableClient } from "../runtime/table-client";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
+import type { HandlerArgs } from "./handler-args";
 
 /** DynamoDB attribute types for keys */
 export type KeyType = "string" | "number" | "binary";
@@ -105,10 +106,7 @@ type SetupFactory<C, T, D, P, S extends string[] | undefined = undefined> = (arg
  */
 export type TableRecordFn<T = Record<string, unknown>, C = undefined, R = void, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { record: TableRecord<T>; table: TableClient<T> }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
   ) => Promise<R>;
 
 /**
@@ -116,10 +114,7 @@ export type TableRecordFn<T = Record<string, unknown>, C = undefined, R = void, 
  */
 export type TableBatchCompleteFn<T = Record<string, unknown>, C = undefined, R = void, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { results: R[]; failures: FailedRecord<T>[]; table: TableClient<T> }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
   ) => Promise<void>;
 
 /**
@@ -127,10 +122,7 @@ export type TableBatchCompleteFn<T = Record<string, unknown>, C = undefined, R =
  */
 export type TableBatchFn<T = Record<string, unknown>, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { records: TableRecord<T>[]; table: TableClient<T> }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
   ) => Promise<void>;
 
 /** Base options shared by all defineTable variants */
@@ -147,7 +139,7 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
    * Error handler called when onRecord, onBatch, or onBatchComplete throws.
    * Receives the error. If not provided, defaults to `console.error`.
    */
-  onError?: (error: unknown) => void;
+  onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
   /**
    * Factory function to initialize shared state for callbacks.
    * Called once on cold start, result is cached and reused across invocations.
@@ -215,7 +207,7 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
   readonly __brand: "effortless-table";
   readonly __spec: TableConfig;
   readonly schema?: (input: unknown) => T;
-  readonly onError?: (error: unknown) => void;
+  readonly onError?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;

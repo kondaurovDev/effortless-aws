@@ -64,7 +64,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
   }
 
   const rt = createHandlerRuntime(handler, "fifo-queue", handler.__spec.lambda?.logLevel ?? "info");
-  const handleError = handler.onError ?? ((e: unknown) => console.error(`[effortless:${rt.handlerName}]`, e));
+  const handleError = handler.onError ?? (({ error }: { error: unknown }) => console.error(`[effortless:${rt.handlerName}]`, error));
 
   return async (event: SQSEvent) => {
     const startTime = Date.now();
@@ -74,25 +74,26 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
       const rawRecords = event.Records ?? [];
       const input = { messageCount: rawRecords.length };
 
+      const shared = await rt.commonArgs();
+
       let messages: FifoQueueMessage<T>[];
       try {
         messages = parseMessages<T>(rawRecords, handler.schema);
       } catch (error) {
-        handleError(error);
+        handleError({ error, ...shared });
         rt.logError(startTime, input, error);
         return {
           batchItemFailures: rawRecords.map(r => ({ itemIdentifier: r.messageId })),
         };
       }
 
-      const shared = await rt.commonArgs();
       const batchItemFailures: BatchItemFailure[] = [];
 
       if (handler.onBatch) {
         try {
           await (handler.onBatch as any)({ messages, ...shared });
         } catch (error) {
-          handleError(error);
+          handleError({ error, ...shared });
           for (const message of messages) {
             batchItemFailures.push({ itemIdentifier: message.messageId });
           }
@@ -103,7 +104,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
           try {
             await onMessage({ message, ...shared });
           } catch (error) {
-            handleError(error);
+            handleError({ error, ...shared });
             batchItemFailures.push({ itemIdentifier: message.messageId });
           }
         }

@@ -2,6 +2,7 @@ import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handle
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
 import type { BucketClient } from "../runtime/bucket-client";
+import type { HandlerArgs } from "./handler-args";
 
 /**
  * Configuration options for defineBucket.
@@ -38,10 +39,7 @@ export type BucketEvent = {
  */
 export type BucketObjectCreatedFn<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { event: BucketEvent; bucket: BucketClient }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
   ) => Promise<void>;
 
 /**
@@ -49,10 +47,7 @@ export type BucketObjectCreatedFn<C = undefined, D = undefined, P = undefined, S
  */
 export type BucketObjectRemovedFn<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { event: BucketEvent; bucket: BucketClient }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
   ) => Promise<void>;
 
 /**
@@ -73,7 +68,7 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
    * Error handler called when onObjectCreated or onObjectRemoved throws.
    * If not provided, defaults to `console.error`.
    */
-  onError?: (error: unknown) => void;
+  onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
   /**
    * Factory function to initialize shared state for callbacks.
    * Called once on cold start, result is cached and reused across invocations.
@@ -127,7 +122,7 @@ export type DefineBucketOptions<
 export type BucketHandler<C = any> = {
   readonly __brand: "effortless-bucket";
   readonly __spec: BucketConfig;
-  readonly onError?: (error: unknown) => void;
+  readonly onError?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;

@@ -114,14 +114,13 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
 
   const defaultError = (error: unknown, status: number) => {
     console.error(`[effortless:${rt.handlerName}]`, error);
-    return {
-      statusCode: status,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    return toResult({
+      status,
+      body: {
         error: status === 400 ? "Validation failed" : "Internal server error",
         details: error instanceof Error ? error.message : String(error),
-      }),
-    };
+      },
+    });
   };
 
   // Core handler logic shared between buffered and streaming modes
@@ -178,7 +177,7 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
         } catch (error) {
           rt.logError(startTime, input, error);
           return handler.onError
-            ? toResult(handler.onError(error, req))
+            ? toResult(handler.onError({ error, req, ...sharedArgs }))
             : defaultError(error, 500);
         }
       }
@@ -194,7 +193,7 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
           } catch (error) {
             rt.logError(startTime, input, error);
             return handler.onError
-              ? toResult(handler.onError(error, req))
+              ? toResult(handler.onError({ error, req, ...sharedArgs }))
               : defaultError(error, 400);
           }
         }
@@ -211,7 +210,7 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
         } catch (error) {
           rt.logError(startTime, input, error);
           return handler.onError
-            ? toResult(handler.onError(error, req))
+            ? toResult(handler.onError({ error, req, ...sharedArgs }))
             : defaultError(error, 500);
         }
       }

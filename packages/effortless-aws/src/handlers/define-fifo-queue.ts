@@ -1,6 +1,7 @@
 import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, Duration } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
+import type { HandlerArgs } from "./handler-args";
 
 /**
  * Parsed SQS FIFO message passed to the handler callbacks.
@@ -67,10 +68,7 @@ type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
  */
 export type FifoQueueMessageFn<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { message: FifoQueueMessage<T> }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
   ) => Promise<void>;
 
 /**
@@ -79,10 +77,7 @@ export type FifoQueueMessageFn<T = unknown, C = undefined, D = undefined, P = un
  */
 export type FifoQueueBatchFn<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
   (args: { messages: FifoQueueMessage<T>[] }
-    & ([C] extends [undefined] ? {} : { ctx: C })
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
+    & HandlerArgs<C, D, P, S>
   ) => Promise<void>;
 
 /** Base options shared by all defineFifoQueue variants */
@@ -96,7 +91,7 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
    * Error handler called when onMessage or onBatch throws.
    * If not provided, defaults to `console.error`.
    */
-  onError?: (error: unknown) => void;
+  onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
   /**
    * Factory function to initialize shared state for the handler.
    * Called once on cold start, result is cached and reused across invocations.
@@ -151,7 +146,7 @@ export type FifoQueueHandler<T = unknown, C = any> = {
   readonly __brand: "effortless-fifo-queue";
   readonly __spec: FifoQueueConfig;
   readonly schema?: (input: unknown) => T;
-  readonly onError?: (error: unknown) => void;
+  readonly onError?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
