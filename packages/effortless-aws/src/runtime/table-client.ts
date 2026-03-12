@@ -49,6 +49,9 @@ export type QueryByTagParams = {
 /** Extract keys of T whose values are arrays */
 type ArrayKeys<T> = { [K in keyof T]: T[K] extends unknown[] ? K : never }[keyof T];
 
+/** Extract keys of T whose values are numbers */
+type NumberKeys<T> = { [K in keyof T]: T[K] extends number ? K : never }[keyof T];
+
 /**
  * Update actions for TableClient.update()
  *
@@ -60,6 +63,8 @@ type ArrayKeys<T> = { [K in keyof T]: T[K] extends unknown[] ? K : never }[keyof
 export type UpdateActions<T> = {
   /** Set domain data fields (inside `data` attribute) */
   set?: Partial<T>;
+  /** Atomically increment/decrement numeric fields inside `data` (use negative values to decrement) */
+  increment?: Pick<Partial<T>, NumberKeys<T>>;
   /** Append elements to list fields inside `data` (creates the list if it doesn't exist) */
   append?: Pick<Partial<T>, ArrayKeys<T>>;
   /** Remove fields from `data` */
@@ -215,6 +220,20 @@ export const createTableClient = <T = Record<string, unknown>>(tableName: string
         }
       }
 
+      if (actions.increment) {
+        for (const [attr, val] of Object.entries(actions.increment as Record<string, unknown>)) {
+          needsDataAlias = true;
+          const alias = `#a${counter}`;
+          const valAlias = `:v${counter}`;
+          const zeroAlias = `:zero${counter}`;
+          names[alias] = attr;
+          values[valAlias] = val;
+          values[zeroAlias] = 0;
+          setClauses.push(`${DATA_ALIAS}.${alias} = if_not_exists(${DATA_ALIAS}.${alias}, ${zeroAlias}) + ${valAlias}`);
+          counter++;
+        }
+      }
+
       if (actions.append) {
         for (const [attr, val] of Object.entries(actions.append as Record<string, unknown>)) {
           needsDataAlias = true;
@@ -283,6 +302,7 @@ export const createTableClient = <T = Record<string, unknown>>(tableName: string
         if (needsDataAlias && (err as { name?: string }).name === "ValidationException") {
           const dataMap: Record<string, unknown> = {};
           if (actions.set) Object.assign(dataMap, actions.set);
+          if (actions.increment) Object.assign(dataMap, actions.increment);
           if (actions.append) Object.assign(dataMap, actions.append);
 
           const retryNames: Record<string, string> = { "#data": "data" };
