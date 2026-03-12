@@ -11,8 +11,17 @@ import { collectRequiredSecrets, checkMissingSecrets, type RequiredSecret } from
 import { projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
 import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
+import { toAwsTagList } from "~/aws/tags";
 
 // ============ Shared helpers ============
+
+const ssmTags = (project: string, stage: string, handlerName: string) =>
+  toAwsTagList({
+    "effortless:project": project,
+    "effortless:stage": stage,
+    "effortless:handler": handlerName,
+    "effortless:type": "ssm-parameter",
+  });
 
 const loadRequiredParams = (
   projectOpt: Option.Option<string>,
@@ -99,30 +108,39 @@ const setCommand = Command.make(
   { key: setKeyArg, project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption },
   ({ key, project: projectOpt, stage, region, verbose }) =>
     Effect.gen(function* () {
-      const { config } = yield* ProjectConfig;
-      const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
+      const ctx = yield* loadRequiredParams(projectOpt, stage, region);
+      const { params } = ctx;
 
-      if (!project) {
-        yield* Console.error("Error: --project is required (or set 'name' in effortless.config.ts)");
-        return;
+      const match = params.find(p => p.ssmKey === key);
+      if (!match) {
+        const available = [...new Set(params.map(p => p.ssmKey))].sort();
+        yield* Console.error(`Error: "${key}" is not declared in any handler.`);
+        if (available.length > 0) {
+          yield* Console.error(`\nAvailable keys:\n${available.map(k => `  - ${k}`).join("\n")}`);
+        }
+        return yield* Effect.fail(new Error(`Unknown config key: ${key}`));
       }
 
-      const finalStage = config?.stage ?? stage;
-      const finalRegion = config?.region ?? region;
-      const ssmPath = `/${project}/${finalStage}/${key}`;
-
       const value = yield* Prompt.text({
-        message: `Value for ${c.cyan(ssmPath)}`,
+        message: `Value for ${c.cyan(match.ssmPath)}`,
       });
 
+      const ssmLayer = Aws.makeClients({ ssm: { region: ctx.region } });
+
       yield* ssm.make("put_parameter", {
-        Name: ssmPath,
+        Name: match.ssmPath,
         Value: value,
         Type: "SecureString",
         Overwrite: true,
-      }).pipe(Effect.provide(Aws.makeClients({ ssm: { region: finalRegion } })));
+      }).pipe(Effect.provide(ssmLayer));
 
-      yield* Console.log(`\n  ${c.green("✓")} ${c.cyan(ssmPath)} ${c.dim("(SecureString)")}`);
+      yield* ssm.make("add_tags_to_resource", {
+        ResourceType: "Parameter",
+        ResourceId: match.ssmPath,
+        Tags: ssmTags(ctx.project, ctx.stage, match.handlerName),
+      }).pipe(Effect.provide(ssmLayer));
+
+      yield* Console.log(`\n  ${c.green("✓")} ${c.cyan(match.ssmPath)} ${c.dim("(SecureString)")}`);
     }).pipe(
       Effect.provide(ProjectConfig.Live),
       Logger.withMinimumLogLevel(LogLevel.Warning)
@@ -171,6 +189,7 @@ const configRootCommand = Command.make(
           Value: value,
           Type: "SecureString",
           Overwrite: false,
+          Tags: ssmTags(ctx.project, ctx.stage, p.handlerName),
         }).pipe(Effect.provide(Aws.makeClients({ ssm: { region: ctx.region } })));
 
         yield* Console.log(`  ${c.green("✓")} created`);
