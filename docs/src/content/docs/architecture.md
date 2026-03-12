@@ -152,8 +152,8 @@ export const users = defineApi({
 
 ```
 RUNTIME_PROPS = ["get", "post", "onRecord", "onBatch", "onBatchComplete",
-                 "onMessage", "setup", "schema", "onError", "deps", "config",
-                 "static", "middleware"]
+                 "onMessage", "setup", "schema", "onError", "onAfterInvoke",
+                 "deps", "config", "static", "middleware"]
 ```
 
 This static config is used by the **deploy phase** to configure AWS resources (Lambda Function URLs, Lambda memory/timeout, etc.) without needing to execute user code.

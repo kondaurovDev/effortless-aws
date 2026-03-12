@@ -105,7 +105,7 @@ Don't write `defineTable<Order>(...)` or `defineFifoQueue<Event>(...)`. When you
 
 ## Shared options
 
-These options are available on all Lambda-backed handlers (`defineApi`, `defineTable`, `defineFifoQueue`).
+These options are available on all Lambda-backed handlers (`defineApi`, `defineTable`, `defineFifoQueue`, `defineBucket`).
 
 ### `schema`
 
@@ -198,6 +198,55 @@ permissions: ["s3:PutObject", "ses:SendEmail"],
 
 Logging verbosity: `"error"` (errors only), `"info"` (+ execution summary), `"debug"` (+ truncated input/output). Default: `"info"`.
 
+### `onError`
+
+Called when a handler callback throws. Receives `{ error, ...handlerArgs }`. For HTTP handlers, should return an `HttpResponse`. For stream/queue handlers, defaults to `console.error`.
+
+```typescript
+onError: ({ error, ctx, deps }) => {
+  console.error("Handler failed:", error);
+  return { status: 500, body: { error: "Something went wrong" } };
+},
+```
+
+### `onAfterInvoke`
+
+Called after each Lambda invocation completes, right before the process freezes. This is the only reliable place to run code between invocations — `setInterval` and background tasks don't execute while Lambda is frozen.
+
+Receives the same args as the handler (`ctx`, `deps`, `config`, `files` — when declared). Supports async. If `onAfterInvoke` throws, the error is logged but does **not** affect the handler's response.
+
+```typescript
+const buffer: LogEntry[] = [];
+
+export default defineApi({
+  basePath: "/api",
+  onAfterInvoke: async () => {
+    // Flush batched logs when buffer is large or stale
+    if (buffer.length >= 100 || timeSinceLastFlush() > 30_000) {
+      await flush(buffer);
+    }
+  },
+  get: {
+    "/users": async ({ req }) => {
+      buffer.push({ path: req.path, time: Date.now() });
+      return { status: 200, body: users };
+    },
+  },
+});
+```
+
+:::tip[Lambda lifecycle]
+Understanding how Lambda manages your process helps explain why `onAfterInvoke` exists:
+
+1. **Cold start** — Lambda creates a new execution environment. Your module loads, `setup` runs once.
+2. **Invoke** — Lambda thaws the process, runs your handler, returns the response.
+3. **Freeze** — Lambda immediately suspends the process (CPU off, event loop paused). No timers fire, no `setInterval` callbacks run, no pending promises resolve.
+4. **Repeat** — on the next request, Lambda thaws the same process from step 2. Variables, connections, and caches survive across invocations.
+5. **Shutdown** — after ~5–15 minutes of inactivity, Lambda sends `SIGTERM` and destroys the environment.
+
+The freeze between steps 2 and 3 is the key insight: `onAfterInvoke` runs at the end of step 2, giving you CPU time before the process is suspended. Without it, you'd have no way to run cleanup logic between invocations.
+:::
+
 ---
 
 ## defineApi
@@ -208,7 +257,7 @@ Creates: Lambda + Function URL with built-in routing
 
 - **GET routes** — query handlers keyed by relative path (e.g., `"/users/{id}"`)
 - **POST handler** — single command entry point with discriminated union schema
-- Shared `deps`, `config`, `setup`, `static`, `onError` across all routes
+- Shared `deps`, `config`, `setup`, `static`, `onError`, `onAfterInvoke` across all routes
 - Unmatched routes return 404 automatically
 
 ```typescript
@@ -225,6 +274,7 @@ export default defineApi({
   config?: { [key]: param(...) },
   static?: string[],
   onError?: (error, req) => HttpResponse,
+  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
 
   // GET routes — queries
   get?: {
@@ -380,6 +430,7 @@ export const orders = defineTable({
   setup?: ({ deps, config }) => C,    // factory for shared state (cached on cold start)
   deps?: { [key]: TableHandler },     // inter-handler dependencies
   config?: { [key]: param(...) },     // SSM parameters
+  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
 
   // Stream handler — choose one mode:
 
@@ -914,6 +965,7 @@ export const orderQueue = defineFifoQueue({
   setup?: ({ deps, config }) => C,      // factory for shared state (cached on cold start)
   deps?: { [key]: TableHandler },       // inter-handler dependencies
   config?: { [key]: param(...) },       // SSM parameters
+  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
 
   // Handler — choose one mode:
 
@@ -1102,6 +1154,7 @@ export const uploads = defineBucket({
   setup?: ({ bucket, deps, config }) => C,  // factory for shared state (cached on cold start)
   deps?: { [key]: Handler },            // inter-handler dependencies
   config?: { [key]: param(...) },       // SSM parameters
+  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
 
   // Event handlers — both optional
   onObjectCreated?: async ({ event, bucket, ctx, deps, config }) => { ... },
