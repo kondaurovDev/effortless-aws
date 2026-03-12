@@ -1,5 +1,25 @@
 # effortless-aws
 
+## 0.26.0
+
+### Minor Changes
+
+- [`c78c078`](https://github.com/kondaurovDev/effortless-aws/commit/c78c0783a9ca2afa55b2c865370ebc725d803070) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - feat: add `onAfterInvoke` lifecycle hook for all handler types
+
+  New optional callback executed after each Lambda invocation completes, right before the process freezes. Useful for flushing batched logs/metrics, checking buffers, or any cleanup that needs CPU time before Lambda suspends the execution environment.
+
+  Supported on: `defineApi`, `defineTable`, `defineFifoQueue`, `defineBucket`.
+
+  ```typescript
+  export default defineApi({
+    basePath: "/api",
+    onAfterInvoke: async ({ ctx, deps }) => {
+      if (buffer.length >= 100) await flush();
+    },
+    // ...
+  });
+  ```
+
 ## 0.25.0
 
 ### Minor Changes
