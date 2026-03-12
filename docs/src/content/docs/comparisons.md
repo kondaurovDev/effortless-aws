@@ -166,7 +166,10 @@ Key differences:
 | State management | Pulumi state (S3 + lock) | No state files — AWS tags |
 | Deployment engine | Pulumi/Terraform | Direct AWS SDK calls |
 | Dashboard | Yes (SST Console) | Planned (control plane + web UI) |
+| Live dev (local proxy) | Yes (`sst dev`) | No — fast redeploys (~5s) |
 | Deploy speed | ~30s (Pulumi diff) | ~5-10s (direct API calls) |
+
+SST's `sst dev` proxies Lambda invocations to your local machine, so you can set breakpoints and hot-reload without redeploying. Effortless takes a different stance: local mocks (in-memory DynamoDB, fake IAM) create false confidence — "works locally, breaks on AWS" is a real problem. Instead, Effortless relies on fast direct deploys (~5s) and encourages writing tests for correctness. If you're unsure something works, a test catches it reliably; manual localhost poking does not.
 
 SST is great for teams already comfortable with IaC who want better DX. Effortless is for teams who don't want to write infrastructure code at all.
 
