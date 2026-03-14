@@ -8,28 +8,25 @@ export type EnsureFifoQueueInput = {
   retentionPeriod?: number;
   delay?: number;
   contentBasedDeduplication?: boolean;
+  maxReceiveCount?: number;
   tags?: Record<string, string>;
 };
 
 export type EnsureFifoQueueResult = {
   queueUrl: string;
   queueArn: string;
+  dlqUrl: string;
+  dlqArn: string;
 };
 
-export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
+const ensureSingleFifoQueue = (opts: {
+  queueName: string;
+  attributes: Record<string, string>;
+  tags?: Record<string, string>;
+}) =>
   Effect.gen(function* () {
-    const {
-      name,
-      visibilityTimeout = 30,
-      retentionPeriod = 345600,
-      delay = 0,
-      contentBasedDeduplication = true,
-      tags
-    } = input;
+    const { queueName, attributes, tags } = opts;
 
-    const queueName = `${name}.fifo`;
-
-    // Check if queue already exists
     const existingUrl = yield* sqs.make("get_queue_url", {
       QueueName: queueName,
     }).pipe(
@@ -46,13 +43,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
       yield* Effect.logDebug(`Creating FIFO queue ${queueName}...`);
       const result = yield* sqs.make("create_queue", {
         QueueName: queueName,
-        Attributes: {
-          FifoQueue: "true",
-          ContentBasedDeduplication: String(contentBasedDeduplication),
-          VisibilityTimeout: String(visibilityTimeout),
-          MessageRetentionPeriod: String(retentionPeriod),
-          DelaySeconds: String(delay),
-        },
+        Attributes: attributes,
         ...(tags ? { tags } : {}),
       });
       queueUrl = result.QueueUrl!;
@@ -60,18 +51,11 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
       yield* Effect.logDebug(`FIFO queue ${queueName} already exists`);
       queueUrl = existingUrl;
 
-      // Update attributes if needed
       yield* sqs.make("set_queue_attributes", {
         QueueUrl: queueUrl,
-        Attributes: {
-          ContentBasedDeduplication: String(contentBasedDeduplication),
-          VisibilityTimeout: String(visibilityTimeout),
-          MessageRetentionPeriod: String(retentionPeriod),
-          DelaySeconds: String(delay),
-        },
+        Attributes: attributes,
       });
 
-      // Sync tags
       if (tags) {
         yield* sqs.make("tag_queue", {
           QueueUrl: queueUrl,
@@ -90,7 +74,52 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
       return yield* Effect.fail(new Error(`Could not resolve ARN for queue ${queueName}`));
     }
 
-    return { queueUrl, queueArn } satisfies EnsureFifoQueueResult;
+    return { queueUrl, queueArn };
+  });
+
+export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
+  Effect.gen(function* () {
+    const {
+      name,
+      visibilityTimeout = 30,
+      retentionPeriod = 345600,
+      delay = 0,
+      contentBasedDeduplication = true,
+      maxReceiveCount = 3,
+      tags
+    } = input;
+
+    // 1. Create DLQ first (needed for RedrivePolicy)
+    const dlqName = `${name}-dlq.fifo`;
+    const { queueUrl: dlqUrl, queueArn: dlqArn } = yield* ensureSingleFifoQueue({
+      queueName: dlqName,
+      attributes: {
+        FifoQueue: "true",
+        ContentBasedDeduplication: String(contentBasedDeduplication),
+        MessageRetentionPeriod: String(retentionPeriod),
+      },
+      tags,
+    });
+
+    // 2. Create main queue with RedrivePolicy pointing to DLQ
+    const queueName = `${name}.fifo`;
+    const { queueUrl, queueArn } = yield* ensureSingleFifoQueue({
+      queueName,
+      attributes: {
+        FifoQueue: "true",
+        ContentBasedDeduplication: String(contentBasedDeduplication),
+        VisibilityTimeout: String(visibilityTimeout),
+        MessageRetentionPeriod: String(retentionPeriod),
+        DelaySeconds: String(delay),
+        RedrivePolicy: JSON.stringify({
+          deadLetterTargetArn: dlqArn,
+          maxReceiveCount,
+        }),
+      },
+      tags,
+    });
+
+    return { queueUrl, queueArn, dlqUrl, dlqArn } satisfies EnsureFifoQueueResult;
   });
 
 export type EnsureSqsEventSourceMappingInput = {
@@ -137,10 +166,8 @@ export const ensureSqsEventSourceMapping = (input: EnsureSqsEventSourceMappingIn
     return result.UUID!;
   });
 
-export const deleteFifoQueue = (queueName: string) =>
+const deleteSingleQueue = (name: string) =>
   Effect.gen(function* () {
-    const name = queueName.endsWith(".fifo") ? queueName : `${queueName}.fifo`;
-
     yield* Effect.logDebug(`Deleting SQS queue: ${name}`);
 
     const urlResult = yield* sqs.make("get_queue_url", {
@@ -160,4 +187,14 @@ export const deleteFifoQueue = (queueName: string) =>
         QueueUrl: urlResult.QueueUrl,
       });
     }
+  });
+
+export const deleteFifoQueue = (queueName: string) =>
+  Effect.gen(function* () {
+    const baseName = queueName.endsWith(".fifo") ? queueName.slice(0, -5) : queueName;
+
+    // Delete main queue first (must remove RedrivePolicy consumer before deleting DLQ)
+    yield* deleteSingleQueue(`${baseName}.fifo`);
+    // Delete associated DLQ
+    yield* deleteSingleQueue(`${baseName}-dlq.fifo`);
   });

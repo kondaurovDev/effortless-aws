@@ -49,6 +49,8 @@ export type FifoQueueConfig = {
   delay?: Duration;
   /** Enable content-based deduplication (default: true) */
   contentBasedDeduplication?: boolean;
+  /** Max number of receives before a message is sent to the dead-letter queue (default: 3) */
+  maxReceiveCount?: number;
 };
 
 /**

@@ -20,6 +20,8 @@ export type DeployFifoQueueResult = {
   bundleSize?: number;
   queueUrl: string;
   queueArn: string;
+  dlqUrl: string;
+  dlqArn: string;
 };
 
 type DeployFifoQueueFunctionInput = {
@@ -50,12 +52,13 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
     yield* Effect.logDebug("Creating SQS FIFO queue...");
     const queueName = `${input.project}-${tagCtx.stage}-${handlerName}`;
     const timeout = toSeconds(config.lambda?.timeout ?? 30);
-    const { queueUrl, queueArn } = yield* ensureFifoQueue({
+    const { queueUrl, queueArn, dlqUrl, dlqArn } = yield* ensureFifoQueue({
       name: queueName,
       visibilityTimeout: Math.max(config.visibilityTimeout ? toSeconds(config.visibilityTimeout) : timeout, timeout),
       retentionPeriod: config.retentionPeriod ? toSeconds(config.retentionPeriod) : undefined,
       delay: config.delay ? toSeconds(config.delay) : undefined,
       contentBasedDeduplication: config.contentBasedDeduplication ?? true,
+      maxReceiveCount: config.maxReceiveCount,
       tags: makeTags(tagCtx, "sqs"),
     });
 
@@ -101,5 +104,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       bundleSize,
       queueUrl,
       queueArn,
+      dlqUrl,
+      dlqArn,
     };
   });
