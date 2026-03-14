@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.27.0
+
+### Minor Changes
+
+- [`d33c492`](https://github.com/kondaurovDev/effortless-aws/commit/d33c49257e06491dce7e37a2498c5870c53fd271) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add automatic dead-letter queue (DLQ) for FIFO queues. A `*-dlq.fifo` queue is now created alongside every FIFO queue with a configurable `maxReceiveCount` (default: 3).
+
 ## 0.26.0
 
 ### Minor Changes
