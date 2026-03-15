@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.27.1
+
+### Patch Changes
+
+- [`008216e`](https://github.com/kondaurovDev/effortless-aws/commit/008216e582be37a587a8350ce39a5c68774c26c5) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Enforce leading slash in `defineApi` route keys and `basePath` via template literal types, normalize double slashes in route matching
+
 ## 0.27.0
 
 ### Minor Changes
