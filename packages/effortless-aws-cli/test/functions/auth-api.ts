@@ -19,9 +19,9 @@ export const api = defineApi({
   },
   post: async ({ req, auth }) => {
     if (req.path === "/login") {
-      return auth.grant({ userId: "u123", role: "admin" });
+      return auth.createSession({ userId: "u123", role: "admin" });
     }
-    return auth.revoke();
+    return auth.clearSession();
   },
 });
 
