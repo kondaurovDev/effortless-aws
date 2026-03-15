@@ -1,5 +1,16 @@
 # @effortless-aws/cli
 
+## 0.11.0
+
+### Minor Changes
+
+- [`85f0fdf`](https://github.com/kondaurovDev/effortless-aws/commit/85f0fdf2ee1d0e194a0df023c935902f3f949ca7) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Refactor auth: rename `CookieAuth` → `Auth`, `grant()` → `createSession()`, `revoke()` → `clearSession()`. Add automatic 401 gate for non-public paths. Add `apiToken` option to `defineApi` for Bearer/API key authentication with deps access and optional caching.
+
+### Patch Changes
+
+- Updated dependencies [[`85f0fdf`](https://github.com/kondaurovDev/effortless-aws/commit/85f0fdf2ee1d0e194a0df023c935902f3f949ca7)]:
+  - effortless-aws@0.28.0
+
 ## 0.10.1
 
 ### Patch Changes
