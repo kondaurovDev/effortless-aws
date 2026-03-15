@@ -1,5 +1,14 @@
 # @effortless-aws/cli
 
+## 0.10.1
+
+### Patch Changes
+
+- [`2f8a706`](https://github.com/kondaurovDev/effortless-aws/commit/2f8a7069b794437daa27531dcde67894e2c6d35c) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Validate `config set` key against handler declarations and tag SSM parameters with standard effortless tags
+
+- Updated dependencies [[`008216e`](https://github.com/kondaurovDev/effortless-aws/commit/008216e582be37a587a8350ce39a5c68774c26c5)]:
+  - effortless-aws@0.27.1
+
 ## 0.10.0
 
 ### Minor Changes
