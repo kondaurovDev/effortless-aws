@@ -11,13 +11,13 @@ const buildCookie = (data: Record<string, unknown>, secret = SECRET) => {
   return `${payload}.${sig}`;
 };
 
-describe("auth helpers", () => {
+describe("auth helpers", async () => {
 
-  describe("grant (no session data)", () => {
-    it("should return 200 with Set-Cookie header", () => {
+  describe("createSession (no session data)", async () => {
+    it("should return 200 with Set-Cookie header", async () => {
       const rt = createAuthRuntime(SECRET, 604800);
-      const auth = rt.forRequest(undefined);
-      const result = auth.grant();
+      const auth = await rt.forRequest(undefined, undefined);
+      const result = auth.createSession();
 
       expect(result.status).toBe(200);
       expect(result.body).toEqual({ ok: true });
@@ -28,10 +28,10 @@ describe("auth helpers", () => {
       expect(result.headers["set-cookie"]).toContain("Max-Age=604800");
     });
 
-    it("should produce a valid HMAC-signed base64url payload cookie", () => {
+    it("should produce a valid HMAC-signed base64url payload cookie", async () => {
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = rt.forRequest(undefined);
-      const result = auth.grant();
+      const auth = await rt.forRequest(undefined, undefined);
+      const result = auth.createSession();
 
       const cookie = result.headers["set-cookie"]!;
       const match = cookie.match(new RegExp(`${AUTH_COOKIE_NAME}=([^;]+)`));
@@ -52,20 +52,20 @@ describe("auth helpers", () => {
       expect(data.exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
     });
 
-    it("should respect custom expiresIn", () => {
+    it("should respect custom expiresIn", async () => {
       const rt = createAuthRuntime(SECRET, 604800);
-      const auth = rt.forRequest(undefined);
-      const result = auth.grant({ expiresIn: "1h" });
+      const auth = await rt.forRequest(undefined, undefined);
+      const result = auth.createSession({ expiresIn: "1h" });
 
       expect(result.headers["set-cookie"]).toContain("Max-Age=3600");
     });
   });
 
-  describe("grant (with session data)", () => {
-    it("should encode custom data in payload", () => {
+  describe("createSession (with session data)", async () => {
+    it("should encode custom data in payload", async () => {
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = rt.forRequest(undefined) as AuthHelpers<{ userId: string; role: string }>;
-      const result = auth.grant({ userId: "u123", role: "admin" });
+      const auth = await rt.forRequest(undefined, undefined) as AuthHelpers<{ userId: string; role: string }>;
+      const result = auth.createSession({ userId: "u123", role: "admin" });
 
       const cookie = result.headers["set-cookie"]!;
       const match = cookie.match(new RegExp(`${AUTH_COOKIE_NAME}=([^;]+)`))!;
@@ -77,69 +77,125 @@ describe("auth helpers", () => {
       expect(data.exp).toBeGreaterThan(Math.floor(Date.now() / 1000));
     });
 
-    it("should accept expiresIn as second arg when data is provided", () => {
+    it("should accept expiresIn as second arg when data is provided", async () => {
       const rt = createAuthRuntime(SECRET, 604800);
-      const auth = rt.forRequest(undefined) as AuthHelpers<{ userId: string }>;
-      const result = auth.grant({ userId: "u1" }, { expiresIn: "2h" });
+      const auth = await rt.forRequest(undefined, undefined) as AuthHelpers<{ userId: string }>;
+      const result = auth.createSession({ userId: "u1" }, { expiresIn: "2h" });
 
       expect(result.headers["set-cookie"]).toContain("Max-Age=7200");
     });
   });
 
-  describe("session", () => {
-    it("should decode session from valid cookie", () => {
+  describe("session (cookie)", async () => {
+    it("should decode session from valid cookie", async () => {
       const exp = Math.floor(Date.now() / 1000) + 3600;
       const cookie = buildCookie({ exp, userId: "u123", role: "admin" });
 
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = rt.forRequest(cookie);
+      const auth = await rt.forRequest(cookie, undefined);
 
       expect(auth.session).toEqual({ userId: "u123", role: "admin" });
     });
 
-    it("should return undefined for expired cookie", () => {
+    it("should return undefined for expired cookie", async () => {
       const exp = Math.floor(Date.now() / 1000) - 100;
       const cookie = buildCookie({ exp, userId: "u123" });
 
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = rt.forRequest(cookie);
+      const auth = await rt.forRequest(cookie, undefined);
 
       expect(auth.session).toBeUndefined();
     });
 
-    it("should return undefined for invalid signature", () => {
+    it("should return undefined for invalid signature", async () => {
       const exp = Math.floor(Date.now() / 1000) + 3600;
       const cookie = buildCookie({ exp, userId: "u123" }, "wrong-secret");
 
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = rt.forRequest(cookie);
+      const auth = await rt.forRequest(cookie, undefined);
 
       expect(auth.session).toBeUndefined();
     });
 
-    it("should return undefined when no cookie provided", () => {
+    it("should return undefined when no cookie provided", async () => {
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = rt.forRequest(undefined);
+      const auth = await rt.forRequest(undefined, undefined);
 
       expect(auth.session).toBeUndefined();
     });
 
-    it("should return undefined for cookie with only exp (no custom data)", () => {
+    it("should return undefined for cookie with only exp (no custom data)", async () => {
       const exp = Math.floor(Date.now() / 1000) + 3600;
       const cookie = buildCookie({ exp });
 
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = rt.forRequest(cookie);
+      const auth = await rt.forRequest(cookie, undefined);
 
       expect(auth.session).toBeUndefined();
     });
   });
 
-  describe("revoke", () => {
-    it("should return 200 with Max-Age=0 to clear cookie", () => {
+  describe("session (apiToken)", async () => {
+    it("should resolve session from sync token verify", async () => {
+      const verify = (token: string) => token === "valid" ? { userId: "t1" } : null;
+      const rt = createAuthRuntime(SECRET, 3600, verify);
+      const auth = await rt.forRequest(undefined, "Bearer valid");
+
+      expect(auth.session).toEqual({ userId: "t1" });
+    });
+
+    it("should resolve session from async token verify", async () => {
+      const verify = async (token: string) => token === "valid" ? { userId: "t1" } : null;
+      const rt = createAuthRuntime(SECRET, 3600, verify);
+      const auth = await await rt.forRequest(undefined, "Bearer valid");
+
+      expect(auth.session).toEqual({ userId: "t1" });
+    });
+
+    it("should return null session for invalid token", async () => {
+      const verify = (token: string) => token === "valid" ? { userId: "t1" } : null;
+      const rt = createAuthRuntime(SECRET, 3600, verify);
+      const auth = await rt.forRequest(undefined, "Bearer wrong");
+
+      expect(auth.session).toBeNull();
+    });
+
+    it("should prioritize apiToken over cookie", async () => {
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const cookie = buildCookie({ exp, userId: "cookie-user" });
+      const verify = (token: string) => token === "valid" ? { userId: "token-user" } : null;
+
+      const rt = createAuthRuntime(SECRET, 3600, verify);
+      const auth = await rt.forRequest(cookie, "Bearer valid");
+
+      expect(auth.session).toEqual({ userId: "token-user" });
+    });
+
+    it("should fall back to cookie when no auth header", async () => {
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const cookie = buildCookie({ exp, userId: "cookie-user" });
+      const verify = (_token: string) => ({ userId: "token-user" });
+
+      const rt = createAuthRuntime(SECRET, 3600, verify);
+      const auth = await rt.forRequest(cookie, undefined);
+
+      expect(auth.session).toEqual({ userId: "cookie-user" });
+    });
+
+    it("should use custom header name without stripping Bearer prefix", async () => {
+      const verify = (value: string) => ({ apiKey: value });
+      const rt = createAuthRuntime(SECRET, 3600, verify, "x-api-key");
+      const auth = await rt.forRequest(undefined, "my-raw-key");
+
+      expect(auth.session).toEqual({ apiKey: "my-raw-key" });
+    });
+  });
+
+  describe("clearSession", async () => {
+    it("should return 200 with Max-Age=0 to clear cookie", async () => {
       const rt = createAuthRuntime(SECRET, 604800);
-      const auth = rt.forRequest(undefined);
-      const result = auth.revoke();
+      const auth = await rt.forRequest(undefined, undefined);
+      const result = auth.clearSession();
 
       expect(result.status).toBe(200);
       expect(result.body).toEqual({ ok: true });

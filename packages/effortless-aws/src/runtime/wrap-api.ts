@@ -102,6 +102,18 @@ const notFound = () => ({
   body: JSON.stringify({ error: "Not Found" }),
 });
 
+const unauthorized = () => ({
+  statusCode: 401,
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ error: "Unauthorized" }),
+});
+
+/** Check if a path matches any public pattern. Supports trailing `*` wildcard. */
+const isPublicPath = (path: string, patterns: string[]): boolean =>
+  patterns.some(p =>
+    p.endsWith("*") ? path.startsWith(p.slice(0, -1)) : path === p,
+  );
+
 // ============ Wrapper ============
 
 export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
@@ -150,8 +162,23 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
         if (match) authCookie = match[1];
       }
 
+      // Extract auth header (Authorization or custom header from apiToken config)
+      const authHeaderName = handler.apiToken?.header ?? "authorization";
+      const authHeader = req.headers[authHeaderName] ?? req.headers[authHeaderName.toLowerCase()] ?? undefined;
+
       // Resolve shared args (ctx, deps, config, files)
-      sharedArgs = await rt.commonArgs(authCookie);
+      sharedArgs = await rt.commonArgs(authCookie, authHeader);
+
+      // Auth gate: reject unauthenticated requests to non-public paths
+      if (handler.auth && sharedArgs.auth) {
+        const auth = sharedArgs.auth as { session: unknown };
+        const publicPaths = handler.auth.public ?? [];
+        const routePath = req.path.replace(new RegExp(`^${basePath}`), "") || "/";
+        if (!auth.session && !isPublicPath(routePath, publicPaths) && !isPublicPath(req.path, publicPaths)) {
+          rt.logExecution(startTime, input, { status: 401 });
+          return unauthorized();
+        }
+      }
 
       // GET / HEAD routing
       if (req.method === "GET" || req.method === "HEAD") {

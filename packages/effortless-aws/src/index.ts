@@ -34,4 +34,4 @@ export type { StaticFiles, ResponseStream } from "./handlers/shared"
 
 // Shared types
 export type { LambdaConfig, LambdaWithPermissions, LogLevel, Permission, AnySecretRef, AnyParamRef } from "./handlers/handler-options"
-export type { CookieAuth, CookieAuthConfig, AuthHelpers } from "./handlers/auth"
+export type { Auth, AuthConfig, AuthHelpers, ApiTokenStrategy } from "./handlers/auth"

@@ -8,8 +8,8 @@ export const AUTH_COOKIE_NAME = "__eff_session";
 
 // ============ Auth config ============
 
-export type CookieAuthConfig<_T = undefined> = {
-  /** Path to redirect unauthenticated users to */
+export type AuthConfig<_T = undefined> = {
+  /** Path to redirect unauthenticated users to (used by static sites). */
   loginPath: string;
   /** Paths that don't require authentication. Supports trailing `*` wildcard. */
   public?: string[];
@@ -18,52 +18,68 @@ export type CookieAuthConfig<_T = undefined> = {
 };
 
 /**
- * Branded cookie auth object returned by `defineAuth()`.
+ * Branded auth object returned by `defineAuth()`.
  * Pass to `defineApi({ auth })` and `defineStaticSite({ auth })`.
  */
-export type CookieAuth<T = undefined> = CookieAuthConfig<T> & {
-  readonly __brand: "effortless-cookie-auth";
+export type Auth<T = undefined> = AuthConfig<T> & {
+  readonly __brand: "effortless-auth";
   /** @internal phantom type marker for session data */
   readonly __session?: T;
 };
 
-// ============ auth namespace ============
+// ============ API Token strategy (used by defineApi) ============
+
+/** API token authentication strategy. Verifies tokens from HTTP headers (e.g. Authorization: Bearer). */
+export type ApiTokenStrategy<T, D = undefined> = {
+  /** HTTP header to read the token from. Default: "authorization" (strips "Bearer " prefix). */
+  header?: string;
+  /** Verify the token value and return session data, or null if invalid. */
+  verify: [D] extends [undefined]
+    ? (value: string) => T | null | Promise<T | null>
+    : (value: string, ctx: { deps: D }) => T | null | Promise<T | null>;
+  /** Cache verified token results for this duration. Avoids calling verify on every request. */
+  cacheTtl?: Duration;
+};
+
+// ============ defineAuth ============
 
 /**
- * Define cookie-based authentication using HMAC-signed tokens.
+ * Define authentication for API handlers and static sites.
  *
- * - Middleware (Lambda@Edge) verifies cookie signatures without external calls
- * - API handler gets `auth.grant()` / `auth.revoke()` / `auth.session` helpers
- * - Secret is auto-generated and stored in SSM Parameter Store
+ * Session-based auth uses HMAC-signed cookies (auto-managed by the framework).
  *
- * @typeParam T - Session data type. When provided, `grant(data)` requires typed payload
+ * - Lambda@Edge middleware verifies cookie signatures for static sites
+ * - API handler gets `auth.createSession()` / `auth.clearSession()` / `auth.session` helpers
+ * - HMAC secret is auto-generated and stored in SSM Parameter Store
+ *
+ * @typeParam T - Session data type. When provided, `createSession(data)` requires typed payload
  *   and `auth.session` is typed as `T` in handler args.
  *
  * @example
  * ```typescript
  * type Session = { userId: string; role: "admin" | "user" };
  *
- * const protect = defineAuth<Session>({
+ * const auth = defineAuth<Session>({
  *   loginPath: '/login',
- *   public: ['/login', '/assets/*'],
+ *   public: ['/login', '/api/login'],
  *   expiresIn: '7d',
  * })
  *
- * export const api = defineApi({ auth: protect, ... })
- * export const webapp = defineStaticSite({ auth: protect, ... })
+ * export const api = defineApi({ auth, ... })
+ * export const webapp = defineStaticSite({ auth, ... })
  * ```
  */
-export const defineAuth = <T = undefined>(options: CookieAuthConfig<T>): CookieAuth<T> => ({
-  __brand: "effortless-cookie-auth",
+export const defineAuth = <T = undefined>(options: AuthConfig<T>): Auth<T> => ({
+  __brand: "effortless-auth",
   ...options,
-}) as CookieAuth<T>;
+}) as Auth<T>;
 
 // ============ Runtime helpers (API Lambda) ============
 
-/** Grant options for creating a session */
-type GrantOptions = { expiresIn?: Duration };
-/** Grant response with Set-Cookie header */
-type GrantResponse = { status: 200; body: { ok: true }; headers: Record<string, string> };
+/** Options for creating a session */
+type SessionOptions = { expiresIn?: Duration };
+/** Session response with Set-Cookie header */
+type SessionResponse = { status: 200; body: { ok: true }; headers: Record<string, string> };
 
 /**
  * Auth helpers injected into API handler callback args when `auth` is configured.
@@ -71,25 +87,25 @@ type GrantResponse = { status: 200; body: { ok: true }; headers: Record<string, 
  */
 export type AuthHelpers<T = undefined> =
   { /** Clear the session cookie. */
-    revoke(): { status: 200; body: { ok: true }; headers: Record<string, string> };
-    /** The current session data (decoded from cookie). Undefined if no valid session. */
+    clearSession(): { status: 200; body: { ok: true }; headers: Record<string, string> };
+    /** The current session data (from cookie or API token). Undefined if no valid session. */
     session: T extends undefined ? undefined : T | undefined;
   }
   & ([T] extends [undefined]
-    ? { /** Create a signed session cookie. */ grant(options?: GrantOptions): GrantResponse }
-    : { /** Create a signed session cookie with typed data. */ grant(data: T, options?: GrantOptions): GrantResponse });
+    ? { /** Create a signed session cookie. */ createSession(options?: SessionOptions): SessionResponse }
+    : { /** Create a signed session cookie with typed data. */ createSession(data: T, options?: SessionOptions): SessionResponse });
 
 // ============ Cookie format ============
 // Payload: base64url(JSON.stringify({ exp, ...data }))
 // Cookie value: {payload}.{hmac-sha256(payload, secret)}
 
 /**
- * Auth runtime created once on cold start. Holds the HMAC key.
- * Call `forRequest(cookieValue)` per request to get typed helpers with decoded session.
+ * Auth runtime created once on cold start. Holds the HMAC key and optional token verifier.
+ * Call `forRequest(cookieValue, authHeader, deps)` per request to get typed helpers.
  * @internal
  */
 export type AuthRuntime = {
-  forRequest(cookieValue: string | undefined): AuthHelpers<any>;
+  forRequest(cookieValue: string | undefined, authHeader: string | undefined, deps?: Record<string, unknown>): Promise<AuthHelpers<any>>;
 };
 
 /**
@@ -97,7 +113,18 @@ export type AuthRuntime = {
  * Called once on cold start with the HMAC secret from SSM.
  * @internal
  */
-export const createAuthRuntime = (secret: string, defaultExpiresIn: number): AuthRuntime => {
+export const createAuthRuntime = (
+  secret: string,
+  defaultExpiresIn: number,
+  apiTokenVerify?: (value: string, ctx: { deps: unknown }) => unknown | Promise<unknown>,
+  apiTokenHeader?: string,
+  apiTokenCacheTtlSeconds?: number,
+): AuthRuntime => {
+  // Token verification cache: token → { session, expiresAt }
+  const tokenCache = apiTokenCacheTtlSeconds
+    ? new Map<string, { session: unknown; expiresAt: number }>()
+    : undefined;
+
   const sign = (payload: string): string =>
     crypto.createHmac("sha256", secret).update(payload).digest("base64url");
 
@@ -119,36 +146,69 @@ export const createAuthRuntime = (secret: string, defaultExpiresIn: number): Aut
     } catch { return undefined; }
   };
 
-  return {
-    forRequest(cookieValue) {
+  const extractTokenValue = (headerValue: string): string => {
+    const isDefaultHeader = !apiTokenHeader || apiTokenHeader.toLowerCase() === "authorization";
+    if (isDefaultHeader && headerValue.toLowerCase().startsWith("bearer ")) {
+      return headerValue.slice(7);
+    }
+    return headerValue;
+  };
+
+  const buildHelpers = (sessionData: unknown): AuthHelpers<any> => ({
+    createSession(...args: unknown[]) {
+      const hasData = args.length > 0 && (typeof args[0] === "object" && args[0] !== null && !("expiresIn" in args[0]));
+      const data = hasData ? args[0] as Record<string, unknown> : undefined;
+      const options = (hasData ? args[1] : args[0]) as SessionOptions | undefined;
+      const seconds = options?.expiresIn ? toSeconds(options.expiresIn) : defaultExpiresIn;
+      const exp = Math.floor(Date.now() / 1000) + seconds;
+      const payload = Buffer.from(JSON.stringify({ exp, ...data }), "utf-8").toString("base64url");
+      const sig = sign(payload);
       return {
-        grant(...args: unknown[]) {
-          const hasData = args.length > 0 && (typeof args[0] === "object" && args[0] !== null && !("expiresIn" in args[0]));
-          const data = hasData ? args[0] as Record<string, unknown> : undefined;
-          const options = (hasData ? args[1] : args[0]) as GrantOptions | undefined;
-          const seconds = options?.expiresIn ? toSeconds(options.expiresIn) : defaultExpiresIn;
-          const exp = Math.floor(Date.now() / 1000) + seconds;
-          const payload = Buffer.from(JSON.stringify({ exp, ...data }), "utf-8").toString("base64url");
-          const sig = sign(payload);
-          return {
-            status: 200 as const,
-            body: { ok: true as const },
-            headers: {
-              "set-cookie": `${cookieBase}${payload}.${sig}${cookieAttrs}; Max-Age=${seconds}`,
-            },
-          };
+        status: 200 as const,
+        body: { ok: true as const },
+        headers: {
+          "set-cookie": `${cookieBase}${payload}.${sig}${cookieAttrs}; Max-Age=${seconds}`,
         },
-        revoke() {
-          return {
-            status: 200 as const,
-            body: { ok: true as const },
-            headers: {
-              "set-cookie": `${cookieBase}${cookieAttrs}; Max-Age=0`,
-            },
-          };
+      };
+    },
+    clearSession() {
+      return {
+        status: 200 as const,
+        body: { ok: true as const },
+        headers: {
+          "set-cookie": `${cookieBase}${cookieAttrs}; Max-Age=0`,
         },
-        session: decodeSession(cookieValue),
-      } as AuthHelpers<any>;
+      };
+    },
+    session: sessionData,
+  } as AuthHelpers<any>);
+
+  return {
+    async forRequest(cookieValue, authHeader, deps) {
+      // API token takes priority over cookie
+      if (authHeader && apiTokenVerify) {
+        const tokenValue = extractTokenValue(authHeader);
+
+        // Check cache
+        if (tokenCache) {
+          const cached = tokenCache.get(tokenValue);
+          if (cached && cached.expiresAt > Date.now()) {
+            return buildHelpers(cached.session);
+          }
+        }
+
+        const session = await apiTokenVerify(tokenValue, { deps });
+
+        // Store in cache
+        if (tokenCache && apiTokenCacheTtlSeconds) {
+          tokenCache.set(tokenValue, { session, expiresAt: Date.now() + apiTokenCacheTtlSeconds * 1000 });
+        }
+
+        return buildHelpers(session);
+      }
+
+      // Fall back to cookie-based session
+      return buildHelpers(decodeSession(cookieValue));
     },
   };
 };

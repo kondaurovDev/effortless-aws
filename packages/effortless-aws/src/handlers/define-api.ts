@@ -2,11 +2,11 @@ import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handle
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles, ResponseStream } from "./shared";
 import type { HttpRequest, HttpResponse } from "./shared";
-import type { CookieAuth, AuthHelpers } from "./auth";
+import type { Auth, AuthHelpers, ApiTokenStrategy } from "./auth";
 import type { HandlerArgs } from "./handler-args";
 
-/** Extract session type T from CookieAuth<T> */
-type SessionOf<A> = A extends CookieAuth<infer T> ? T : undefined;
+/** Extract session type T from Auth<T> */
+type SessionOf<A> = A extends Auth<infer T> ? T : undefined;
 
 /** GET route handler — no schema, no data */
 export type ApiGetHandlerFn<
@@ -15,7 +15,7 @@ export type ApiGetHandlerFn<
   P = undefined,
   S extends string[] | undefined = undefined,
   ST extends boolean | undefined = undefined,
-  A extends CookieAuth<any> | undefined = undefined
+  A extends Auth<any> | undefined = undefined
 > =
   (args: { req: HttpRequest }
     & HandlerArgs<C, D, P, S>
@@ -31,7 +31,7 @@ export type ApiPostHandlerFn<
   P = undefined,
   S extends string[] | undefined = undefined,
   ST extends boolean | undefined = undefined,
-  A extends CookieAuth<any> | undefined = undefined
+  A extends Auth<any> | undefined = undefined
 > =
   (args: { req: HttpRequest }
     & ([T] extends [undefined] ? {} : { data: T })
@@ -71,7 +71,7 @@ export type DefineApiOptions<
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined,
   ST extends boolean | undefined = undefined,
-  A extends CookieAuth<any> | undefined = undefined
+  A extends Auth<any> | undefined = undefined
 > = {
   /** Lambda function settings (memory, timeout, permissions, etc.) */
   lambda?: LambdaWithPermissions;
@@ -79,8 +79,10 @@ export type DefineApiOptions<
   basePath: `/${string}`;
   /** Enable response streaming. When true, routes receive a `stream` arg for SSE. Routes can still return HttpResponse normally. */
   stream?: ST;
-  /** Cookie-based authentication. Injects `auth` helpers (grant/revoke) into handler args. */
+  /** Session-based authentication. Injects `auth` helpers (createSession/clearSession/session) into handler args. */
   auth?: A;
+  /** API token authentication for external clients (Bearer tokens, API keys). Has access to deps. */
+  apiToken?: ApiTokenStrategy<SessionOf<A>, [D] extends [undefined] ? undefined : ResolveDeps<D>>;
   /**
    * Factory function to initialize shared state.
    * Called once on cold start, result is cached and reused across invocations.
@@ -126,7 +128,8 @@ export type ApiHandler<
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
   readonly static?: string[];
-  readonly auth?: CookieAuth;
+  readonly auth?: Auth;
+  readonly apiToken?: ApiTokenStrategy<any, any>;
   readonly get?: Record<`/${string}`, (...args: any[]) => any>;
   readonly post?: (...args: any[]) => any;
 };
@@ -172,11 +175,11 @@ export const defineApi = <
   P extends Record<string, AnyParamRef> | undefined = undefined,
   S extends string[] | undefined = undefined,
   ST extends boolean | undefined = undefined,
-  A extends CookieAuth<any> | undefined = undefined
+  A extends Auth<any> | undefined = undefined
 >(
   options: DefineApiOptions<T, C, D, P, S, ST, A>
 ): ApiHandler<T, C> => {
-  const { get, post, schema, onError, onAfterInvoke, setup, deps, config, auth: authConfig, static: staticFiles, ...__spec } = options;
+  const { get, post, schema, onError, onAfterInvoke, setup, deps, config, auth: authConfig, apiToken, static: staticFiles, ...__spec } = options;
   return {
     __brand: "effortless-api",
     __spec,
@@ -190,5 +193,6 @@ export const defineApi = <
     ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
     ...(authConfig ? { auth: authConfig } : {}),
+    ...(apiToken ? { apiToken } : {}),
   } as ApiHandler<T, C>;
 };

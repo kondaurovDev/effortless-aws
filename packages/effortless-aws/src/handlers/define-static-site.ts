@@ -1,4 +1,4 @@
-import type { CookieAuth } from "./auth";
+import type { Auth } from "./auth";
 
 /** Any branded handler that deploys to API Gateway (HttpHandler, ApiHandler, etc.) */
 type AnyRoutableHandler = { readonly __brand: string };
@@ -67,7 +67,7 @@ export type StaticSiteConfig = {
   /** Lambda@Edge middleware that runs before serving pages. Use for auth checks, redirects, etc. */
   middleware?: MiddlewareHandler;
   /** Cookie-based authentication. Auto-generates Lambda@Edge middleware that verifies signed cookies. */
-  auth?: CookieAuth<any>;
+  auth?: Auth<any>;
   /** SEO: auto-generate sitemap.xml and robots.txt at deploy time, optionally submit URLs to Google Indexing API */
   seo?: StaticSiteSeo;
 };
