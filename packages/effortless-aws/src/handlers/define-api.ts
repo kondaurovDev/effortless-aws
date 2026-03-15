@@ -53,7 +53,7 @@ export type ApiConfig = {
   /** Lambda function settings (memory, timeout, permissions, etc.) */
   lambda?: LambdaWithPermissions;
   /** Base path prefix for all routes (e.g., "/api") */
-  basePath: string;
+  basePath: `/${string}`;
   /** Enable response streaming. When true, the Lambda Function URL uses RESPONSE_STREAM invoke mode. */
   stream?: boolean;
 };
@@ -76,7 +76,7 @@ export type DefineApiOptions<
   /** Lambda function settings (memory, timeout, permissions, etc.) */
   lambda?: LambdaWithPermissions;
   /** Base path prefix for all routes (e.g., "/api") */
-  basePath: string;
+  basePath: `/${string}`;
   /** Enable response streaming. When true, routes receive a `stream` arg for SSE. Routes can still return HttpResponse normally. */
   stream?: ST;
   /** Cookie-based authentication. Injects `auth` helpers (grant/revoke) into handler args. */
@@ -98,7 +98,7 @@ export type DefineApiOptions<
   onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
 
   /** GET routes — query handlers keyed by relative path (e.g., "/users/{id}") */
-  get?: Record<string, ApiGetHandlerFn<C, D, P, S, ST, A>>;
+  get?: Record<`/${string}`, ApiGetHandlerFn<C, D, P, S, ST, A>>;
 
   /**
    * Schema for POST body validation. Use with discriminated unions:
@@ -127,7 +127,7 @@ export type ApiHandler<
   readonly config?: Record<string, unknown>;
   readonly static?: string[];
   readonly auth?: CookieAuth;
-  readonly get?: Record<string, (...args: any[]) => any>;
+  readonly get?: Record<`/${string}`, (...args: any[]) => any>;
   readonly post?: (...args: any[]) => any;
 };
 

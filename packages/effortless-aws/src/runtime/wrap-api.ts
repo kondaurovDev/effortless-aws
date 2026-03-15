@@ -48,7 +48,7 @@ const buildGetMatchers = (
   basePath: string
 ): RouteMatcher[] =>
   Object.entries(routes).map(([pattern, handler]) => {
-    const fullPattern = basePath + pattern;
+    const fullPattern = (basePath + pattern).replace(/\/\/+/g, "/");
     const paramNames: string[] = [];
     const regexStr = fullPattern.replace(/\{(\w+)\}/g, (_, name) => {
       paramNames.push(name);
