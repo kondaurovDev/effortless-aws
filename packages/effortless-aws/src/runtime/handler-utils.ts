@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import type { LogLevel, Duration } from "../handlers/handler-options";
 import { toSeconds } from "../handlers/handler-options";
-import type { Auth, AuthRuntime } from "../handlers/auth";
+import type { AuthRuntime } from "../handlers/auth";
 import { createAuthRuntime } from "../handlers/auth";
 import { createTableClient } from "./table-client";
 import { createBucketClient } from "./bucket-client";
@@ -14,8 +14,6 @@ export type { LogLevel };
 
 export const ENV_DEP_PREFIX = "EFF_DEP_";
 export const ENV_PARAM_PREFIX = "EFF_PARAM_";
-export const ENV_AUTH_SECRET = "EFF_AUTH_SECRET";
-export const ENV_AUTH_EXPIRES = "EFF_AUTH_EXPIRES";
 
 const LOG_RANK: Record<LogLevel, number> = { error: 0, info: 1, debug: 2 };
 
@@ -111,7 +109,7 @@ export const buildParams = async (
 };
 
 export type HandlerRuntime = {
-  commonArgs(cookieValue?: string, authHeader?: string): Promise<Record<string, unknown>>;
+  commonArgs(cookieValue?: string, authHeader?: string, headers?: Record<string, string | undefined>): Promise<Record<string, unknown>>;
   logExecution(startTime: number, input: unknown, output: unknown): void;
   logError(startTime: number, input: unknown, error: unknown): void;
   patchConsole(): void;
@@ -133,7 +131,7 @@ const staticFiles = {
 };
 
 export const createHandlerRuntime = (
-  handler: { setup?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[]; auth?: Auth; apiToken?: { verify: Function; header?: string; cacheTtl?: unknown } },
+  handler: { setup?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[] },
   handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket" | "api",
   logLevel: LogLevel = "info",
   extraSetupArgs?: () => Record<string, unknown>
@@ -154,20 +152,27 @@ export const createHandlerRuntime = (
     return resolvedParams;
   };
 
-  const getAuthRuntime = async () => {
+  const getAuthRuntime = async (setupCtx?: unknown) => {
     if (resolvedAuthRuntime !== null) return resolvedAuthRuntime;
-    const ssmPath = process.env[ENV_AUTH_SECRET];
-    if (!ssmPath || !handler.auth) { resolvedAuthRuntime = undefined; return undefined; }
-    const values = await getParameters([ssmPath]);
-    const secret = values.get(ssmPath);
-    if (!secret) throw new Error(`Auth secret not found at ${ssmPath}`);
-    const defaultExpires = handler.auth.expiresIn ? toSeconds(handler.auth.expiresIn) : 604800; // 7 days
-    const cacheTtlSeconds = handler.apiToken?.cacheTtl ? toSeconds(handler.apiToken.cacheTtl as Duration) : undefined;
+    // Auth config lives on ctx.auth (returned from setup)
+    const authOpts = setupCtx && typeof setupCtx === "object" && "auth" in setupCtx
+      ? (setupCtx as Record<string, unknown>).auth as { secret?: string; expiresIn?: Duration; apiToken?: { header?: string; verify?: (value: string) => any; cacheTtl?: Duration } } | undefined
+      : undefined;
+    if (!authOpts?.secret) { resolvedAuthRuntime = undefined; return undefined; }
+    const secret = authOpts.secret;
+    resolvedAuthHeaderName = authOpts.apiToken?.header;
+    const defaultExpires = authOpts.expiresIn ? toSeconds(authOpts.expiresIn) : 604800; // 7 days
+    const apiToken = authOpts.apiToken;
+    const cacheTtlSeconds = apiToken?.cacheTtl ? toSeconds(apiToken.cacheTtl as Duration) : undefined;
+    const rawVerify = apiToken?.verify;
+    const wrappedVerify = rawVerify
+      ? (args: { value: string }) => rawVerify(args.value)
+      : undefined;
     resolvedAuthRuntime = createAuthRuntime(
       secret,
       defaultExpires,
-      handler.apiToken?.verify as ((value: string, ctx: { deps: unknown }) => unknown) | undefined,
-      handler.apiToken?.header,
+      wrappedVerify,
+      apiToken?.header,
       cacheTtlSeconds,
     );
     return resolvedAuthRuntime;
@@ -178,7 +183,7 @@ export const createHandlerRuntime = (
     if (handler.setup) {
       const params = await getParams();
       const deps = getDeps();
-      const args: Record<string, unknown> = {};
+      const args: Record<string, unknown> = { enableAuth: (opts: unknown) => opts };
       if (params) args.config = params;
       if (deps) args.deps = deps;
       if (handler.static) args.files = staticFiles;
@@ -188,7 +193,9 @@ export const createHandlerRuntime = (
     return ctx;
   };
 
-  const commonArgs = async (cookieValue?: string, authHeader?: string): Promise<Record<string, unknown>> => {
+  let resolvedAuthHeaderName: string | undefined;
+
+  const commonArgs = async (cookieValue?: string, authHeader?: string, headers?: Record<string, string | undefined>): Promise<Record<string, unknown>> => {
     const args: Record<string, unknown> = {};
     if (handler.setup) args.ctx = await getSetup();
     const deps = getDeps();
@@ -196,9 +203,14 @@ export const createHandlerRuntime = (
     const params = await getParams();
     if (params) args.config = params;
     if (handler.static) args.files = staticFiles;
-    const authRuntime = await getAuthRuntime();
+    const authRuntime = await getAuthRuntime(args.ctx);
     if (authRuntime) {
-      args.auth = await authRuntime.forRequest(cookieValue, authHeader, deps);
+      // For callback auth, resolve the header name from resolved auth options on first call
+      let finalAuthHeader = authHeader;
+      if (finalAuthHeader === undefined && headers && resolvedAuthHeaderName) {
+        finalAuthHeader = headers[resolvedAuthHeaderName] ?? headers[resolvedAuthHeaderName.toLowerCase()] ?? undefined;
+      }
+      args.auth = await authRuntime.forRequest(cookieValue, finalAuthHeader);
     }
     return args;
   };

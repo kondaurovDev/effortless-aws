@@ -1,5 +1,5 @@
 import { unmarshall } from "@aws-sdk/util-dynamodb";
-import type { TableHandler, TableRecord, FailedRecord } from "../handlers/define-table";
+import type { TableHandler, TableRecord } from "../handlers/define-table";
 import type { TableItem } from "../handlers/handler-options";
 import { createTableClient } from "./table-client";
 import { createHandlerRuntime } from "./handler-utils";
@@ -61,23 +61,15 @@ const parseRecords = <T>(rawRecords: DynamoDBStreamRecord[], schema?: (input: un
   return { records, sequenceNumbers };
 };
 
-const collectFailures = (records: TableRecord<any>[], sequenceNumbers: Map<TableRecord<any>, string>): BatchItemFailure[] => {
-  const failures: BatchItemFailure[] = [];
-  for (const record of records) {
-    const seq = sequenceNumbers.get(record);
-    if (seq) failures.push({ itemIdentifier: seq });
-  }
-  return failures;
-};
-
 const ENV_DEP_SELF = "EFF_DEP_SELF";
 
 export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
-  if (!handler.onRecord && !handler.onBatch) {
-    throw new Error("wrapTableStream requires a handler with onRecord or onBatch defined");
+  if (!handler.onRecord && !handler.onRecordBatch) {
+    throw new Error("wrapTableStream requires a handler with onRecord or onRecordBatch defined");
   }
 
   const tagField = handler.__spec.tagField ?? "tag";
+  const concurrency = handler.__spec.concurrency ?? 1;
 
   let selfClient: ReturnType<typeof createTableClient> | null = null;
   const getSelfClient = () => {
@@ -98,13 +90,16 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
   return async (event: DynamoDBStreamEvent) => {
     const startTime = Date.now();
     rt.patchConsole();
-    let shared: (Awaited<ReturnType<typeof rt.commonArgs>> & { table: ReturnType<typeof getSelfClient> }) | undefined;
+    let ctxProps: Record<string, unknown> = {};
 
     try {
       const rawRecords = event.Records ?? [];
       const input = { recordCount: rawRecords.length };
 
-      shared = { ...await rt.commonArgs(), table: getSelfClient() };
+      const common = await rt.commonArgs();
+      const ctx = common.ctx;
+      ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
+      const shared = { ...ctxProps };
 
       let records: TableRecord<T>[];
       let sequenceNumbers: Map<TableRecord<T>, string>;
@@ -117,42 +112,48 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
       }
 
       const batchItemFailures: BatchItemFailure[] = [];
+      const frozenBatch = Object.freeze(records);
 
-      if (handler.onBatch) {
+      if (handler.onRecordBatch) {
         try {
-          await (handler.onBatch as any)({ records, ...shared });
+          const result = await (handler.onRecordBatch as any)({ records: frozenBatch, ...shared });
+          if (result?.failures) {
+            for (const seq of result.failures) {
+              batchItemFailures.push({ itemIdentifier: seq });
+            }
+          }
         } catch (error) {
           handleError({ error, ...shared });
-          batchItemFailures.push(...collectFailures(records, sequenceNumbers));
-        }
-      } else {
-        // Per-record mode
-        const results: any[] = [];
-        const failures: FailedRecord<T>[] = [];
-        const onRecord = handler.onRecord as any;
-
-        for (const record of records) {
-          try {
-            const result = await onRecord({ record, ...shared });
-            if (result !== undefined) results.push(result);
-          } catch (error) {
-            handleError({ error, ...shared });
-            failures.push({ record, error });
+          for (const record of records) {
             const seq = sequenceNumbers.get(record);
             if (seq) batchItemFailures.push({ itemIdentifier: seq });
           }
         }
-
-        if (handler.onBatchComplete) {
-          try {
-            await (handler.onBatchComplete as any)({ results, failures, ...shared });
-          } catch (error) {
-            handleError({ error, ...shared });
-            // Mark all non-failed records as failed too
-            for (const record of records) {
+      } else {
+        const onRecord = handler.onRecord as any;
+        if (concurrency <= 1) {
+          for (const record of records) {
+            try {
+              await onRecord({ record, batch: frozenBatch, ...shared });
+            } catch (error) {
+              handleError({ error, ...shared });
               const seq = sequenceNumbers.get(record);
-              if (seq && !batchItemFailures.some(f => f.itemIdentifier === seq)) {
-                batchItemFailures.push({ itemIdentifier: seq });
+              if (seq) batchItemFailures.push({ itemIdentifier: seq });
+            }
+          }
+        } else {
+          for (let i = 0; i < records.length; i += concurrency) {
+            const chunk = records.slice(i, i + concurrency);
+            const results = await Promise.allSettled(
+              chunk.map(record => onRecord({ record, batch: frozenBatch, ...shared }))
+            );
+            for (let j = 0; j < results.length; j++) {
+              const result = results[j]!;
+              const record = chunk[j]!;
+              if (result.status === "rejected") {
+                handleError({ error: (result as PromiseRejectedResult).reason, ...shared });
+                const seq = sequenceNumbers.get(record);
+                if (seq) batchItemFailures.push({ itemIdentifier: seq });
               }
             }
           }
@@ -167,8 +168,8 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
 
       return { batchItemFailures };
     } finally {
-      if (handler.onAfterInvoke && shared) {
-        try { await handler.onAfterInvoke(shared); }
+      if (handler.onAfterInvoke) {
+        try { await handler.onAfterInvoke(ctxProps); }
         catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
       }
       rt.restoreConsole();

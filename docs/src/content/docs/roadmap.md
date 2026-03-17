@@ -265,7 +265,7 @@ The same pattern applies to all resource types:
 
 **Problem**: When queue messages fail processing, they either retry infinitely or disappear. Setting up a Dead Letter Queue manually requires creating a second SQS queue, configuring redrive policy, and wiring a separate Lambda to process failures.
 
-**Approach**: `defineFifoQueue` already supports `onMessage` (per-message, with partial batch failures) and `onBatch` (entire batch). DLQ adds declarative dead-letter configuration on top.
+**Approach**: `defineFifoQueue` already supports `onMessage` (per-message, with partial batch failures) and `onMessageBatch` (entire batch, with optional partial failures via return value). DLQ adds declarative dead-letter configuration on top.
 
 Per-message processing:
 
@@ -292,7 +292,7 @@ export const importProducts = defineFifoQueue({
   batchSize: 10,
   batchWindow: 60,
   dlq: { maxRetries: 3 },
-  onBatch: async ({ messages }) => {
+  onMessageBatch: async ({ messages }) => {
     await db.bulkInsert(messages.map(m => m.body));
   },
 });

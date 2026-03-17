@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest"
 import * as path from "path"
 
-import { extractTableConfigs } from "~cli/build/bundle"
+import { extractTableConfigs } from "./helpers/extract-from-source"
 import { importBundle } from "./helpers/bundle-code"
 
 const projectDir = path.resolve(__dirname, "..")
@@ -27,11 +27,11 @@ describe("defineTable", () => {
 
   describe("config extraction", () => {
 
-    it("should extract config from named export (no pk/sk needed)", () => {
+    it("should extract config from named export (no pk/sk needed)", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable({
+        export const orders = defineTable()({
           streamView: "NEW_AND_OLD_IMAGES",
           batchSize: 50,
           lambda: { memory: 512 },
@@ -41,7 +41,7 @@ describe("defineTable", () => {
         });
       `;
 
-      const configs = extractTableConfigs(source);
+      const configs = await extractTableConfigs(source);
 
       expect(configs).toHaveLength(1);
       const first = configs[0]!;
@@ -55,16 +55,16 @@ describe("defineTable", () => {
       expect((first.config as any).sk).toBeUndefined();
     });
 
-    it("should extract config from default export", () => {
+    it("should extract config from default export", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export default defineTable({
+        export default defineTable()({
           onRecord: async ({ record }) => {}
         });
       `;
 
-      const configs = extractTableConfigs(source);
+      const configs = await extractTableConfigs(source);
 
       expect(configs).toHaveLength(1);
       const first = configs[0]!;
@@ -72,53 +72,33 @@ describe("defineTable", () => {
       expect(first.hasHandler).toBe(true);
     });
 
-    it("should detect resource-only (no handler)", () => {
+    it("should detect resource-only (no handler)", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const users = defineTable({});
+        export const users = defineTable()({});
       `;
 
-      const configs = extractTableConfigs(source);
+      const configs = await extractTableConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.hasHandler).toBe(false);
     });
 
-    it("should detect hasHandler for onBatch", () => {
+    it("should handle multiple exports", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const events = defineTable({
-          name: "events",
-          onBatch: async ({ records }) => {
-            console.log(records);
-          }
-        });
-      `;
-
-      const configs = extractTableConfigs(source);
-
-      expect(configs).toHaveLength(1);
-      expect(configs[0]!.hasHandler).toBe(true);
-    });
-
-    it("should handle multiple exports", () => {
-      const source = `
-        import { defineTable } from "effortless-aws";
-
-        export const orders = defineTable({
-          name: "orders",
+        export const orders = defineTable()({
           onRecord: async ({ record }) => {}
         });
 
-        export const users = defineTable({
-          name: "users",
+        export const users = defineTable()({
           onRecord: async ({ record }) => {}
         });
       `;
 
-      const configs = extractTableConfigs(source);
+      const configs = await extractTableConfigs(source);
 
       expect(configs).toHaveLength(2);
       expect(configs.map(c => c.exportName)).toContain("orders");
@@ -135,8 +115,7 @@ describe("defineTable", () => {
 
         globalThis.__test_onRecord = [];
 
-        export default defineTable({
-          name: "orders",
+        export default defineTable()({
           onRecord: async ({ record }) => {
             globalThis.__test_onRecord.push(record.new?.data?.name);
           }
@@ -162,11 +141,10 @@ describe("defineTable", () => {
 
         globalThis.__test_ctx = [];
 
-        export default defineTable({
-          name: "orders",
+        export default defineTable()({
           setup: ({ table }) => ({ runtime: "mock-runtime" }),
-          onRecord: async ({ record, ctx }) => {
-            globalThis.__test_ctx.push(ctx.runtime);
+          onRecord: async ({ record, runtime }) => {
+            globalThis.__test_ctx.push(runtime);
           }
         });
       `;
@@ -183,70 +161,6 @@ describe("defineTable", () => {
 
   });
 
-  describe("onBatch", () => {
-
-    it("should bundle and invoke handler", async () => {
-      const handlerCode = `
-        import { defineTable } from "effortless-aws";
-
-        globalThis.__test_onBatch = [];
-
-        export default defineTable({
-          name: "events",
-          onBatch: async ({ records }) => {
-            globalThis.__test_onBatch.push(...records.map(r => r.new?.data?.name));
-          }
-        });
-      `;
-
-      const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
-
-      const response = await mod.handler({
-        Records: [
-          makeRecord({ data: { name: "Alice" }, seq: "100" }),
-          makeRecord({ data: { name: "Bob" }, seq: "200" }),
-        ],
-      });
-
-      expect(response.batchItemFailures).toEqual([]);
-      expect((globalThis as any).__test_onBatch).toEqual(["Alice", "Bob"]);
-    });
-
-    it("should report all records as failed when handler throws", async () => {
-      const handlerCode = `
-        import { defineTable } from "effortless-aws";
-
-        globalThis.__test_onBatchError = [];
-
-        export default defineTable({
-          name: "events",
-          onError: ({ error }) => {
-            globalThis.__test_onBatchError.push(error.message);
-          },
-          onBatch: async ({ records }) => {
-            throw new Error("batch failed");
-          }
-        });
-      `;
-
-      const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
-
-      const response = await mod.handler({
-        Records: [
-          makeRecord({ seq: "100" }),
-          makeRecord({ seq: "200" }),
-        ],
-      });
-
-      expect(response.batchItemFailures).toEqual([
-        { itemIdentifier: "100" },
-        { itemIdentifier: "200" },
-      ]);
-      expect((globalThis as any).__test_onBatchError).toEqual(["batch failed"]);
-    });
-
-  });
-
   describe("schema", () => {
 
     it("should decode data portion through schema function", async () => {
@@ -259,8 +173,7 @@ describe("defineTable", () => {
           name: String(input.name).toUpperCase(),
         });
 
-        export default defineTable({
-          name: "users",
+        export default defineTable()({
           schema: decodeData,
           onRecord: async ({ record }) => {
             globalThis.__test_schema.push(record.new?.data);
@@ -280,21 +193,20 @@ describe("defineTable", () => {
       ]);
     });
 
-    it("should decode data in onBatch through schema function", async () => {
+    it("should decode data in onRecord through schema function for multiple records", async () => {
       const handlerCode = `
         import { defineTable } from "effortless-aws";
 
-        globalThis.__test_batchSchema = [];
+        globalThis.__test_recordSchema = [];
 
         const decodeItem = (input) => ({
           value: Number(input.value) * 2,
         });
 
-        export default defineTable({
-          name: "items",
+        export default defineTable()({
           schema: decodeItem,
-          onBatch: async ({ records }) => {
-            globalThis.__test_batchSchema.push(...records.map(r => r.new?.data));
+          onRecord: async ({ record }) => {
+            globalThis.__test_recordSchema.push(record.new?.data);
           }
         });
       `;
@@ -309,7 +221,7 @@ describe("defineTable", () => {
       });
 
       expect(response.batchItemFailures).toEqual([]);
-      expect((globalThis as any).__test_batchSchema).toEqual([
+      expect((globalThis as any).__test_recordSchema).toEqual([
         { value: 10 },
         { value: 20 },
       ]);
@@ -324,10 +236,9 @@ describe("defineTable", () => {
           return input;
         };
 
-        export default defineTable({
-          name: "strict",
+        export default defineTable()({
           schema: strictDecode,
-          onBatch: async ({ records }) => {}
+          onRecord: async ({ record }) => {}
         });
       `;
 
@@ -369,8 +280,7 @@ describe("defineTable", () => {
 
         globalThis.__test_setupTable = null;
 
-        export default defineTable({
-          name: "orders",
+        export default defineTable()({
           setup: ({ table }) => {
             globalThis.__test_setupTable = {
               tableName: table.tableName,
@@ -392,7 +302,7 @@ describe("defineTable", () => {
       expect(result.hasPut).toBe(true);
     });
 
-    it("should pass table client to onRecord", async () => {
+    it("should pass table client to onRecord via setup", async () => {
       process.env = { ...originalEnv, EFF_DEP_SELF: "table:test-project-dev-orders" };
 
       const handlerCode = `
@@ -400,8 +310,8 @@ describe("defineTable", () => {
 
         globalThis.__test_table = [];
 
-        export default defineTable({
-          name: "orders",
+        export default defineTable()({
+          setup: ({ table }) => ({ table }),
           onRecord: async ({ record, table }) => {
             globalThis.__test_table.push({
               tableName: table.tableName,
@@ -420,36 +330,6 @@ describe("defineTable", () => {
       expect(results).toHaveLength(1);
       expect(results[0].tableName).toBe("test-project-dev-orders");
       expect(results[0].hasPut).toBe(true);
-    });
-
-    it("should pass table client to onBatch", async () => {
-      process.env = { ...originalEnv, EFF_DEP_SELF: "table:test-project-dev-events" };
-
-      const handlerCode = `
-        import { defineTable } from "effortless-aws";
-
-        globalThis.__test_batchTable = null;
-
-        export default defineTable({
-          name: "events",
-          onBatch: async ({ records, table }) => {
-            globalThis.__test_batchTable = {
-              tableName: table.tableName,
-              hasQuery: typeof table.query === "function",
-            };
-          }
-        });
-      `;
-
-      const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
-
-      const response = await mod.handler({ Records: [makeRecord()] });
-
-      expect(response.batchItemFailures).toEqual([]);
-      const result = (globalThis as any).__test_batchTable;
-      expect(result).not.toBeNull();
-      expect(result.tableName).toBe("test-project-dev-events");
-      expect(result.hasQuery).toBe(true);
     });
 
   });

@@ -1,4 +1,4 @@
-import type { ApiHandler } from "../handlers/define-api";
+import type { ApiHandler, RouteEntry } from "../handlers/define-api";
 import type { ContentType, ResponseStream } from "../handlers/shared";
 import { AUTH_COOKIE_NAME } from "../handlers/auth";
 import { createHandlerRuntime } from "./handler-utils";
@@ -35,49 +35,6 @@ type LambdaEvent = {
   isBase64Encoded?: boolean;
 };
 
-// ============ Route matching ============
-
-type RouteMatcher = {
-  regex: RegExp;
-  paramNames: string[];
-  handler: Function;
-};
-
-const buildGetMatchers = (
-  routes: Record<string, Function>,
-  basePath: string
-): RouteMatcher[] =>
-  Object.entries(routes).map(([pattern, handler]) => {
-    const fullPattern = (basePath + pattern).replace(/\/\/+/g, "/");
-    const paramNames: string[] = [];
-    const regexStr = fullPattern.replace(/\{(\w+)\}/g, (_, name) => {
-      paramNames.push(name);
-      return "([^/]+)";
-    });
-    return {
-      regex: new RegExp(`^${regexStr}$`),
-      paramNames,
-      handler,
-    };
-  });
-
-const matchRoute = (
-  matchers: RouteMatcher[],
-  path: string
-): { handler: Function; params: Record<string, string> } | null => {
-  for (const matcher of matchers) {
-    const match = path.match(matcher.regex);
-    if (match) {
-      const params: Record<string, string> = {};
-      matcher.paramNames.forEach((name, i) => {
-        params[name] = match[i + 1]!;
-      });
-      return { handler: matcher.handler, params };
-    }
-  }
-  return null;
-};
-
 // ============ Response helpers ============
 
 const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string>; binary?: boolean }) => {
@@ -108,21 +65,21 @@ const unauthorized = () => ({
   body: JSON.stringify({ error: "Unauthorized" }),
 });
 
-/** Check if a path matches any public pattern. Supports trailing `*` wildcard. */
-const isPublicPath = (path: string, patterns: string[]): boolean =>
-  patterns.some(p =>
-    p.endsWith("*") ? path.startsWith(p.slice(0, -1)) : path === p,
+// ============ Route matching ============
+
+/** Find a matching route for the given method and path (relative to basePath) */
+const findRoute = (routes: RouteEntry[], method: string, relativePath: string): RouteEntry | undefined =>
+  routes.find(r =>
+    r.path === relativePath && (r.method === method || (r.method === "GET" && method === "HEAD"))
   );
 
 // ============ Wrapper ============
 
-export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
+export const wrapApi = <C>(handler: ApiHandler<C>) => {
   const rt = createHandlerRuntime(handler, "api", handler.__spec.lambda?.logLevel ?? "info");
   const basePath = handler.__spec.basePath;
   const isStream = handler.__spec.stream === true;
-
-  // Build GET route matchers at cold start
-  const getMatchers = handler.get ? buildGetMatchers(handler.get, basePath) : [];
+  const routes = handler.routes ?? [];
 
   const defaultError = (error: unknown, status: number) => {
     console.error(`[effortless:${rt.handlerName}]`, error);
@@ -135,24 +92,56 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
     });
   };
 
+  /** Extract relative path after basePath: /basePath/foo/bar → /foo/bar */
+  const extractRelativePath = (fullPath: string): string | null => {
+    const prefix = basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
+    if (!fullPath.startsWith(prefix)) return null;
+    const rest = fullPath.slice(prefix.length);
+    if (rest === "" || rest === "/") return "/";
+    if (!rest.startsWith("/")) return null;
+    return rest;
+  };
+
   // Core handler logic shared between buffered and streaming modes
   const handleRequest = async (event: LambdaEvent, streamCtx?: { rawStream: any; httpStream: any; stream: ResponseStream }) => {
     const startTime = Date.now();
     rt.patchConsole();
     let sharedArgs: Awaited<ReturnType<typeof rt.commonArgs>> | undefined;
+    let ctxProps: Record<string, unknown> = {};
 
     try {
+      const method = event.requestContext?.http?.method ?? event.httpMethod ?? "GET";
+      const path = event.requestContext?.http?.path ?? event.path ?? "/";
+      const headers = event.headers ?? {};
+      const query = event.queryStringParameters ?? {};
+      const params = event.pathParameters ?? {} as Record<string, string | undefined>;
+      const body = parseBody(event.body, event.isBase64Encoded ?? false);
+
+      // Merged input: query < body < params (higher priority wins)
+      const merged = {
+        ...query,
+        ...(typeof body === "object" && body !== null ? body as Record<string, unknown> : {}),
+        ...params,
+      };
+
       const req = {
-        method: event.requestContext?.http?.method ?? event.httpMethod ?? "GET",
-        path: event.requestContext?.http?.path ?? event.path ?? "/",
-        headers: event.headers ?? {},
-        query: event.queryStringParameters ?? {},
-        params: event.pathParameters ?? {} as Record<string, string | undefined>,
-        body: parseBody(event.body, event.isBase64Encoded ?? false),
+        method, path, headers, query, params, body,
         rawBody: event.body,
       };
 
-      const input = { method: req.method, path: req.path, query: req.query, body: req.body };
+      const logInput = { method, path, query, body };
+      const relativePath = extractRelativePath(req.path);
+
+      if (!relativePath) {
+        rt.logExecution(startTime, logInput, { status: 404 });
+        return notFound();
+      }
+
+      const entry = findRoute(routes, req.method, relativePath);
+      if (!entry) {
+        rt.logExecution(startTime, logInput, { status: 404 });
+        return notFound();
+      }
 
       // Extract auth cookie from request headers
       const cookieHeader = req.headers["cookie"] ?? req.headers["Cookie"] ?? "";
@@ -161,94 +150,45 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
         const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${AUTH_COOKIE_NAME}=([^;]+)`));
         if (match) authCookie = match[1];
       }
-
-      // Extract auth header (Authorization or custom header from apiToken config)
-      const authHeaderName = handler.apiToken?.header ?? "authorization";
+      // Auth header name is resolved lazily after auth callback runs in commonArgs
+      const authHeaderName = "authorization";
       const authHeader = req.headers[authHeaderName] ?? req.headers[authHeaderName.toLowerCase()] ?? undefined;
+      sharedArgs = await rt.commonArgs(authCookie, authHeader, req.headers as Record<string, string | undefined>);
 
-      // Resolve shared args (ctx, deps, config, files)
-      sharedArgs = await rt.commonArgs(authCookie, authHeader);
-
-      // Auth gate: reject unauthenticated requests to non-public paths
-      if (handler.auth && sharedArgs.auth) {
+      // Auth gate
+      if (sharedArgs.auth) {
         const auth = sharedArgs.auth as { session: unknown };
-        const publicPaths = handler.auth.public ?? [];
-        const routePath = req.path.replace(new RegExp(`^${basePath}`), "") || "/";
-        if (!auth.session && !isPublicPath(routePath, publicPaths) && !isPublicPath(req.path, publicPaths)) {
-          rt.logExecution(startTime, input, { status: 401 });
+        if (!auth.session && !entry.public) {
+          rt.logExecution(startTime, logInput, { status: 401 });
           return unauthorized();
         }
       }
 
-      // GET / HEAD routing
-      if (req.method === "GET" || req.method === "HEAD") {
-        const matched = matchRoute(getMatchers, req.path);
-        if (!matched) {
-          rt.logExecution(startTime, input, { status: 404 });
-          return notFound();
-        }
+      // Spread ctx into route args (strip auth config, replaced by AuthHelpers)
+      const { ctx, auth, ...rest } = sharedArgs;
+      ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
+      delete ctxProps.auth;
+      const args: Record<string, unknown> = { ...ctxProps, req, input: merged, ...rest };
+      if (auth) args.auth = auth;
+      if (streamCtx) args.stream = streamCtx.stream;
 
-        // Merge matched path params into req
-        req.params = { ...req.params, ...matched.params };
-        const args: Record<string, unknown> = { req, ...sharedArgs };
-        if (streamCtx) args.stream = streamCtx.stream;
-
-        try {
-          const response = await (matched.handler as any)(args);
-          if (response) {
-            rt.logExecution(startTime, input, response.body);
-            return toResult(response);
-          }
-          // void return — handler wrote to stream directly
-          rt.logExecution(startTime, input, "[stream]");
-          return undefined;
-        } catch (error) {
-          rt.logError(startTime, input, error);
-          return handler.onError
-            ? toResult(handler.onError({ error, req, ...sharedArgs }))
-            : defaultError(error, 500);
+      try {
+        const response = await entry.onRequest(args);
+        if (response) {
+          rt.logExecution(startTime, logInput, response.body);
+          return toResult(response);
         }
+        rt.logExecution(startTime, logInput, "[stream]");
+        return undefined;
+      } catch (error) {
+        rt.logError(startTime, logInput, error);
+        return handler.onError
+          ? toResult(handler.onError({ error, req, ...ctxProps }))
+          : defaultError(error, 500);
       }
-
-      // POST handling
-      if (req.method === "POST" && handler.post) {
-        const args: Record<string, unknown> = { req, ...sharedArgs };
-        if (streamCtx) args.stream = streamCtx.stream;
-
-        if (handler.schema) {
-          try {
-            args.data = handler.schema(req.body);
-          } catch (error) {
-            rt.logError(startTime, input, error);
-            return handler.onError
-              ? toResult(handler.onError({ error, req, ...sharedArgs }))
-              : defaultError(error, 400);
-          }
-        }
-
-        try {
-          const response = await (handler.post as any)(args);
-          if (response) {
-            rt.logExecution(startTime, input, response.body);
-            return toResult(response);
-          }
-          // void return — handler wrote to stream directly
-          rt.logExecution(startTime, input, "[stream]");
-          return undefined;
-        } catch (error) {
-          rt.logError(startTime, input, error);
-          return handler.onError
-            ? toResult(handler.onError({ error, req, ...sharedArgs }))
-            : defaultError(error, 500);
-        }
-      }
-
-      // No matching route or method
-      rt.logExecution(startTime, input, { status: 404 });
-      return notFound();
     } finally {
       if (handler.onAfterInvoke && sharedArgs) {
-        try { await handler.onAfterInvoke(sharedArgs); }
+        try { await handler.onAfterInvoke(ctxProps); }
         catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
       }
       rt.restoreConsole();
@@ -260,7 +200,6 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const streamify = (globalThis as any).awslambda?.streamifyResponse;
     if (!streamify) {
-      // Fallback for local dev / non-Lambda environments
       return async (event: LambdaEvent) => handleRequest(event);
     }
 
@@ -268,8 +207,6 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const HttpResponseStream = (globalThis as any).awslambda?.HttpResponseStream;
 
-      // Check if handler uses SSE by running the route — we need to create the stream first
-      // We start with a deferred approach: create stream helper, run handler, then decide
       let streamUsed = false;
       let sseMode = false;
       let httpStream: any = null;
@@ -313,17 +250,14 @@ export const wrapApi = <T, C>(handler: ApiHandler<T, C>) => {
       const result = await handleRequest(event, { rawStream, httpStream, stream });
 
       if (result && !streamUsed) {
-        // Handler returned HttpResponse — write it to stream
         const hs = HttpResponseStream
           ? HttpResponseStream.from(rawStream, { statusCode: result.statusCode, headers: result.headers })
           : rawStream;
         hs.write(result.body);
         hs.end();
       } else if (!streamUsed) {
-        // No result and no stream usage — shouldn't happen, but close stream
         rawStream.end();
       }
-      // If streamUsed is true, the handler already wrote to and closed the stream
     });
   }
 

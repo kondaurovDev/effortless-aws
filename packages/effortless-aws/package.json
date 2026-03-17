@@ -36,7 +36,8 @@
   },
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "catalog:",
@@ -49,6 +50,8 @@
     "@types/node": "catalog:",
     "tsup": "catalog:",
     "type-fest": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vite-tsconfig-paths": "catalog:",
+    "vitest": "catalog:"
   }
 }

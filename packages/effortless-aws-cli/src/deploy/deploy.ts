@@ -13,10 +13,10 @@ import {
   addFunctionUrlPublicAccess,
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
-import type { SecretEntry, GenerateSpec } from "~/build/handler-registry";
+import type { SecretEntry } from "~/build/handler-registry";
 import * as crypto from "crypto";
 import { ssm } from "~/aws/clients";
-import { collectRequiredSecrets, checkMissingSecrets, collectAuthSecret, fetchAuthSecretValue } from "./resolve-config";
+import { collectRequiredSecrets, checkMissingSecrets } from "./resolve-config";
 
 // Re-export from shared
 export {
@@ -379,13 +379,14 @@ const SSM_PERMISSIONS = [
  * Resolve param entries to environment variables and IAM permissions.
  * SSM path convention: /${project}/${stage}/${key}
  */
-/** Execute a GenerateSpec to produce a secret value at deploy time. */
-const executeGenerateSpec = (spec: GenerateSpec): string => {
-  switch (spec.type) {
-    case "hex": return crypto.randomBytes(spec.bytes).toString("hex");
-    case "base64": return crypto.randomBytes(spec.bytes).toString("base64url");
-    case "uuid": return crypto.randomUUID();
-  }
+/** Execute a generate DSL string to produce a secret value at deploy time. */
+const executeGenerate = (spec: string): string => {
+  if (spec === "uuid") return crypto.randomUUID();
+  const hexMatch = spec.match(/^hex:(\d+)$/);
+  if (hexMatch) return crypto.randomBytes(Number(hexMatch[1])).toString("hex");
+  const base64Match = spec.match(/^base64:(\d+)$/);
+  if (base64Match) return crypto.randomBytes(Number(base64Match[1])).toString("base64url");
+  throw new Error(`Unknown generate spec: "${spec}". Use "hex:N", "base64:N", or "uuid".`);
 };
 
 const resolveSecrets = (
@@ -432,8 +433,6 @@ type DeployTaskCtx = {
   mailerDomainMap: Map<string, string>;
   queueNameMap: Map<string, string>;
   logComplete: (name: string, type: string, status: StepStatus, bundleSize?: number) => Effect.Effect<void>;
-  /** SSM path for auth secret (set when any handler uses auth) */
-  authSecretPath?: string;
 };
 
 const makeDeployInput = (ctx: DeployTaskCtx, file: string): DeployInput => ({
@@ -530,19 +529,11 @@ const buildStaticSiteTasks = (
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
-          // If this site uses auth, fetch the secret value for middleware injection
-          let authSecretValue: string | undefined;
-          if (fn.authConfig && ctx.authSecretPath) {
-            authSecretValue = yield* fetchAuthSecretValue(ctx.authSecretPath).pipe(
-              Effect.provide(Aws.makeClients({ ssm: { region: ctx.input.region } }))
-            );
-          }
           const result = yield* deployStaticSite({
             projectDir: ctx.input.projectDir, project: ctx.input.project,
             stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
             ...(fn.hasHandler ? { file } : {}),
             ...(apiOriginDomain ? { apiOriginDomain } : {}),
-            ...(authSecretValue && fn.authConfig ? { authSecret: authSecretValue, authConfig: fn.authConfig } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             s3: { region }, cloudfront: { region: "us-east-1" },
             resource_groups_tagging_api: { region: "us-east-1" },
@@ -652,11 +643,6 @@ const buildApiTasks = (
       tasks.push(
         Effect.gen(function* () {
           const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
-          // Add auth secret env var if this API handler uses auth
-          if (fn.authConfig && ctx.authSecretPath) {
-            env.depsEnv["EFF_AUTH_SECRET"] = ctx.authSecretPath;
-            env.depsPermissions = [...env.depsPermissions, "ssm:GetParameter", "ssm:GetParameters"];
-          }
           const { exportName, functionArn, status, bundleSize, handlerName } = yield* deployApiFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
@@ -721,7 +707,7 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers } = discoverHandlers(files);
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers } = yield* Effect.promise(() => discoverHandlers(files, input.projectDir));
 
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
@@ -749,8 +735,6 @@ export const deployProject = (input: DeployProjectInput) =>
     // Check for missing SSM parameters
     const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
     const requiredSecrets = collectRequiredSecrets(discovered, input.project, stage);
-    const authSecret = collectAuthSecret(discovered, input.project, stage);
-    if (authSecret) requiredSecrets.push(authSecret);
     if (requiredSecrets.length > 0) {
       const { missing } = yield* checkMissingSecrets(requiredSecrets).pipe(
         Effect.provide(Aws.makeClients({ ssm: { region: input.region } }))
@@ -762,7 +746,7 @@ export const deployProject = (input: DeployProjectInput) =>
 
       if (withGenerators.length > 0) {
         for (const entry of withGenerators) {
-          const value = executeGenerateSpec(entry.generate!);
+          const value = executeGenerate(entry.generate!);
           yield* ssm.make("put_parameter", {
             Name: entry.ssmPath,
             Value: value,
@@ -840,7 +824,6 @@ export const deployProject = (input: DeployProjectInput) =>
     const logComplete = createLiveProgress(manifest);
     const ctx: DeployTaskCtx = {
       input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, logComplete,
-      ...(authSecret ? { authSecretPath: authSecret.ssmPath } : {}),
     };
 
     const tableResults: DeployTableResult[] = [];

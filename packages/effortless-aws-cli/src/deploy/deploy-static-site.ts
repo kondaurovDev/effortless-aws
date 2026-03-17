@@ -4,8 +4,7 @@ import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import type { ExtractedStaticSiteFunction } from "~/build/bundle";
-import { bundleMiddleware, bundleAuthMiddleware, zip } from "~/build/bundle";
-import type { AuthConfig } from "~/build/handler-registry";
+import { bundleMiddleware, zip } from "~/build/bundle";
 import {
   Aws,
   makeTags,
@@ -39,10 +38,6 @@ export type DeployStaticSiteInput = {
   file?: string;
   /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
   apiOriginDomain?: string;
-  /** Auth HMAC secret value (for injecting into auth middleware bundle) */
-  authSecret?: string;
-  /** Auth config (loginPath, public patterns) for generating auth middleware */
-  authConfig?: AuthConfig;
   verbose?: boolean;
 };
 
@@ -121,55 +116,6 @@ const deployMiddlewareLambda = (input: {
     );
 
     yield* Effect.logDebug(`Middleware deployed: ${versionArn}`);
-    return { versionArn };
-  });
-
-/** Deploy auto-generated auth middleware as Lambda@Edge in us-east-1 */
-const deployAuthMiddlewareLambda = (input: {
-  project: string;
-  stage: string;
-  handlerName: string;
-  tagCtx: TagContext;
-  authConfig: AuthConfig;
-  authSecret: string;
-}) =>
-  Effect.gen(function* () {
-    const { project, stage, handlerName, tagCtx, authConfig, authSecret } = input;
-    const middlewareName = `${handlerName}-middleware`;
-
-    yield* Effect.logDebug(`Deploying auth middleware Lambda@Edge: ${middlewareName}`);
-
-    const roleArn = yield* ensureEdgeRole(
-      project, stage, middlewareName, makeTags(tagCtx, "iam-role")
-    );
-
-    const bundled = yield* bundleAuthMiddleware({ authConfig, secret: authSecret });
-    const code = yield* zip({ content: bundled });
-
-    const edgeFunctionName = `${project}-${stage}-${middlewareName}`;
-
-    yield* ensureLambda({
-      project, stage,
-      name: middlewareName,
-      region: "us-east-1",
-      roleArn, code,
-      memory: 128,
-      timeout: 5,
-      architecture: Architecture.x86_64,
-      tags: makeTags(tagCtx, "lambda"),
-    }).pipe(
-      Effect.provide(Aws.makeClients({ lambda: { region: "us-east-1" } }))
-    );
-
-    yield* ensureEdgePermission(edgeFunctionName).pipe(
-      Effect.provide(Aws.makeClients({ lambda: { region: "us-east-1" } }))
-    );
-
-    const { versionArn } = yield* publishVersion(edgeFunctionName).pipe(
-      Effect.provide(Aws.makeClients({ lambda: { region: "us-east-1" } }))
-    );
-
-    yield* Effect.logDebug(`Auth middleware deployed: ${versionArn}`);
     return { versionArn };
   });
 
@@ -299,22 +245,12 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       }
     }
 
-    // 4. Viewer request: either Lambda@Edge (middleware/auth) or CloudFront Function (URL rewrite)
+    // 4. Viewer request: either Lambda@Edge (middleware) or CloudFront Function (URL rewrite)
     const isSpa = config.spa ?? false;
     let urlRewriteFunctionArn: string | undefined;
     let lambdaEdgeArn: string | undefined;
-    const hasAuth = !!(input.authSecret && input.authConfig);
 
-    if (hasAuth) {
-      // Auto-generated auth middleware — HMAC secret injected at build time
-      const authResult = yield* deployAuthMiddlewareLambda({
-        project, stage, handlerName, tagCtx,
-        authConfig: input.authConfig!, authSecret: input.authSecret!,
-      }).pipe(
-        Effect.provide(Aws.makeClients({ iam: { region: "us-east-1" } }))
-      );
-      lambdaEdgeArn = authResult.versionArn;
-    } else if (hasMiddleware && input.file) {
+    if (hasMiddleware && input.file) {
       // User-defined Lambda@Edge middleware
       const result = yield* deployMiddlewareLambda({
         projectDir, project, stage, handlerName,

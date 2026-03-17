@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import * as path from "path"
 import * as AdmZip from "adm-zip"
 
-import { extractApiConfigs, extractTableConfigs } from "~cli/build/bundle"
+import { extractApiConfigs, extractTableConfigs } from "./helpers/extract-from-source"
 import { zip, resolveStaticFiles } from "~cli/build/bundle"
 import { importBundle, bundleCode } from "./helpers/bundle-code"
 
@@ -15,86 +15,86 @@ describe("static extraction", () => {
 
   describe("extractApiConfigs", () => {
 
-    it("should extract static globs", () => {
+    it("should extract static globs", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({
+        export const widget = defineApi()({
           basePath: "/widget",
           static: ["src/templates/*.ejs"],
-          get: { "/": async ({ req, files }) => ({ status: 200 }) }
+          queries: { index: async ({ input, files }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs"]);
     });
 
-    it("should extract multiple static globs", () => {
+    it("should extract multiple static globs", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({
+        export const widget = defineApi()({
           basePath: "/widget",
           static: ["src/templates/*.ejs", "src/assets/*.css"],
-          get: { "/": async ({ req }) => ({ status: 200 }) }
+          queries: { index: async ({ input }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs", "src/assets/*.css"]);
     });
 
-    it("should return empty staticGlobs when no static property", () => {
+    it("should return empty staticGlobs when no static property", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const hello = defineApi({
+        export const hello = defineApi()({
           basePath: "/hello",
-          get: { "/": async ({ req }) => ({ status: 200 }) }
+          queries: { index: async ({ input }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual([]);
     });
 
-    it("should extract static from default export", () => {
+    it("should extract static from default export", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/widget",
           static: ["templates/*.ejs"],
-          get: { "/": async ({ req }) => ({ status: 200 }) }
+          queries: { index: async ({ input }) => ({ status: 200 }) }
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.exportName).toBe("default");
       expect(configs[0]!.staticGlobs).toEqual(["templates/*.ejs"]);
     });
 
-    it("should not leak static into config", () => {
+    it("should not leak static into config", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({
+        export const widget = defineApi()({
           basePath: "/widget",
           static: ["src/templates/*.ejs"],
-          post: async ({ data }) => ({ status: 200 })
+          routes: []
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs[0]!.config).toEqual({ basePath: "/widget" });
       expect(configs[0]!.config).not.toHaveProperty("static");
@@ -104,34 +104,34 @@ describe("static extraction", () => {
 
   describe("extractTableConfigs", () => {
 
-    it("should extract static globs from table handler", () => {
+    it("should extract static globs from table handler", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable({
+        export const orders = defineTable()({
           name: "orders",
           static: ["src/templates/report.ejs"],
           onRecord: async ({ record }) => {}
         });
       `;
 
-      const configs = extractTableConfigs(source);
+      const configs = await extractTableConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/report.ejs"]);
     });
 
-    it("should return empty staticGlobs for table without static", () => {
+    it("should return empty staticGlobs for table without static", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable({
+        export const orders = defineTable()({
           name: "orders",
           onRecord: async ({ record }) => {}
         });
       `;
 
-      const configs = extractTableConfigs(source);
+      const configs = await extractTableConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.staticGlobs).toEqual([]);
@@ -225,22 +225,25 @@ describe("static files runtime", () => {
     const handlerCode = `
       import { defineApi } from "effortless-aws";
 
-      export default defineApi({
+      export default defineApi()({
         basePath: "/widget",
         static: ["test/fixtures/hello.txt"],
-        get: {
-          "/": async ({ req, files }) => ({
-            status: 200,
-            body: { content: files.read("test/fixtures/hello.txt") }
-          })
-        }
+        routes: [
+          {
+            path: "GET /index",
+            onRequest: async ({ files }) => ({
+              status: 200,
+              body: { content: files.read("test/fixtures/hello.txt") }
+            }),
+          },
+        ],
       });
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir });
 
     const response = await mod.handler({
-      requestContext: { http: { method: "GET", path: "/widget/" } },
+      requestContext: { http: { method: "GET", path: "/widget/index" } },
       headers: {},
       queryStringParameters: {},
       pathParameters: {},

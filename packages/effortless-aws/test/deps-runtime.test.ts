@@ -21,7 +21,7 @@ import type { ApiHandler } from "~aws/handlers/define-api"
 import type { TableHandler } from "~aws/handlers/define-table"
 
 const makeApiEvent = (overrides: Record<string, unknown> = {}) => ({
-  requestContext: { http: { method: "POST", path: "/test" } },
+  requestContext: { http: { method: "POST", path: "/test/run" } },
   headers: {},
   queryStringParameters: {},
   pathParameters: {},
@@ -68,10 +68,10 @@ describe("deps runtime injection", () => {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedDeps = args.deps;
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -97,16 +97,16 @@ describe("deps runtime injection", () => {
         __spec: { basePath: "/test" },
         setup: () => ({ env: "test" }),
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeApiEvent());
 
-      expect(capturedArgs.ctx).toEqual({ env: "test" });
+      expect(capturedArgs.env).toEqual("test");
       expect(capturedArgs.deps.orders.tableName).toBe("my-orders-table");
     });
 
@@ -118,22 +118,19 @@ describe("deps runtime injection", () => {
       const handler = {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
-        schema: (input: unknown) => {
-          const obj = input as any;
-          if (!obj?.item) throw new Error("item required");
-          return { item: obj.item };
-        },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        post: async (args: any) => {
-          capturedArgs = args;
-          return { status: 201 };
-        },
+        routes: [{ method: "POST", path: "/run",
+          onRequest: async (args: any) => {
+            capturedArgs = args;
+            return { status: 201 };
+          },
+        }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeApiEvent({ body: JSON.stringify({ item: "book" }) }));
 
-      expect(capturedArgs.data).toEqual({ item: "book" });
+      expect(capturedArgs.req.body).toEqual({ item: "book" });
       expect(capturedArgs.deps.orders.tableName).toBe("my-orders-table");
     });
 
@@ -147,11 +144,11 @@ describe("deps runtime injection", () => {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", __spec: { tagField: "__tag" }, config: {} } },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedDeps = args.deps;
           await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { __tag: "Order", amount: 42 } });
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -174,10 +171,10 @@ describe("deps runtime injection", () => {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", __spec: {}, config: {} } },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           await args.deps.orders.put({ pk: "order#1", sk: "ORDER", data: { tag: "Order", amount: 42 } });
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -195,9 +192,9 @@ describe("deps runtime injection", () => {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           return { status: 200, body: { table: args.deps.orders.tableName } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -213,10 +210,10 @@ describe("deps runtime injection", () => {
       const handler = {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { hello: "world" } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -229,20 +226,18 @@ describe("deps runtime injection", () => {
 
   describe("Table stream handler (wrapTableStream)", () => {
 
-    it("should inject deps into onRecord", async () => {
+    it("should inject deps into setup, spread ctx into onRecord", async () => {
       process.env = { ...originalEnv, EFF_DEP_users: "table:test-project-dev-users" };
 
-      const capturedDeps: any[] = [];
+      const capturedArgs: any[] = [];
 
       const handler = {
         __brand: "effortless-table",
         __spec: {},
         deps: { users: { __brand: "effortless-table", config: {} } },
+        setup: ({ deps }: any) => ({ users: deps.users }),
         onRecord: async (args: any) => {
-          capturedDeps.push({
-            tableName: args.deps.users.tableName,
-            hasPut: typeof args.deps.users.put === "function",
-          });
+          capturedArgs.push(args);
         },
       } as unknown as TableHandler;
 
@@ -257,22 +252,23 @@ describe("deps runtime injection", () => {
       ]));
 
       expect(response.batchItemFailures).toEqual([]);
-      expect(capturedDeps).toHaveLength(1);
-      expect(capturedDeps[0].tableName).toBe("test-project-dev-users");
-      expect(capturedDeps[0].hasPut).toBe(true);
+      expect(capturedArgs).toHaveLength(1);
+      expect(capturedArgs[0].users.tableName).toBe("test-project-dev-users");
+      expect(typeof capturedArgs[0].users.put).toBe("function");
     });
 
-    it("should inject deps into onBatch", async () => {
+    it("should inject deps into setup, spread ctx into onRecord", async () => {
       process.env = { ...originalEnv, EFF_DEP_users: "table:test-project-dev-users" };
 
-      let capturedArgs: any = null;
+      const capturedArgs: any[] = [];
 
       const handler = {
         __brand: "effortless-table",
         __spec: {},
         deps: { users: { __brand: "effortless-table", config: {} } },
-        onBatch: async (args: any) => {
-          capturedArgs = args;
+        setup: ({ deps }: any) => ({ users: deps.users }),
+        onRecord: async (args: any) => {
+          capturedArgs.push(args);
         },
       } as unknown as TableHandler;
 
@@ -293,12 +289,11 @@ describe("deps runtime injection", () => {
       ]));
 
       expect(response.batchItemFailures).toEqual([]);
-      expect(capturedArgs).not.toBeNull();
-      expect(capturedArgs.deps.users.tableName).toBe("test-project-dev-users");
-      expect(capturedArgs.records).toHaveLength(2);
+      expect(capturedArgs).toHaveLength(2);
+      expect(capturedArgs[0].users.tableName).toBe("test-project-dev-users");
     });
 
-    it("should inject deps + setup into onRecord", async () => {
+    it("should inject deps + setup into onRecord (ctx spread)", async () => {
       process.env = { ...originalEnv, EFF_DEP_users: "table:test-project-dev-users" };
 
       let capturedArgs: any = null;
@@ -306,7 +301,7 @@ describe("deps runtime injection", () => {
       const handler = {
         __brand: "effortless-table",
         __spec: {},
-        setup: () => ({ runtime: "test-runtime" }),
+        setup: ({ deps }: any) => ({ runtime: "test-runtime", users: deps.users }),
         deps: { users: { __brand: "effortless-table", config: {} } },
         onRecord: async (args: any) => {
           capturedArgs = args;
@@ -323,11 +318,11 @@ describe("deps runtime injection", () => {
         },
       ]));
 
-      expect(capturedArgs.ctx).toEqual({ runtime: "test-runtime" });
-      expect(capturedArgs.deps.users.tableName).toBe("test-project-dev-users");
+      expect(capturedArgs.runtime).toEqual("test-runtime");
+      expect(capturedArgs.users.tableName).toBe("test-project-dev-users");
     });
 
-    it("should not inject deps when handler has no deps", async () => {
+    it("should not have deps in callback when handler has no deps", async () => {
       let capturedArgs: any = null;
 
       const handler = {
@@ -355,7 +350,7 @@ describe("deps runtime injection", () => {
 
   describe("Table self-client (table arg)", () => {
 
-    it("should inject table client into onRecord", async () => {
+    it("should inject table client into onRecord via setup", async () => {
       process.env = { ...originalEnv, EFF_DEP_SELF: "table:my-project-dev-orders" };
 
       let capturedArgs: any = null;
@@ -363,6 +358,7 @@ describe("deps runtime injection", () => {
       const handler = {
         __brand: "effortless-table",
         __spec: {},
+        setup: ({ table }: any) => ({ table }),
         onRecord: async (args: any) => {
           capturedArgs = args;
         },
@@ -386,7 +382,7 @@ describe("deps runtime injection", () => {
       expect(typeof capturedArgs.table.query).toBe("function");
     });
 
-    it("should inject table client into onBatch", async () => {
+    it("should inject table client into onRecord", async () => {
       process.env = { ...originalEnv, EFF_DEP_SELF: "table:my-project-dev-events" };
 
       let capturedArgs: any = null;
@@ -394,7 +390,8 @@ describe("deps runtime injection", () => {
       const handler = {
         __brand: "effortless-table",
         __spec: {},
-        onBatch: async (args: any) => {
+        setup: ({ table }: any) => ({ table }),
+        onRecord: async (args: any) => {
           capturedArgs = args;
         },
       } as unknown as TableHandler;
@@ -411,10 +408,11 @@ describe("deps runtime injection", () => {
 
       expect(capturedArgs.table).toBeDefined();
       expect(capturedArgs.table.tableName).toBe("my-project-dev-events");
-      expect(capturedArgs.records).toHaveLength(1);
+      expect(capturedArgs.record).toBeDefined();
+      expect(capturedArgs.batch).toHaveLength(1);
     });
 
-    it("should inject table + deps + setup together", async () => {
+    it("should inject table + setup (ctx spread) together", async () => {
       process.env = {
         ...originalEnv,
         EFF_DEP_SELF: "table:my-project-dev-orders",
@@ -426,7 +424,7 @@ describe("deps runtime injection", () => {
       const handler = {
         __brand: "effortless-table",
         __spec: {},
-        setup: () => ({ env: "test" }),
+        setup: ({ deps, table }: any) => ({ env: "test", users: deps.users, table }),
         deps: { users: { __brand: "effortless-table", config: {} } },
         onRecord: async (args: any) => {
           capturedArgs = args;
@@ -444,8 +442,8 @@ describe("deps runtime injection", () => {
       ]));
 
       expect(capturedArgs.table.tableName).toBe("my-project-dev-orders");
-      expect(capturedArgs.deps.users.tableName).toBe("my-project-dev-users");
-      expect(capturedArgs.ctx).toEqual({ env: "test" });
+      expect(capturedArgs.users.tableName).toBe("my-project-dev-users");
+      expect(capturedArgs.env).toEqual("test");
     });
 
     it("should not inject table when EFF_DEP_SELF is absent", async () => {

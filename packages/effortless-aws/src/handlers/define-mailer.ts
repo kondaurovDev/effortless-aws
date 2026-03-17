@@ -46,7 +46,7 @@ export type MailerHandler = {
  * });
  * ```
  */
-export const defineMailer = (options: MailerConfig): MailerHandler => ({
+export const defineMailer = () => (options: MailerConfig): MailerHandler => ({
   __brand: "effortless-mailer",
   __spec: options,
 });

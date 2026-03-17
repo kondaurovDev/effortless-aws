@@ -264,6 +264,77 @@ describe("createTableClient (single-table design)", () => {
       expect(mockUpdateItem).not.toHaveBeenCalled();
     });
 
+    it("should retry with full data map on ValidationException", async () => {
+      mockUpdateItem
+        .mockRejectedValueOnce(Object.assign(new Error("ValidationException"), { name: "ValidationException" }))
+        .mockResolvedValueOnce({});
+
+      const client = createTableClient<OrderData>("orders");
+      await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
+        set: { status: "shipped", amount: 200 },
+      });
+
+      expect(mockUpdateItem).toHaveBeenCalledTimes(2);
+      const retryCall = mockUpdateItem.mock.calls[1]![0];
+      expect(retryCall.UpdateExpression).toBe("SET #data = :fullData");
+      const retryValues = unmarshall(retryCall.ExpressionAttributeValues);
+      expect(retryValues[":fullData"]).toEqual({ status: "shipped", amount: 200 });
+    });
+
+    it("should retry with tag + ttl alongside full data on ValidationException", async () => {
+      mockUpdateItem
+        .mockRejectedValueOnce(Object.assign(new Error("ValidationException"), { name: "ValidationException" }))
+        .mockResolvedValueOnce({});
+
+      const client = createTableClient<OrderData>("orders");
+      await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
+        set: { status: "shipped" },
+        tag: "shipped-order",
+        ttl: 1700000000,
+      });
+
+      expect(mockUpdateItem).toHaveBeenCalledTimes(2);
+      const retryCall = mockUpdateItem.mock.calls[1]![0];
+      expect(retryCall.UpdateExpression).toBe("SET #data = :fullData, #tag = :tagVal, #ttl = :ttlVal");
+    });
+
+    it("should retry with REMOVE ttl on ValidationException when ttl is null", async () => {
+      mockUpdateItem
+        .mockRejectedValueOnce(Object.assign(new Error("ValidationException"), { name: "ValidationException" }))
+        .mockResolvedValueOnce({});
+
+      const client = createTableClient<OrderData>("orders");
+      await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
+        set: { status: "archived" },
+        ttl: null,
+      });
+
+      expect(mockUpdateItem).toHaveBeenCalledTimes(2);
+      const retryCall = mockUpdateItem.mock.calls[1]![0];
+      expect(retryCall.UpdateExpression).toBe("SET #data = :fullData REMOVE #ttl");
+    });
+
+    it("should rethrow non-ValidationException errors", async () => {
+      mockUpdateItem.mockRejectedValueOnce(new Error("AccessDeniedException"));
+
+      const client = createTableClient<OrderData>("orders");
+      await expect(
+        client.update({ pk: "USER#1", sk: "ORDER#1" }, { set: { status: "x" } })
+      ).rejects.toThrow("AccessDeniedException");
+    });
+
+    it("should not retry when only top-level fields change (no data alias)", async () => {
+      mockUpdateItem.mockRejectedValueOnce(
+        Object.assign(new Error("ValidationException"), { name: "ValidationException" })
+      );
+
+      const client = createTableClient<OrderData>("orders");
+      await expect(
+        client.update({ pk: "USER#1", sk: "ORDER#1" }, { tag: "new-tag" })
+      ).rejects.toThrow("ValidationException");
+      expect(mockUpdateItem).toHaveBeenCalledTimes(1);
+    });
+
   });
 
   describe("query", () => {
@@ -441,6 +512,31 @@ describe("createTableClient (single-table design)", () => {
         IndexName: "tag-pk-index",
         KeyConditionExpression: "#tag = :tag AND #pk BETWEEN :pk1 AND :pk2",
         ExpressionAttributeValues: marshall({ ":tag": "order", ":pk1": "USER#A", ":pk2": "USER#Z" }, { removeUndefinedValues: true }),
+      }));
+    });
+
+    it("should query GSI with pk gt", async () => {
+      mockQuery.mockResolvedValueOnce({ Items: [] });
+
+      const client = createTableClient<OrderData>("orders");
+      await client.queryByTag({ tag: "order", pk: { gt: "USER#100" } });
+
+      expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
+        IndexName: "tag-pk-index",
+        KeyConditionExpression: "#tag = :tag AND #pk > :pk",
+        ExpressionAttributeNames: { "#tag": "tag", "#pk": "pk" },
+      }));
+    });
+
+    it("should query GSI with pk lte", async () => {
+      mockQuery.mockResolvedValueOnce({ Items: [] });
+
+      const client = createTableClient<OrderData>("orders");
+      await client.queryByTag({ tag: "order", pk: { lte: "USER#Z" } });
+
+      expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
+        IndexName: "tag-pk-index",
+        KeyConditionExpression: "#tag = :tag AND #pk <= :pk",
       }));
     });
 

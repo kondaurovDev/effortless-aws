@@ -1,155 +1,166 @@
 ---
 title: Authentication
-description: Protect your API and static site with cookie-based authentication using defineAuth.
+description: Protect your API with cookie-based authentication using enableAuth in defineApi setup.
 ---
 
-You have a frontend and an API, and some pages and endpoints should only be accessible to logged-in users. You don't want to integrate a third-party auth service or manage JWTs manually.
+You have an API and some endpoints should only be accessible to logged-in users. You don't want to integrate a third-party auth service or manage JWTs manually.
 
-`defineAuth` gives you cookie-based authentication out of the box. It creates HMAC-signed session cookies, verifies them at the CDN edge (no round-trip to your backend), and injects typed session helpers into your API handlers.
+`enableAuth` gives you cookie-based authentication out of the box. It creates HMAC-signed session cookies, verifies them per-route, and injects typed session helpers into your route handlers. You call it inside `defineApi`'s `setup` function.
 
 ## How it works
 
-1. You define an auth config with `defineAuth<Session>()`
-2. Pass it to `defineApi({ auth })` and `defineStaticSite({ auth })`
-3. The API handler gets `auth.grant()`, `auth.revoke()`, and `auth.session`
-4. The static site gets an auto-generated Lambda@Edge middleware that blocks unauthenticated requests
+1. Add a `sessionSecret: secret()` to your API's `config`
+2. Call `enableAuth<Session>()` inside `setup`, passing the secret and options
+3. Return the `auth` object from `setup` --- it becomes available in every route handler
+4. Mark individual routes as `public: true` to skip authentication
 
-The session is stored in an `HttpOnly; Secure; SameSite=Lax` cookie, signed with HMAC-SHA256. The signing secret is auto-generated at deploy time and stored in SSM Parameter Store. Verification happens at the edge --- no external API calls, no database lookups.
+The session is stored in an `HttpOnly; Secure; SameSite=Lax` cookie, signed with HMAC-SHA256. The signing secret is provided explicitly via `secret()` and stored in SSM Parameter Store.
 
-## Define the auth config
-
-Start by declaring what your session looks like and how auth should behave:
+## Full example
 
 ```typescript
 // src/resources.ts
-import { defineAuth } from "effortless-aws";
+import { defineApi, defineTable, secret } from "effortless-aws";
 
+type ApiKey = { pk: string; sk: string; role: "admin" | "user" };
 type Session = { userId: string; role: "admin" | "user" };
 
-export const auth = defineAuth<Session>({
-  loginPath: "/login",
-  public: ["/login", "/assets/*"],
-  expiresIn: "7d",
-});
-```
-
-| Option | Description |
-|---|---|
-| `loginPath` | Where unauthenticated users are redirected |
-| `public` | Paths that don't require authentication. Supports trailing `*` wildcard |
-| `expiresIn` | Session lifetime. Accepts duration strings like `"7d"`, `"1h"`, `"30m"` or seconds. Default: `"7d"` |
-
-The generic `<Session>` makes `auth.grant()` require typed data and `auth.session` return `Session | undefined` in handlers.
-
-## Protect your API
-
-Pass the auth config to `defineApi`. Your handlers receive an `auth` object with three members:
-
-- **`auth.grant(data)`** --- create a signed session cookie. Returns a response with `Set-Cookie` header
-- **`auth.revoke()`** --- clear the session cookie. Returns a response with `Max-Age=0`
-- **`auth.session`** --- the decoded session data from the current request's cookie, or `undefined`
-
-```typescript
-// src/resources.ts
-import { defineApi, defineTable, unsafeAs } from "effortless-aws";
-import { z } from "zod";
-
-export const users = defineTable({
-  schema: unsafeAs<{ email: string; passwordHash: string; role: "admin" | "user" }>(),
-});
-
-const Action = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("login"), email: z.string(), password: z.string() }),
-  z.object({ action: z.literal("logout") }),
-]);
+export const apiKeys = defineTable<ApiKey>({});
 
 export const api = defineApi({
   basePath: "/api",
-  auth,
-  deps: () => ({ users }),
-  schema: (input) => Action.parse(input),
+  deps: () => ({ apiKeys }),
+  config: { sessionSecret: secret() },
+  setup: ({ deps, config, enableAuth }) => ({
+    auth: enableAuth<Session>({
+      secret: config.sessionSecret,
+      expiresIn: "7d",
+      apiToken: {
+        header: "x-api-key",
+        verify: async (value: string) => {
+          const items = await deps.apiKeys.query({ pk: value });
+          const key = items[0];
+          if (!key) return null;
+          return { userId: key.sk, role: key.data.role };
+        },
+        cacheTtl: "5m",
+      },
+    }),
+  }),
+  routes: [
+    {
+      path: "GET /me",
+      onRequest: async ({ auth }) => ({
+        status: 200,
+        body: { session: auth.session },
+      }),
+    },
+    {
+      path: "POST /login",
+      public: true,
+      onRequest: async ({ input, auth }) => {
+        const data = parseLogin(input);
+        return auth.createSession({ userId: data.userId, role: data.role });
+      },
+    },
+    {
+      path: "POST /logout",
+      onRequest: async ({ auth }) => auth.clearSession(),
+    },
+  ],
+});
+```
 
-  get: {
-    "/me": async ({ auth }) => {
-      if (!auth.session) {
-        return { status: 401, body: { error: "Not authenticated" } };
-      }
-      return { status: 200, body: auth.session };
+## enableAuth options
+
+`enableAuth<Session>(options)` is called inside `setup` and accepts:
+
+| Option | Description |
+|---|---|
+| `secret` | **Required.** The HMAC signing secret, typically from `config` via `secret()` |
+| `expiresIn` | Session lifetime. Accepts duration strings like `"7d"`, `"1h"`, `"30m"`. Default: `"7d"` |
+| `apiToken` | Optional API token authentication (see below) |
+
+The generic `<Session>` controls the shape of data stored in the cookie and returned by `auth.session`.
+
+## Auth helpers in routes
+
+Every route handler receives the `auth` object returned from `setup`. It has three members:
+
+- **`auth.createSession(data)`** --- create a signed session cookie. Returns a response with `Set-Cookie` header
+- **`auth.clearSession()`** --- clear the session cookie. Returns a response with `Max-Age=0`
+- **`auth.session`** --- the decoded session data from the current request's cookie, or `undefined`
+
+`auth.createSession()` returns a full response object (`{ status: 200, body: { ok: true }, headers: { "set-cookie": "..." } }`), so you can return it directly from a route handler.
+
+## Public routes
+
+By default, all routes require a valid session. To make a route accessible without authentication, add `public: true`:
+
+```typescript
+routes: [
+  {
+    path: "POST /login",
+    public: true,
+    onRequest: async ({ input, auth }) => {
+      // auth.session is undefined here (no cookie yet)
+      return auth.createSession({ userId: "u1", role: "user" });
     },
   },
+  {
+    path: "GET /me",
+    // requires valid session --- unauthenticated requests get 401
+    onRequest: async ({ auth }) => ({
+      status: 200,
+      body: auth.session,
+    }),
+  },
+],
+```
 
-  post: async ({ data, auth, deps }) => {
-    switch (data.action) {
-      case "login": {
-        const user = await deps.users.get({
-          pk: `USER#${data.email}`,
-          sk: "PROFILE",
-        });
-        if (!user || !verifyPassword(data.password, user.data.passwordHash)) {
-          return { status: 401, body: { error: "Invalid credentials" } };
-        }
-        // Create a signed session cookie
-        return auth.grant({ userId: data.email, role: user.data.role });
-      }
-      case "logout":
-        return auth.revoke();
-    }
+## API token authentication
+
+If your API also needs to support token-based auth (for programmatic clients, CLI tools, etc.), configure `apiToken`:
+
+```typescript
+enableAuth<Session>({
+  secret: config.sessionSecret,
+  apiToken: {
+    header: "x-api-key",          // header to read the token from (default: "authorization")
+    verify: async (value) => {    // return session data or null
+      const items = await deps.apiKeys.query({ pk: value });
+      const key = items[0];
+      if (!key) return null;
+      return { userId: key.sk, role: key.data.role };
+    },
+    cacheTtl: "5m",              // cache verified tokens in memory
   },
 });
 ```
 
-`auth.grant()` returns a full response object (`{ status: 200, body: { ok: true }, headers: { "set-cookie": "..." } }`), so you can return it directly. If you need a custom expiration for a specific grant:
+When a request arrives, the auth middleware checks for the API token header first. If present, it calls `verify()` and uses the returned data as the session. If not present, it falls back to the session cookie.
+
+## Sharing setup values with routes
+
+Since `enableAuth` lives inside `setup`, you can return other values alongside `auth`. Everything returned from `setup` is spread into route handler args:
 
 ```typescript
-return auth.grant({ userId: "u1", role: "admin" }, { expiresIn: "1h" });
-```
-
-## Protect your static site
-
-Pass the same auth config to `defineStaticSite`. Effortless auto-generates a Lambda@Edge function that verifies the cookie signature before serving any page.
-
-```typescript
-export const webapp = defineStaticSite({
-  dir: "apps/frontend/dist",
-  build: "pnpm --dir apps/frontend build",
-  spa: true,
-  auth,
-  routes: {
-    "/api/*": api,
+setup: ({ deps, config, enableAuth }) => ({
+  appName: config.appName,
+  auth: enableAuth<Session>({ secret: config.sessionSecret }),
+}),
+routes: [
+  {
+    path: "GET /me",
+    onRequest: async ({ appName, auth }) => ({
+      status: 200,
+      body: { app: appName, session: auth.session },
+    }),
   },
-});
+],
 ```
 
-When a request comes in:
-1. If the path matches a `public` pattern --- serve the page (no cookie check)
-2. If a valid, non-expired session cookie exists --- serve the page
-3. Otherwise --- redirect to `loginPath`
-
-This happens at the CDN edge, so unauthenticated users never hit your origin. The verification is purely cryptographic --- the HMAC signature is checked against the secret that was injected into the Lambda@Edge function at build time.
-
-## Custom session data
-
-The generic on `defineAuth<T>` controls what data is stored in the cookie. Without a generic (`defineAuth({...})`), `grant()` takes no data and `session` is `undefined`.
-
-With a generic, `grant()` requires typed data and `session` is typed:
-
-```typescript
-// No session data
-const simpleAuth = defineAuth({
-  loginPath: "/login",
-});
-// auth.grant()        --- no data needed
-// auth.session        --- undefined
-
-// With session data
-const typedAuth = defineAuth<{ userId: string; role: string }>({
-  loginPath: "/login",
-});
-// auth.grant({ userId: "u1", role: "admin" })  --- data required
-// auth.session?.userId                          --- typed as string
-```
-
-Keep session data small --- it's stored in the cookie and sent with every request. Store IDs and roles, not large objects.
+Note that `deps` and `config` are only available inside `setup`. Route handlers receive the values returned from `setup`.
 
 ## How the cookie works
 
@@ -160,31 +171,29 @@ __eff_session={base64url(JSON.stringify({ exp, ...data }))}.{hmac-sha256(payload
 ```
 
 - **Payload**: base64url-encoded JSON with an `exp` (Unix timestamp) field and your session data
-- **Signature**: HMAC-SHA256 of the payload, using the auto-generated secret
+- **Signature**: HMAC-SHA256 of the payload, using the secret from your `config`
 - **Cookie attributes**: `HttpOnly; Secure; SameSite=Lax; Path=/`
-
-The secret is generated once per project+stage and stored at `/{project}/{stage}/auth-hmac-secret` in SSM Parameter Store.
 
 `HttpOnly` prevents JavaScript from reading the cookie (XSS protection). `Secure` ensures it's only sent over HTTPS. `SameSite=Lax` prevents CSRF for state-changing requests while allowing normal navigation.
 
-## Architecture
+## Custom session data
 
-```
-Browser
-  │
-  ├── GET /dashboard
-  │     └── CloudFront → Lambda@Edge (verify cookie) → S3 (serve page)
-  │
-  ├── POST /api  { action: "login", ... }
-  │     └── CloudFront → Lambda Function URL → auth.grant() → Set-Cookie
-  │
-  └── GET /api/me
-        └── CloudFront → Lambda Function URL → auth.session → JSON response
+The generic on `enableAuth<T>` controls what data is stored in the cookie.
+
+```typescript
+// With session data
+enableAuth<{ userId: string; role: string }>({
+  secret: config.sessionSecret,
+});
+// auth.createSession({ userId: "u1", role: "admin" })  --- data required
+// auth.session?.userId                                  --- typed as string
 ```
 
-- **Lambda@Edge** runs at CloudFront edge locations, verifying cookies with zero latency to your origin
-- **API Lambda** handles login/logout and reads the session from the same cookie
-- **HMAC secret** is fetched once per Lambda cold start from SSM, then cached in memory
+Keep session data small --- it's stored in the cookie and sent with every request. Store IDs and roles, not large objects.
+
+## Static site authentication
+
+Static sites do not have a built-in `auth` option. If you need to protect a static site, use `middleware` for edge-level authentication.
 
 ## See also
 

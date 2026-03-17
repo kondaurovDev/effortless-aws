@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --filter effortless-aws build)",
+      "Bash(pnpm --filter effortless-aws typecheck)",
+      "Bash(pnpm --filter @effortless-aws/cli typecheck)",
+      "Bash(pnpm --filter effortless-aws test)",
+      "Bash(pnpm test:*)",
+      "Bash(npx vitest:*)",
+      "Bash(pnpm exec:*)",
+      "Bash(pnpm --filter effortless-aws run build)",
+      "Bash(pnpm typecheck:*)"
+    ]
+  }
+}

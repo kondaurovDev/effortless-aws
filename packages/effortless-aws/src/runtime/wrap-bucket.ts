@@ -47,13 +47,17 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
   return async (event: S3Event) => {
     const startTime = Date.now();
     rt.patchConsole();
-    let shared: (Awaited<ReturnType<typeof rt.commonArgs>> & { bucket: ReturnType<typeof getSelfClient> }) | undefined;
+    let ctxProps: Record<string, unknown> = {};
 
     try {
       const rawRecords = event.Records ?? [];
       const input = { recordCount: rawRecords.length };
 
-      shared = { ...await rt.commonArgs(), bucket: getSelfClient() };
+      const common = await rt.commonArgs();
+      const ctx = common.ctx;
+      ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
+      const bucket = getSelfClient();
+      const shared = { bucket, ...ctxProps };
       let errorCount = 0;
 
       for (const record of rawRecords) {
@@ -84,8 +88,8 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
         rt.logExecution(startTime, input, { processedCount: rawRecords.length });
       }
     } finally {
-      if (handler.onAfterInvoke && shared) {
-        try { await handler.onAfterInvoke(shared); }
+      if (handler.onAfterInvoke) {
+        try { await handler.onAfterInvoke(ctxProps); }
         catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
       }
       rt.restoreConsole();

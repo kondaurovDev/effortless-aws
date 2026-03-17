@@ -1,5 +1,3 @@
-import type { Auth } from "./auth";
-
 /** Any branded handler that deploys to API Gateway (HttpHandler, ApiHandler, etc.) */
 type AnyRoutableHandler = { readonly __brand: string };
 
@@ -66,8 +64,6 @@ export type StaticSiteConfig = {
   errorPage?: string;
   /** Lambda@Edge middleware that runs before serving pages. Use for auth checks, redirects, etc. */
   middleware?: MiddlewareHandler;
-  /** Cookie-based authentication. Auto-generates Lambda@Edge middleware that verifies signed cookies. */
-  auth?: Auth<any>;
   /** SEO: auto-generate sitemap.xml and robots.txt at deploy time, optionally submit URLs to Google Indexing API */
   seo?: StaticSiteSeo;
 };
@@ -104,19 +100,8 @@ export type StaticSiteHandler = {
  * });
  * ```
  *
- * @example Protected site with middleware (Lambda@Edge)
- * ```typescript
- * export const admin = defineStaticSite({
- *   dir: "admin/dist",
- *   middleware: async (request) => {
- *     if (!request.cookies.session) {
- *       return { redirect: "/login" };
- *     }
- *   },
- * });
- * ```
  */
-export const defineStaticSite = (options: StaticSiteConfig): StaticSiteHandler => ({
+export const defineStaticSite = () => (options: StaticSiteConfig): StaticSiteHandler => ({
   __brand: "effortless-static-site",
   __spec: options,
 });

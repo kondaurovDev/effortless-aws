@@ -1,8 +1,8 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, TableItem, Duration } from "./handler-options";
+import type { LambdaWithPermissions, ResolveConfig, TableItem, Duration, ConfigFactory } from "./handler-options";
+import { resolveConfigFactory } from "./handler-options";
 import type { TableClient } from "../runtime/table-client";
-import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
+import type { ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
-import type { HandlerArgs } from "./handler-args";
 
 /** DynamoDB attribute types for keys */
 export type KeyType = "string" | "number" | "binary";
@@ -39,18 +39,12 @@ export type TableConfig = {
   batchWindow?: Duration;
   /** Where to start reading the stream (default: "LATEST") */
   startingPosition?: "LATEST" | "TRIM_HORIZON";
+  /** Number of records to process concurrently within a batch (default: 1 — sequential) */
+  concurrency?: number;
   /**
    * Name of the field in `data` that serves as the entity type discriminant.
    * Effortless auto-copies `data[tagField]` to the top-level DynamoDB `tag` attribute on `put()`.
    * Defaults to `"tag"`.
-   *
-   * @example
-   * ```typescript
-   * export const orders = defineTable<{ type: "order"; amount: number }>({
-   *   tagField: "type",
-   *   onRecord: async ({ record }) => { ... }
-   * });
-   * ```
    */
   tagField?: string;
 };
@@ -78,20 +72,8 @@ export type TableRecord<T = Record<string, unknown>> = {
 };
 
 /**
- * Information about a failed record during batch processing
- *
- * @typeParam T - Type of the domain data
- */
-export type FailedRecord<T = Record<string, unknown>> = {
-  /** The record that failed to process */
-  record: TableRecord<T>;
-  /** The error that occurred */
-  error: unknown;
-};
-
-/**
  * Setup factory type for table handlers.
- * Always receives `table: TableClient<T>` (self-client for the handler's own table).
+ * Receives `table: TableClient<T>` (self-client for the handler's own table).
  * Also receives `deps` and/or `config` when declared.
  */
 type SetupFactory<C, T, D, P, S extends string[] | undefined = undefined> = (args:
@@ -101,32 +83,36 @@ type SetupFactory<C, T, D, P, S extends string[] | undefined = undefined> = (arg
     & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => C | Promise<C>;
 
-/**
- * Callback function type for processing a single DynamoDB stream record
- */
-export type TableRecordFn<T = Record<string, unknown>, C = undefined, R = void, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
-  (args: { record: TableRecord<T>; table: TableClient<T> }
-    & HandlerArgs<C, D, P, S>
-  ) => Promise<R>;
+/** Spread ctx into callback args (empty when no setup) */
+type SpreadCtx<C> = [C] extends [undefined] ? {} : C & {};
 
 /**
- * Callback function type for processing accumulated batch results
+ * Callback function type for processing a single DynamoDB stream record.
+ * Receives the current record and the full batch for context.
  */
-export type TableBatchCompleteFn<T = Record<string, unknown>, C = undefined, R = void, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
-  (args: { results: R[]; failures: FailedRecord<T>[]; table: TableClient<T> }
-    & HandlerArgs<C, D, P, S>
+export type TableRecordFn<T = Record<string, unknown>, C = undefined> =
+  (args: { record: TableRecord<T>; batch: readonly TableRecord<T>[] }
+    & SpreadCtx<C>
   ) => Promise<void>;
 
 /**
- * Callback function type for processing all records in a batch at once
+ * Batch handler function for DynamoDB stream records.
+ * Called once with all records in the batch.
+ * Return `{ failures: string[] }` (sequence numbers) for partial batch failure reporting.
  */
-export type TableBatchFn<T = Record<string, unknown>, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
-  (args: { records: TableRecord<T>[]; table: TableClient<T> }
-    & HandlerArgs<C, D, P, S>
-  ) => Promise<void>;
+export type TableBatchFn<T = Record<string, unknown>, C = undefined> =
+  (args: { records: readonly TableRecord<T>[] }
+    & SpreadCtx<C>
+  ) => Promise<void | { failures: string[] }>;
 
 /** Base options shared by all defineTable variants */
-type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = Omit<TableConfig, "tagField"> & {
+type DefineTableBase<
+  T = Record<string, unknown>,
+  C = undefined,
+  D = undefined,
+  P = undefined,
+  S extends string[] | undefined = undefined
+> = Omit<TableConfig, "tagField"> & {
   /** Name of the field in `data` that serves as the entity type discriminant (default: `"tag"`). */
   tagField?: Extract<keyof T, string>;
   /**
@@ -136,70 +122,66 @@ type DefineTableBase<T = Record<string, unknown>, C = undefined, D = undefined, 
    */
   schema?: (input: unknown) => T;
   /**
-   * Error handler called when onRecord, onBatch, or onBatchComplete throws.
-   * Receives the error. If not provided, defaults to `console.error`.
+   * Error handler called when onRecord/onRecordBatch throws.
+   * If not provided, defaults to `console.error`.
    */
-  onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
+  onError?: (args: { error: unknown } & SpreadCtx<C>) => void;
   /** Called after each invocation completes, right before Lambda freezes the process */
-  onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
+  onAfterInvoke?: (args: SpreadCtx<C>) => void | Promise<void>;
   /**
    * Factory function to initialize shared state for callbacks.
    * Called once on cold start, result is cached and reused across invocations.
-   * When deps/params are declared, receives them as argument.
-   * Supports both sync and async return values.
+   * Receives `table` (self-client), plus `deps`/`config`/`files` when declared.
    */
-  setup?: SetupFactory<C, T, D, P, S>;
+  setup?: SetupFactory<C, T, NoInfer<D>, NoInfer<P>, NoInfer<S>>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
-   * Typed clients are injected into the handler via the `deps` argument.
+   * Typed clients are injected into setup via the `deps` argument.
    * Pass a function returning the deps object: `deps: () => ({ orders })`.
    */
   deps?: () => D & {};
   /**
    * SSM Parameter Store parameters.
-   * Declare with `param()` helper. Values are fetched and cached at cold start.
-   * Typed values are injected into the handler via the `config` argument.
+   * Declare with `defineSecret()` helper. Values are fetched and cached at cold start.
    */
-  config?: P;
+  config?: ConfigFactory<P>;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
-   * Files are accessible at runtime via the `files` callback argument.
+   * Files are accessible at runtime via the `files` argument in setup.
    */
   static?: S;
 };
 
-/** Per-record processing: onRecord with optional onBatchComplete */
-type DefineTableWithOnRecord<T = Record<string, unknown>, C = undefined, R = void, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineTableBase<T, C, D, P, S> & {
-  onRecord: TableRecordFn<T, C, R, D, P, S>;
-  onBatchComplete?: TableBatchCompleteFn<T, C, R, D, P, S>;
-  onBatch?: never;
-};
-
-/** Batch processing: onBatch processes all records at once */
-type DefineTableWithOnBatch<T = Record<string, unknown>, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineTableBase<T, C, D, P, S> & {
-  onBatch: TableBatchFn<T, C, D, P, S>;
-  onRecord?: never;
-  onBatchComplete?: never;
-};
-
-/** Resource-only: no handler, just creates the table */
-type DefineTableResourceOnly<T = Record<string, unknown>, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineTableBase<T, C, D, P, S> & {
-  onRecord?: never;
-  onBatch?: never;
-  onBatchComplete?: never;
-};
-
+/**
+ * Options for defineTable.
+ * `onRecord` and `onRecordBatch` are mutually exclusive. Both are optional (table-only mode).
+ */
 export type DefineTableOptions<
   T = Record<string, unknown>,
   C = undefined,
-  R = void,
-  D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined,
+  D = undefined,
+  P = undefined,
   S extends string[] | undefined = undefined
-> =
-  | DefineTableWithOnRecord<T, C, R, D, P, S>
-  | DefineTableWithOnBatch<T, C, D, P, S>
-  | DefineTableResourceOnly<T, C, D, P, S>;
+> = DefineTableBase<T, C, D, P, S> & (
+  | {
+      /**
+       * Per-record stream handler. Called once per record in the batch.
+       * Runtime handles partial batch failure reporting automatically.
+       * Records are processed with configurable `concurrency` (default: 1 — sequential).
+       */
+      onRecord?: TableRecordFn<T, C>;
+      onRecordBatch?: never;
+    }
+  | {
+      /**
+       * Batch stream handler. Called once with all records in the batch.
+       * Return `{ failures: string[] }` with sequence numbers for partial batch failure.
+       */
+      onRecordBatch?: TableBatchFn<T, C>;
+      onRecord?: never;
+    }
+  | { onRecord?: never; onRecordBatch?: never }
+);
 
 /**
  * Internal handler object created by defineTable
@@ -216,8 +198,7 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
   readonly config?: Record<string, unknown>;
   readonly static?: string[];
   readonly onRecord?: (...args: any[]) => any;
-  readonly onBatchComplete?: (...args: any[]) => any;
-  readonly onBatch?: (...args: any[]) => any;
+  readonly onRecordBatch?: (...args: any[]) => any;
 };
 
 /**
@@ -228,35 +209,41 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
  *
  * @example Table with stream handler
  * ```typescript
- * type OrderData = { amount: number; status: string };
- *
- * export const orders = defineTable<OrderData>({
- *   streamView: "NEW_AND_OLD_IMAGES",
+ * export const orders = defineTable<OrderData>()({
  *   batchSize: 10,
- *   onRecord: async ({ record }) => {
+ *   concurrency: 5,
+ *   setup: ({ table }) => ({ table }),
+ *   onRecord: async ({ record, batch, table }) => {
  *     if (record.eventName === "INSERT") {
- *       console.log("New order:", record.new?.data.amount);
+ *       console.log("New order:", record.new?.data);
  *     }
  *   }
  * });
  * ```
  *
+ * @example Table with runtime validation
+ * ```typescript
+ * export const orders = defineTable<OrderData>()({
+ *   schema: (input) => OrderSchema.parse(input),
+ *   onRecord: async ({ record }) => { ... }
+ * });
+ * ```
+ *
  * @example Table only (no Lambda)
  * ```typescript
- * export const users = defineTable({});
+ * export const users = defineTable()({});
  * ```
  */
-export const defineTable = <
-  T = Record<string, unknown>,
+export const defineTable = <T = Record<string, unknown>>() => <
   C = undefined,
-  R = void,
-  D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined,
+  D = undefined,
+  P = undefined,
   S extends string[] | undefined = undefined
 >(
-  options: DefineTableOptions<T, C, R, D, P, S>
+  options: DefineTableOptions<T, C, D, P, S>
 ): TableHandler<T, C> => {
-  const { onRecord, onBatchComplete, onBatch, onError, onAfterInvoke, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
+  const { onRecord, onRecordBatch, onError, onAfterInvoke, schema, setup, deps, config: configFactory, static: staticFiles, ...__spec } = options;
+  const config = configFactory ? resolveConfigFactory(configFactory) : undefined;
   return {
     __brand: "effortless-table",
     __spec,
@@ -268,7 +255,6 @@ export const defineTable = <
     ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
     ...(onRecord ? { onRecord } : {}),
-    ...(onBatchComplete ? { onBatchComplete } : {}),
-    ...(onBatch ? { onBatch } : {})
+    ...(onRecordBatch ? { onRecordBatch } : {}),
   } as TableHandler<T, C>;
 };

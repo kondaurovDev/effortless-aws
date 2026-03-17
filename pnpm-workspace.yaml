@@ -19,3 +19,5 @@ catalog:
   tsup: ^8.5.1
   type-fest: ^4.22.1
   typescript: ^5.9.3
+  vitest: ^4.0.18
+  vite-tsconfig-paths: ^6.1.1

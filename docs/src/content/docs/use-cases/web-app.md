@@ -160,12 +160,16 @@ export const items = defineTable({
 export const api = defineApi({
   basePath: "/api/items",
   deps: () => ({ items }),
-  get: {
-    "/": async ({ deps }) => {
-      const result = await deps.items.query({});
-      return { status: 200, body: result };
+  setup: ({ deps }) => ({ items: deps.items }),
+  routes: [
+    {
+      path: "GET /",
+      onRequest: async ({ items }) => ({
+        status: 200,
+        body: await items.query({}),
+      }),
     },
-  },
+  ],
 });
 ```
 

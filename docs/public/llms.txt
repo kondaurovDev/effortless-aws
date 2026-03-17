@@ -37,7 +37,7 @@ Every `export const x = define*({...})` creates AWS resources. The export name b
 
 ### deps = automatic IAM wiring
 
-Reference other handlers via `deps: { orders, uploads, mailer }`. The framework injects typed clients and creates IAM permissions automatically.
+Reference other handlers via `deps: () => ({ orders, uploads, mailer })`. The framework injects typed clients and creates IAM permissions automatically.
 
 ### config = SSM secrets
 
@@ -45,7 +45,7 @@ Reference other handlers via `deps: { orders, uploads, mailer }`. The framework 
 
 ### setup = cold-start factory
 
-`setup: async ({ deps, config }) => ({ db: createPool(config.dbUrl) })` runs once per cold start. Return value is available as `ctx` in callbacks.
+`setup: async ({ deps, config }) => ({ db: createPool(config.dbUrl) })` runs once per cold start. Return value properties are **spread directly into callback args** (no `ctx` wrapper). `deps`, `config`, and `files` are available in `setup` only — not in callbacks.
 
 ### schema = validation
 
@@ -59,81 +59,120 @@ Pass a validation function or `typed<T>()` for type-only. Validated data arrives
 
 ### defineApi — HTTP API
 
-Creates Lambda + Function URL with built-in routing. Deploys a single Lambda that handles all routes internally — no API Gateway needed.
+Creates Lambda + Function URL with route-based routing. Deploys a single Lambda that handles all routes internally.
 
-`defineApi` is the primary way to build HTTP APIs. It supports multiple GET routes and a POST command handler under a shared base path with shared deps/config/setup.
+`defineApi` uses a `routes` array where each route specifies `path` (method + path pattern) and `onRequest` handler. Shared `deps`, `config`, `setup`, `static` across all routes.
 
 ```typescript
 import { defineApi, defineTable, typed, param } from "effortless-aws";
 import { z } from "zod";
 
 type User = { tag: string; name: string; email: string };
+type Session = { userId: string; role: string };
 
 export const users = defineTable({ schema: typed<User>() });
 
-// Discriminated union for POST commands
-const Action = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("create"), name: z.string(), email: z.string() }),
-  z.object({ action: z.literal("delete"), id: z.string() }),
-]);
+const CreateUser = z.object({ name: z.string(), email: z.string() });
+const DeleteUser = z.object({ id: z.string() });
 
 export default defineApi({
-  basePath: "/api",                          // all routes prefixed with /api
-  deps: { users },
+  deps: () => ({ users }),
   config: { dbUrl: param("database-url") },
-  setup: async ({ deps, config }) => ({ pool: createPool(config.dbUrl) }),
-
-  // GET routes — queries (path-based routing, no body)
-  get: {
-    "/users": async ({ req, deps }) => ({
-      status: 200,
-      body: await deps.users.queryByTag({ tag: "user" }),
-    }),
-    "/users/{id}": async ({ req, deps }) => ({
-      status: 200,
-      body: await deps.users.get({ pk: `USER#${req.params.id}`, sk: "PROFILE" }),
-    }),
+  setup: async ({ deps, config }) => {
+    const pool = createPool(config.dbUrl);
+    // enableAuth makes auth helpers available in route callbacks
+    const auth = enableAuth<Session>({ expiresIn: "7d" });
+    return { pool, auth };
   },
 
-  // POST — commands (single handler, discriminated union)
-  schema: (input) => Action.parse(input),
-  post: async ({ data, deps }) => {
-    switch (data.action) {
-      case "create": {
+  routes: [
+    {
+      path: "GET /api/users",
+      onRequest: async ({ pool, auth }) => ({
+        status: 200,
+        body: await pool.query("SELECT * FROM users"),
+      }),
+    },
+    {
+      path: "GET /api/me",
+      onRequest: async ({ auth }) => ({
+        status: 200,
+        body: { userId: auth.session?.userId },
+      }),
+    },
+    {
+      path: "POST /api/createUser",
+      schema: (input) => CreateUser.parse(input),
+      onRequest: async ({ data, pool }) => {
         const id = crypto.randomUUID();
-        await deps.users.put({ pk: `USER#${id}`, sk: "PROFILE", data: { tag: "user", ...data } });
+        await pool.query("INSERT INTO users ...", [id, data.name, data.email]);
         return { status: 201, body: { id } };
-      }
-      case "delete": {
-        await deps.users.delete({ pk: `USER#${data.id}`, sk: "PROFILE" });
+      },
+    },
+    {
+      path: "POST /api/deleteUser",
+      schema: (input) => DeleteUser.parse(input),
+      onRequest: async ({ data, pool }) => {
+        await pool.query("DELETE FROM users WHERE id = $1", [data.id]);
         return { status: 200, body: { ok: true } };
-      }
-    }
-  },
+      },
+    },
+    {
+      path: "POST /api/login",
+      public: true,  // accessible without session
+      schema: (input) => z.object({ password: z.string() }).parse(input),
+      onRequest: async ({ data, auth }) => {
+        if (data.password !== "secret") return { status: 401, body: { error: "Invalid" } };
+        return auth.createSession({ userId: "admin", role: "admin" });
+      },
+    },
+  ],
 });
 ```
 
 **Key features:**
-- `basePath` — single Lambda handles all routes under this prefix
-- `get` — record of `{ path: handler }` for query routes with `{param}` extraction
-- `schema` + `post` — single POST handler with discriminated union for commands
-- Both `get` and `post` are optional (you can use just one)
-- Shared `deps`, `config`, `setup`, `static`, `onError` across all routes
-- Unmatched routes get a 404 automatically
-- Lambda Function URL with built-in CORS — no API Gateway overhead
+- `routes` — array of `{ path, onRequest, schema?, public? }` entries
+- `path` — `"METHOD /pattern"` string (e.g. `"GET /api/users"`, `"POST /api/create"`)
+- `schema` — optional validation for request body; validated value arrives as `data` in callback
+- `public: true` on a route — bypasses auth gate
+- `enableAuth` injected via `setup` return — makes auth helpers available as spread args in route callbacks
+- Shared `deps`, `config`, `setup`, `static`, `onError`, `onAfterInvoke` across all routes
+- Unmatched routes/methods get 404, missing session gets 401
 
-**`req` object (available in all route handlers):**
+**`enableAuth` — typed authentication (injected via setup):**
+
+```typescript
+// Session-only (cookie-based)
+const auth = enableAuth<Session>({ expiresIn: "7d" });
+
+// Session + API token (hybrid: cookie for browser, token for external clients)
+const auth = enableAuth<Session>({
+  expiresIn: "7d",
+  apiToken: {
+    verify: (token) => lookupUser(token),  // return Session | null
+    cacheTtl: "5m",                        // cache verified tokens
+    header: "x-api-key",                   // default: "authorization" (Bearer)
+  },
+});
+```
+
+Auth helpers spread into route callback args (when `enableAuth` is returned from setup):
+- `auth.createSession(data)` — create signed session cookie, returns `{ status: 200, headers: { "set-cookie": ... } }`
+- `auth.clearSession()` — clear session cookie
+- `auth.session` — current session data (`T | undefined`)
+- API token takes priority over cookie when both are present
+
+**`req` object (available in all handlers):**
 - `req.method` — HTTP method
 - `req.path` — request path
 - `req.headers` — `Record<string, string | undefined>`
 - `req.query` — query string parameters
-- `req.params` — path parameters from `{param}` placeholders
 - `req.body` — parsed body (JSON auto-parsed)
 - `req.rawBody` — raw string body
 
 ### defineTable — DynamoDB table
 
-Creates a DynamoDB table. Optionally creates a stream Lambda if `onRecord`/`onBatch` is provided.
+Creates a DynamoDB table. Optionally creates a stream Lambda if `onRecord`/`onRecordBatch` is provided.
 
 **Single-table design with fixed envelope:**
 
@@ -161,24 +200,22 @@ export const orders = defineTable({
   tagField: "tag",           // default; change to "type" or "kind" if needed
 
   // Per-record processing (partial batch failures built in)
-  onRecord: async ({ record, deps, config, ctx }) => {
+  onRecord: async ({ record, table, ...spreadCtx }) => {
     // record.eventName: "INSERT" | "MODIFY" | "REMOVE"
     // record.new?.data — new item data (typed as Order)
     // record.old?.data — previous item data
     // record.keys — { pk, sk }
+    // ...spreadCtx — properties returned from setup, spread directly into args
   },
 
   // OR batch processing
-  onBatch: async ({ records }) => { /* all records at once */ },
-
-  // OR record + summary
-  onRecord: async ({ record }) => { return { amount: record.new!.data.amount }; },
-  onBatchComplete: async ({ results, failures }) => { /* aggregate */ },
+  // OR batch processing (return { failures: string[] } for partial batch failure)
+  onRecordBatch: async ({ records }) => { /* all records at once */ },
 
   batchSize: 100,            // 1-10000, default varies
-  deps: { notifications },
+  deps: () => ({ notifications }),
   config: { webhookUrl: param("webhook/url") },
-  setup: async ({ deps, config }) => ({ /* cold-start init */ }),
+  setup: async ({ deps, config }) => ({ /* cold-start init — only place deps/config available */ }),
   memory: 256,
   timeout: 30,
   logLevel: "info",
@@ -234,20 +271,21 @@ export const orderQueue = defineFifoQueue({
   schema: typed<OrderEvent>(),
 
   // Per-message (partial batch failures built in)
-  onMessage: async ({ message, deps, config, ctx }) => {
+  onMessage: async ({ message, ...spreadCtx }) => {
     // message.body — typed as OrderEvent
     // message.messageId, message.messageGroupId, message.rawBody
+    // ...spreadCtx — properties returned from setup, spread directly into args
   },
 
-  // OR batch processing
-  onBatch: async ({ messages }) => { /* all messages at once */ },
+  // OR batch processing (return { failures: string[] } for partial batch failure)
+  onMessageBatch: async ({ messages }) => { /* all messages at once */ },
 
   batchSize: 10,              // 1-10, default: 10
   batchWindow: 10,            // seconds to wait, 0-300
   visibilityTimeout: 120,     // seconds before retry
   retentionPeriod: 86400,     // message retention in seconds
   contentBasedDeduplication: true,
-  deps: { orders },
+  deps: () => ({ orders }),
   config: { apiKey: param("api-key") },
   memory: 256,
   timeout: 30,
@@ -259,15 +297,20 @@ export const orderQueue = defineFifoQueue({
 
 ```typescript
 export const orders = defineApi({
-  basePath: "/orders",
-  deps: { orderQueue },
-  post: async ({ deps }) => {
-    await deps.orderQueue.send({
-      body: { orderId: "123", action: "created" },
-      messageGroupId: "order-123",
-    });
-    return { status: 200, body: { ok: true } };
-  },
+  deps: () => ({ orderQueue }),
+  routes: [
+    {
+      path: "POST /orders/create",
+      schema: (input) => OrderSchema.parse(input),
+      onRequest: async ({ data, deps }) => {
+        await deps.orderQueue.send({
+          body: { orderId: data.id, action: "created" },
+          messageGroupId: `order-${data.id}`,
+        });
+        return { status: 200, body: { ok: true } };
+      },
+    },
+  ],
 });
 ```
 
@@ -286,9 +329,10 @@ export const images = defineBucket({
   prefix: "uploads/",       // filter by key prefix
   suffix: ".jpg",            // filter by key suffix
 
-  onObjectCreated: async ({ event, bucket, deps }) => {
+  onObjectCreated: async ({ event, bucket, ...spreadCtx }) => {
     // event.key, event.size, event.eventName, event.eTag, event.eventTime
     // bucket — BucketClient for this bucket
+    // ...spreadCtx — properties returned from setup, spread directly into args
     const file = await bucket.get(event.key);
   },
 
@@ -296,7 +340,7 @@ export const images = defineBucket({
     await removeFromIndex(event.key);
   },
 
-  deps: { records },
+  deps: () => ({ records }),
   config: { apiKey: param("api-key") },
   memory: 256,
   timeout: 30,
@@ -456,16 +500,16 @@ All generics are inferred automatically. Never specify generics manually:
 ```typescript
 export const orders = defineTable({
   schema: typed<Order>(),                       // T = Order
-  deps: { users },                              // D inferred
+  deps: () => ({ users }),                      // D inferred
   config: { threshold: param("threshold", Number) }, // P inferred, Number transform applied
-  setup: async ({ config }) => ({               // C = return type
+  setup: async ({ deps, config }) => ({         // C = return type; only place deps/config available
     db: createPool(config.threshold),
+    // deps.users is TableClient<User> here
+    // config.threshold is number here
   }),
-  onRecord: async ({ record, ctx, deps, config }) => {
+  onRecord: async ({ record, db }) => {
     // record.new?.data is Order
-    // ctx is { db: Pool }
-    // deps.users is TableClient<User>
-    // config.threshold is number
+    // db is Pool — spread directly from setup return value
   },
 });
 ```
@@ -474,13 +518,15 @@ export const orders = defineTable({
 
 Handler callbacks receive a single object with relevant args. Args are conditionally present based on configuration:
 - `req` — HTTP request (defineApi)
-- `data` — validated body (when schema is set)
-- `deps` — typed dep clients (when deps is set)
-- `config` — resolved SSM values (when config is set)
-- `ctx` — setup return value (when setup is set)
-- `files` — static file reader (when static is set)
+- `data` — validated body/query (when schema is set)
+- `input` — raw query params (query without schema)
+- `...ctx` — setup return properties spread directly into args (when setup is set)
+- `auth` — session helpers spread from setup via `enableAuth`: `createSession`, `clearSession`, `session`
+- `stream` — response stream (when stream: true)
 - `record` / `records` / `message` / `messages` — event data (type-specific)
 - `event` / `bucket` — S3 event data (defineBucket)
+
+Note: `deps`, `config`, and `files` are available in `setup` only — not spread into callback args.
 
 ### param() with transforms
 

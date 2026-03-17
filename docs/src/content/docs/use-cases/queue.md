@@ -79,14 +79,15 @@ type FulfillmentEvent = { orderId: string; warehouse: string };
 export const fulfillment = defineFifoQueue({
   schema: unsafeAs<FulfillmentEvent>(),
   deps: () => ({ orders }),
-  onMessage: async ({ message, deps }) => {
-    // deps.orders is TableClient<Order> — typed from the table's generic
-    const order = await deps.orders.get({ id: message.body.orderId });
+  setup: ({ deps }) => ({ orders: deps.orders }),
+  onMessage: async ({ message, orders }) => {
+    // orders is TableClient<Order> — typed from the table's generic
+    const order = await orders.get({ id: message.body.orderId });
     if (!order) return;
 
-    await deps.orders.put({ ...order, status: "fulfilling" });
+    await orders.put({ ...order, status: "fulfilling" });
     await shipFromWarehouse(message.body.warehouse, order);
-    await deps.orders.put({ ...order, status: "shipped" });
+    await orders.put({ ...order, status: "shipped" });
   },
 });
 ```
@@ -97,7 +98,7 @@ Each Lambda gets only the DynamoDB permissions it needs. No manual IAM policies.
 
 Processing messages one by one is fine for most cases. But when you need to handle high throughput — bulk database writes, batch API calls, aggregated operations — you want to work with the entire batch at once.
 
-Use `onBatch` instead of `onMessage`:
+Use `onMessageBatch` instead of `onMessage`:
 
 ```typescript
 // src/analytics.ts
@@ -108,14 +109,14 @@ type ClickEvent = { page: string; userId: string; timestamp: string };
 export const clickEvents = defineFifoQueue({
   schema: unsafeAs<ClickEvent>(),
   batchSize: 10,
-  onBatch: async ({ messages }) => {
+  onMessageBatch: async ({ messages }) => {
     const events = messages.map(m => m.body);
     await bulkInsertToAnalytics(events);
   },
 });
 ```
 
-With `onBatch`, if the handler throws, all messages in the batch are reported as failed. Use this when individual message processing doesn't make sense — bulk inserts, batch API calls, or all-or-nothing operations.
+With `onMessageBatch`, if the handler throws, all messages in the batch are reported as failed. For partial failure support, return `{ failures: string[] }` with the messageIds of failed messages. Use this when individual message processing doesn't make sense — bulk inserts, batch API calls, or all-or-nothing operations.
 
 ## Using secrets
 
@@ -128,13 +129,14 @@ type WebhookEvent = { url: string; payload: Record<string, unknown> };
 
 export const webhookQueue = defineFifoQueue({
   schema: unsafeAs<WebhookEvent>(),
-  params: {
+  config: {
     apiKey: param("webhook/api-key"),
   },
-  onMessage: async ({ message, params }) => {
+  setup: ({ config }) => ({ apiKey: config.apiKey }),
+  onMessage: async ({ message, apiKey }) => {
     await fetch(message.body.url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${params.apiKey}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(message.body.payload),
     });
   },

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 import * as path from "path"
 
-import { extractApiConfigs } from "~cli/build/bundle"
+import { extractApiConfigs } from "./helpers/extract-from-source"
 import { importBundle } from "./helpers/bundle-code"
 
 const projectDir = path.resolve(__dirname, "..")
@@ -19,79 +19,78 @@ describe("defineApi", () => {
 
   describe("AST extraction", () => {
 
-    it("should extract basePath from config", () => {
+    it("should extract basePath from config", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          get: {
-            "/users": async ({ req }) => ({ status: 200, body: [] }),
-          },
-          post: async ({ data }) => ({ status: 200, body: data }),
+          routes: [
+            { path: "GET /users", onRequest: async ({ req }) => ({ status: 200, body: [] }) },
+          ],
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.exportName).toBe("default");
       expect(configs[0]!.config).toEqual({ basePath: "/api" });
     });
 
-    it("should strip get, post, schema from static config", () => {
+    it("should strip routes from static config", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi({
+        export const api = defineApi()({
           basePath: "/api",
-          memory: 512,
-          get: {
-            "/users": async ({ req }) => ({ status: 200, body: [] }),
-          },
-          schema: (input) => input,
-          post: async ({ data }) => ({ status: 200, body: data }),
+          routes: [
+            { path: "GET /users", onRequest: async ({ req }) => ({ status: 200, body: [] }) },
+            {
+              path: "POST /users",
+              onRequest: async ({ input }) => ({ status: 201, body: input }),
+            },
+          ],
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs).toHaveLength(1);
       expect(configs[0]!.exportName).toBe("api");
-      expect(configs[0]!.config).toEqual({ basePath: "/api", memory: 512 });
-      expect(configs[0]!.config).not.toHaveProperty("get");
-      expect(configs[0]!.config).not.toHaveProperty("post");
-      expect(configs[0]!.config).not.toHaveProperty("schema");
+      expect(configs[0]!.config).toEqual({ basePath: "/api" });
+      expect(configs[0]!.config).not.toHaveProperty("routes");
     });
 
-    it("should not match other define* calls", () => {
+    it("should not match other define* calls", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const api = defineTable({
+        export const api = defineTable()({
           schema: (input) => input,
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
       expect(configs).toHaveLength(0);
     });
 
-    it("should extract deps and param entries", () => {
+    it("should extract deps and param entries", async () => {
       const source = `
-        import { defineApi, param } from "effortless-aws";
+        import { defineApi } from "effortless-aws";
+        const users = {} as any;
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
           deps: () => ({ users }),
-          config: { dbUrl: param("database-url") },
-          get: {
-            "/users": async ({ req }) => ({ status: 200, body: [] }),
-          },
+          config: ({ defineSecret }) => ({ dbUrl: defineSecret({ key: "database-url" }) }),
+          routes: [
+            { path: "GET /users", onRequest: async ({ req }) => ({ status: 200, body: [] }) },
+          ],
         });
       `;
 
-      const configs = extractApiConfigs(source);
+      const configs = await extractApiConfigs(source);
 
       expect(configs[0]!.depsKeys).toEqual(["users"]);
       expect(configs[0]!.secretEntries).toEqual([{ propName: "dbUrl", ssmKey: "database-url" }]);
@@ -99,24 +98,24 @@ describe("defineApi", () => {
 
   });
 
-  describe("GET routing", () => {
+  describe("route matching", () => {
 
     it("should route GET requests by path", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          get: {
-            "/users": async ({ req }) => ({
-              status: 200,
-              body: { route: "list-users" }
-            }),
-            "/health": async ({ req }) => ({
-              status: 200,
-              body: { route: "health" }
-            }),
-          },
+          routes: [
+            {
+              path: "GET /users",
+              onRequest: async ({ req }) => ({ status: 200, body: { route: "list-users" } }),
+            },
+            {
+              path: "GET /health",
+              onRequest: async ({ req }) => ({ status: 200, body: { route: "health" } }),
+            },
+          ],
         });
       `;
 
@@ -131,47 +130,70 @@ describe("defineApi", () => {
       expect(JSON.parse(res2.body).route).toBe("health");
     });
 
-    it("should extract path parameters", async () => {
+    it("should pass merged input via input arg", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          get: {
-            "/users/{id}": async ({ req }) => ({
-              status: 200,
-              body: { userId: req.params.id }
-            }),
-            "/users/{userId}/posts/{postId}": async ({ req }) => ({
-              status: 200,
-              body: { userId: req.params.userId, postId: req.params.postId }
-            }),
-          },
+          routes: [
+            {
+              path: "GET /user",
+              onRequest: async ({ req }) => ({ status: 200, body: { userId: req.query.id } }),
+            },
+          ],
         });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
 
-      const res1 = await mod.handler(makeEvent("GET", "/api/users/123"));
-      expect(res1.statusCode).toBe(200);
-      expect(JSON.parse(res1.body).userId).toBe("123");
-
-      const res2 = await mod.handler(makeEvent("GET", "/api/users/456/posts/789"));
-      expect(res2.statusCode).toBe(200);
-      const body2 = JSON.parse(res2.body);
-      expect(body2.userId).toBe("456");
-      expect(body2.postId).toBe("789");
+      const res = await mod.handler(makeEvent("GET", "/api/user", {
+        queryStringParameters: { id: "123" },
+      }));
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).userId).toBe("123");
     });
 
-    it("should return 404 for unmatched GET path", async () => {
+    it("should validate input with schema function", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          get: {
-            "/users": async ({ req }) => ({ status: 200, body: [] }),
-          },
+          routes: [
+            {
+              path: "GET /user",
+              onRequest: async ({ input }) => {
+                if (!input || !input.id) throw new Error("id is required");
+                const data = { id: input.id };
+                return { status: 200, body: { userId: data.id } };
+              },
+            },
+          ],
+        });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
+
+      const res1 = await mod.handler(makeEvent("GET", "/api/user", {
+        queryStringParameters: { id: "123" },
+      }));
+      expect(res1.statusCode).toBe(200);
+      expect(JSON.parse(res1.body).userId).toBe("123");
+
+      const res2 = await mod.handler(makeEvent("GET", "/api/user"));
+      expect(res2.statusCode).toBe(500);
+    });
+
+    it("should return 404 for unmatched path", async () => {
+      const handlerCode = `
+        import { defineApi } from "effortless-aws";
+
+        export default defineApi()({
+          basePath: "/api",
+          routes: [
+            { path: "GET /users", onRequest: async () => ({ status: 200, body: [] }) },
+          ],
         });
       `;
 
@@ -184,80 +206,83 @@ describe("defineApi", () => {
 
   });
 
-  describe("POST handling", () => {
+  describe("POST routes", () => {
 
-    it("should validate body with schema and pass data to handler", async () => {
+    it("should validate body and pass data to handler", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          schema: (input) => {
-            const obj = input;
-            if (!obj || typeof obj !== "object" || !("action" in obj)) {
-              throw new Error("action is required");
-            }
-            return obj;
-          },
-          post: async ({ data }) => ({
-            status: 200,
-            body: { received: data.action }
-          }),
+          routes: [
+            {
+              path: "POST /users",
+              onRequest: async ({ input }) => {
+                if (!input || typeof input !== "object" || !("name" in input)) {
+                  throw new Error("name is required");
+                }
+                return { status: 201, body: { created: input.name } };
+              },
+            },
+          ],
         });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
 
-      const res = await mod.handler(makeEvent("POST", "/api", {
-        body: JSON.stringify({ action: "createUser", name: "Alice" })
+      const res = await mod.handler(makeEvent("POST", "/api/users", {
+        body: JSON.stringify({ name: "Alice" })
       }));
 
-      expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.body).received).toBe("createUser");
+      expect(res.statusCode).toBe(201);
+      expect(JSON.parse(res.body).created).toBe("Alice");
     });
 
-    it("should return 400 when schema validation fails", async () => {
+    it("should return 500 when validation throws", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          schema: (input) => {
-            if (!input || typeof input !== "object" || !("action" in input)) {
-              throw new Error("action is required");
-            }
-            return input;
-          },
-          post: async ({ data }) => ({ status: 200, body: data }),
+          routes: [
+            {
+              path: "POST /users",
+              onRequest: async ({ input }) => {
+                if (!input || typeof input !== "object" || !("name" in input)) {
+                  throw new Error("name is required");
+                }
+                return { status: 201, body: input };
+              },
+            },
+          ],
         });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
 
-      const res = await mod.handler(makeEvent("POST", "/api", {
-        body: JSON.stringify({ noAction: true })
+      const res = await mod.handler(makeEvent("POST", "/api/users", {
+        body: JSON.stringify({ noName: true })
       }));
 
-      expect(res.statusCode).toBe(400);
-      expect(JSON.parse(res.body).error).toBe("Validation failed");
+      expect(res.statusCode).toBe(500);
     });
 
-    it("should return 404 for POST when no post handler defined", async () => {
+    it("should return 404 for POST when route not found", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          get: {
-            "/users": async ({ req }) => ({ status: 200, body: [] }),
-          },
+          routes: [
+            { path: "GET /users", onRequest: async () => ({ status: 200, body: [] }) },
+          ],
         });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
 
-      const res = await mod.handler(makeEvent("POST", "/api", {
-        body: JSON.stringify({ action: "test" })
+      const res = await mod.handler(makeEvent("POST", "/api/users", {
+        body: JSON.stringify({ name: "test" })
       }));
 
       expect(res.statusCode).toBe(404);
@@ -267,24 +292,25 @@ describe("defineApi", () => {
 
   describe("setup", () => {
 
-    it("should pass setup result to GET and POST handlers", async () => {
+    it("should pass setup result to route handlers", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
           setup: () => ({ db: "mock-client" }),
-          get: {
-            "/data": async ({ req, ctx }) => ({
-              status: 200,
-              body: { client: ctx.db }
-            }),
-          },
-          schema: (input) => input,
-          post: async ({ data, ctx }) => ({
-            status: 200,
-            body: { client: ctx.db, data }
-          }),
+          routes: [
+            {
+              path: "GET /data",
+              onRequest: async ({ db }) => ({ status: 200, body: { client: db } }),
+            },
+            {
+              path: "POST /data",
+              onRequest: async ({ input, db }) => {
+                return { status: 200, body: { client: db, data: input } };
+              },
+            },
+          ],
         });
       `;
 
@@ -294,7 +320,7 @@ describe("defineApi", () => {
       expect(getRes.statusCode).toBe(200);
       expect(JSON.parse(getRes.body).client).toBe("mock-client");
 
-      const postRes = await mod.handler(makeEvent("POST", "/api", {
+      const postRes = await mod.handler(makeEvent("POST", "/api/data", {
         body: JSON.stringify({ action: "test" })
       }));
       expect(postRes.statusCode).toBe(200);
@@ -305,17 +331,15 @@ describe("defineApi", () => {
 
   describe("methods", () => {
 
-    it("should return 404 for unsupported methods (PUT, DELETE, etc.)", async () => {
+    it("should return 404 for unsupported methods", async () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({
+        export default defineApi()({
           basePath: "/api",
-          get: {
-            "/users": async ({ req }) => ({ status: 200, body: [] }),
-          },
-          schema: (input) => input,
-          post: async ({ data }) => ({ status: 200, body: data }),
+          routes: [
+            { path: "GET /users", onRequest: async () => ({ status: 200, body: [] }) },
+          ],
         });
       `;
 
@@ -327,69 +351,5 @@ describe("defineApi", () => {
 
   });
 
-  describe("auth extraction", () => {
-
-    it("should extract auth config from inline defineAuth() call", () => {
-      const source = `
-        import { defineApi, defineAuth } from "effortless-aws";
-
-        export const api = defineApi({
-          basePath: "/api",
-          auth: defineAuth({
-            loginPath: "/login",
-            public: ["/login", "/assets/*"],
-            expiresIn: "7d",
-          }),
-          post: {
-            "/login": async ({ auth }) => auth.grant(),
-          },
-        });
-      `;
-
-      const configs = extractApiConfigs(source);
-
-      expect(configs).toHaveLength(1);
-      expect(configs[0]!.authConfig).toEqual({
-        loginPath: "/login",
-        public: ["/login", "/assets/*"],
-        expiresIn: "7d",
-      });
-    });
-
-    it("should extract auth config from variable reference", () => {
-      const source = `
-        import { defineApi, defineAuth } from "effortless-aws";
-
-        const protect = defineAuth({ loginPath: "/login" });
-
-        export const api = defineApi({
-          basePath: "/api",
-          auth: protect,
-          get: { "/health": () => ({ status: 200, body: "ok" }) },
-        });
-      `;
-
-      const configs = extractApiConfigs(source);
-
-      expect(configs).toHaveLength(1);
-      expect(configs[0]!.authConfig).toEqual({ loginPath: "/login" });
-    });
-
-    it("should not have authConfig when no auth", () => {
-      const source = `
-        import { defineApi } from "effortless-aws";
-
-        export const api = defineApi({
-          basePath: "/api",
-          get: { "/health": () => ({ status: 200, body: "ok" }) },
-        });
-      `;
-
-      const configs = extractApiConfigs(source);
-
-      expect(configs[0]!.authConfig).toBeUndefined();
-    });
-
-  });
 
 });

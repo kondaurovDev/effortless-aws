@@ -57,6 +57,12 @@ catalogs:
     typescript:
       specifier: ^5.9.3
       version: 5.9.3
+    vite-tsconfig-paths:
+      specifier: ^6.1.1
+      version: 6.1.1
+    vitest:
+      specifier: ^4.0.18
+      version: 4.0.18
 
 importers:
 
@@ -104,6 +110,12 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      vite-tsconfig-paths:
+        specifier: 'catalog:'
+        version: 6.1.1(typescript@5.9.3)(vite@7.3.1(@types/node@22.19.9)(yaml@2.8.2))
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.18(@types/node@22.19.9)(yaml@2.8.2)
 
   packages/effortless-aws-cli:
     dependencies:
@@ -202,10 +214,10 @@ importers:
         specifier: 'catalog:'
         version: 5.9.3
       vite-tsconfig-paths:
-        specifier: ^6.1.1
+        specifier: 'catalog:'
         version: 6.1.1(typescript@5.9.3)(vite@7.3.1(@types/node@22.19.9)(yaml@2.8.2))
       vitest:
-        specifier: ^4.0.18
+        specifier: 'catalog:'
         version: 4.0.18(@types/node@22.19.9)(yaml@2.8.2)
 
 packages:

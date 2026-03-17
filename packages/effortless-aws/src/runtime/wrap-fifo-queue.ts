@@ -59,8 +59,8 @@ const parseMessages = <T>(
 };
 
 export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
-  if (!handler.onMessage && !handler.onBatch) {
-    throw new Error("wrapFifoQueue requires a handler with onMessage or onBatch defined");
+  if (!handler.onMessage && !handler.onMessageBatch) {
+    throw new Error("wrapFifoQueue requires a handler with onMessage or onMessageBatch defined");
   }
 
   const rt = createHandlerRuntime(handler, "fifo-queue", handler.__spec.lambda?.logLevel ?? "info");
@@ -69,13 +69,16 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
   return async (event: SQSEvent) => {
     const startTime = Date.now();
     rt.patchConsole();
-    let shared: Awaited<ReturnType<typeof rt.commonArgs>> | undefined;
+    let ctxProps: Record<string, unknown> = {};
 
     try {
       const rawRecords = event.Records ?? [];
       const input = { messageCount: rawRecords.length };
 
-      shared = await rt.commonArgs();
+      const common = await rt.commonArgs();
+      const ctx = common.ctx;
+      ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
+      const shared = { ...ctxProps };
 
       let messages: FifoQueueMessage<T>[];
       try {
@@ -90,9 +93,14 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
 
       const batchItemFailures: BatchItemFailure[] = [];
 
-      if (handler.onBatch) {
+      if (handler.onMessageBatch) {
         try {
-          await (handler.onBatch as any)({ messages, ...shared });
+          const result = await (handler.onMessageBatch as any)({ messages, ...shared });
+          if (result?.failures) {
+            for (const id of result.failures) {
+              batchItemFailures.push({ itemIdentifier: id });
+            }
+          }
         } catch (error) {
           handleError({ error, ...shared });
           for (const message of messages) {
@@ -119,8 +127,8 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
 
       return { batchItemFailures };
     } finally {
-      if (handler.onAfterInvoke && shared) {
-        try { await handler.onAfterInvoke(shared); }
+      if (handler.onAfterInvoke) {
+        try { await handler.onAfterInvoke(ctxProps); }
         catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
       }
       rt.restoreConsole();

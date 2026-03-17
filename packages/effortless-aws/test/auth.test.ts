@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { createHmac } from "crypto"
 import { createAuthRuntime, AUTH_COOKIE_NAME, type AuthHelpers } from "~aws/handlers/auth"
 
@@ -17,7 +17,7 @@ describe("auth helpers", async () => {
     it("should return 200 with Set-Cookie header", async () => {
       const rt = createAuthRuntime(SECRET, 604800);
       const auth = await rt.forRequest(undefined, undefined);
-      const result = auth.createSession();
+      const result = auth.createSession({});
 
       expect(result.status).toBe(200);
       expect(result.body).toEqual({ ok: true });
@@ -31,7 +31,7 @@ describe("auth helpers", async () => {
     it("should produce a valid HMAC-signed base64url payload cookie", async () => {
       const rt = createAuthRuntime(SECRET, 3600);
       const auth = await rt.forRequest(undefined, undefined);
-      const result = auth.createSession();
+      const result = auth.createSession({});
 
       const cookie = result.headers["set-cookie"]!;
       const match = cookie.match(new RegExp(`${AUTH_COOKIE_NAME}=([^;]+)`));
@@ -55,7 +55,7 @@ describe("auth helpers", async () => {
     it("should respect custom expiresIn", async () => {
       const rt = createAuthRuntime(SECRET, 604800);
       const auth = await rt.forRequest(undefined, undefined);
-      const result = auth.createSession({ expiresIn: "1h" });
+      const result = auth.createSession({}, { expiresIn: "1h" });
 
       expect(result.headers["set-cookie"]).toContain("Max-Age=3600");
     });
@@ -64,7 +64,7 @@ describe("auth helpers", async () => {
   describe("createSession (with session data)", async () => {
     it("should encode custom data in payload", async () => {
       const rt = createAuthRuntime(SECRET, 3600);
-      const auth = await rt.forRequest(undefined, undefined) as AuthHelpers<{ userId: string; role: string }>;
+      const auth = await rt.forRequest(undefined, undefined) as AuthHelpers;
       const result = auth.createSession({ userId: "u123", role: "admin" });
 
       const cookie = result.headers["set-cookie"]!;
@@ -79,7 +79,7 @@ describe("auth helpers", async () => {
 
     it("should accept expiresIn as second arg when data is provided", async () => {
       const rt = createAuthRuntime(SECRET, 604800);
-      const auth = await rt.forRequest(undefined, undefined) as AuthHelpers<{ userId: string }>;
+      const auth = await rt.forRequest(undefined, undefined) as AuthHelpers;
       const result = auth.createSession({ userId: "u1" }, { expiresIn: "2h" });
 
       expect(result.headers["set-cookie"]).toContain("Max-Age=7200");
@@ -137,7 +137,7 @@ describe("auth helpers", async () => {
 
   describe("session (apiToken)", async () => {
     it("should resolve session from sync token verify", async () => {
-      const verify = (token: string) => token === "valid" ? { userId: "t1" } : null;
+      const verify = ({ value }: { value: string; }) => value === "valid" ? { userId: "t1" } : null;
       const rt = createAuthRuntime(SECRET, 3600, verify);
       const auth = await rt.forRequest(undefined, "Bearer valid");
 
@@ -145,7 +145,7 @@ describe("auth helpers", async () => {
     });
 
     it("should resolve session from async token verify", async () => {
-      const verify = async (token: string) => token === "valid" ? { userId: "t1" } : null;
+      const verify = async ({ value }: { value: string; }) => value === "valid" ? { userId: "t1" } : null;
       const rt = createAuthRuntime(SECRET, 3600, verify);
       const auth = await await rt.forRequest(undefined, "Bearer valid");
 
@@ -153,7 +153,7 @@ describe("auth helpers", async () => {
     });
 
     it("should return null session for invalid token", async () => {
-      const verify = (token: string) => token === "valid" ? { userId: "t1" } : null;
+      const verify = ({ value }: { value: string; }) => value === "valid" ? { userId: "t1" } : null;
       const rt = createAuthRuntime(SECRET, 3600, verify);
       const auth = await rt.forRequest(undefined, "Bearer wrong");
 
@@ -163,7 +163,7 @@ describe("auth helpers", async () => {
     it("should prioritize apiToken over cookie", async () => {
       const exp = Math.floor(Date.now() / 1000) + 3600;
       const cookie = buildCookie({ exp, userId: "cookie-user" });
-      const verify = (token: string) => token === "valid" ? { userId: "token-user" } : null;
+      const verify = ({ value }: { value: string; }) => value === "valid" ? { userId: "token-user" } : null;
 
       const rt = createAuthRuntime(SECRET, 3600, verify);
       const auth = await rt.forRequest(cookie, "Bearer valid");
@@ -174,7 +174,7 @@ describe("auth helpers", async () => {
     it("should fall back to cookie when no auth header", async () => {
       const exp = Math.floor(Date.now() / 1000) + 3600;
       const cookie = buildCookie({ exp, userId: "cookie-user" });
-      const verify = (_token: string) => ({ userId: "token-user" });
+      const verify = (_args: { value: string }) => ({ userId: "token-user" });
 
       const rt = createAuthRuntime(SECRET, 3600, verify);
       const auth = await rt.forRequest(cookie, undefined);
@@ -183,11 +183,71 @@ describe("auth helpers", async () => {
     });
 
     it("should use custom header name without stripping Bearer prefix", async () => {
-      const verify = (value: string) => ({ apiKey: value });
+      const verify = ({ value }: { value: string; }) => ({ apiKey: value });
       const rt = createAuthRuntime(SECRET, 3600, verify, "x-api-key");
       const auth = await rt.forRequest(undefined, "my-raw-key");
 
       expect(auth.session).toEqual({ apiKey: "my-raw-key" });
+    });
+  });
+
+  describe("apiToken cache", async () => {
+    it("should return cached session on second call within TTL", async () => {
+      const verify = vi.fn(({ value }: { value: string; }) => ({ userId: value }));
+      const rt = createAuthRuntime(SECRET, 3600, verify, undefined, 60);
+
+      await rt.forRequest(undefined, "Bearer abc");
+      await rt.forRequest(undefined, "Bearer abc");
+
+      expect(verify).toHaveBeenCalledTimes(1);
+    });
+
+    it("should re-verify after cache expires", async () => {
+      const verify = vi.fn(({ value }: { value: string; }) => ({ userId: value }));
+      const rt = createAuthRuntime(SECRET, 3600, verify, undefined, 1);
+
+      await rt.forRequest(undefined, "Bearer abc");
+
+      // Simulate cache expiry by advancing Date.now past the TTL
+      const realNow = Date.now;
+      Date.now = () => realNow() + 2000;
+      try {
+        await rt.forRequest(undefined, "Bearer abc");
+        expect(verify).toHaveBeenCalledTimes(2);
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
+    it("should not cache when cacheTtl is not set", async () => {
+      const verify = vi.fn(({ value }: { value: string; }) => ({ userId: value }));
+      const rt = createAuthRuntime(SECRET, 3600, verify);
+
+      await rt.forRequest(undefined, "Bearer abc");
+      await rt.forRequest(undefined, "Bearer abc");
+
+      expect(verify).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("tampered cookie", async () => {
+    it("should return undefined for valid payload with wrong HMAC", async () => {
+      const exp = Math.floor(Date.now() / 1000) + 3600;
+      const payload = Buffer.from(JSON.stringify({ exp, userId: "u123" }), "utf-8").toString("base64url");
+      const fakeSig = createHmac("sha256", "wrong-key").update(payload).digest("base64url");
+      const tampered = `${payload}.${fakeSig}`;
+
+      const rt = createAuthRuntime(SECRET, 3600);
+      const auth = await rt.forRequest(tampered, undefined);
+
+      expect(auth.session).toBeUndefined();
+    });
+
+    it("should return undefined for malformed cookie (no dot)", async () => {
+      const rt = createAuthRuntime(SECRET, 3600);
+      const auth = await rt.forRequest("nodothere", undefined);
+
+      expect(auth.session).toBeUndefined();
     });
   });
 

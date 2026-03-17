@@ -1,23 +1,23 @@
 import { describe, it, expect } from "vitest"
 
-import { extractStaticSiteConfigs } from "~cli/build/bundle"
+import { extractStaticSiteConfigs } from "./helpers/extract-from-source"
 
 // ============ AST extraction ============
 
 describe("defineStaticSite extraction", () => {
 
-  it("should extract static site config from named export", () => {
+  it("should extract static site config from named export", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite({
+      export const docs = defineStaticSite()({
         dir: "dist",
         spa: true,
         build: "npm run build",
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("docs");
@@ -28,17 +28,17 @@ describe("defineStaticSite extraction", () => {
     });
   });
 
-  it("should extract static site config from default export", () => {
+  it("should extract static site config from default export", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export default defineStaticSite({
+      export default defineStaticSite()({
         dir: "dist",
         index: "main.html",
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("default");
@@ -48,16 +48,16 @@ describe("defineStaticSite extraction", () => {
     });
   });
 
-  it("should have empty deps, params, static globs, and route patterns", () => {
+  it("should have empty deps, params, static globs, and route patterns", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite({
+      export const docs = defineStaticSite()({
         dir: "dist",
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs[0]!.depsKeys).toEqual([]);
     expect(configs[0]!.secretEntries).toEqual([]);
@@ -65,11 +65,11 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.routePatterns).toEqual([]);
   });
 
-  it("should detect middleware and set hasHandler to true", () => {
+  it("should detect middleware and set hasHandler to true", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const admin = defineStaticSite({
+      export const admin = defineStaticSite()({
         dir: "admin/dist",
         middleware: async (request) => {
           if (!request.cookies.session) {
@@ -79,7 +79,7 @@ describe("defineStaticSite extraction", () => {
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("admin");
@@ -89,33 +89,33 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.config).toEqual({ dir: "admin/dist" });
   });
 
-  it("should set hasHandler to false when no middleware", () => {
+  it("should set hasHandler to false when no middleware", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite({
+      export const docs = defineStaticSite()({
         dir: "dist",
         spa: true,
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.hasHandler).toBe(false);
   });
 
-  it("should extract record-form domain for per-stage configuration", () => {
+  it("should extract record-form domain for per-stage configuration", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const app = defineStaticSite({
+      export const app = defineStaticSite()({
         dir: "dist",
         domain: { prod: "example.com", dev: "dev.example.com" },
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.config.domain).toEqual({
@@ -124,28 +124,28 @@ describe("defineStaticSite extraction", () => {
     });
   });
 
-  it("should extract string domain", () => {
+  it("should extract string domain", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const app = defineStaticSite({
+      export const app = defineStaticSite()({
         dir: "dist",
         domain: "example.com",
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.config.domain).toBe("example.com");
   });
 
-  it("should extract single route pattern", () => {
+  it("should extract single route pattern", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
-      import { api } from "./api";
+      const api = {} as any;
 
-      export const app = defineStaticSite({
+      export const app = defineStaticSite()({
         dir: "dist",
         routes: {
           "/api/*": api,
@@ -153,7 +153,7 @@ describe("defineStaticSite extraction", () => {
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.routePatterns).toEqual(["/api/*"]);
@@ -161,13 +161,13 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.config).not.toHaveProperty("routes");
   });
 
-  it("should extract multiple route patterns", () => {
+  it("should extract multiple route patterns", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
-      import { api } from "./api";
-      import { auth } from "./auth";
+      const api = {} as any;
+      const auth = {} as any;
 
-      export const app = defineStaticSite({
+      export const app = defineStaticSite()({
         dir: "dist",
         routes: {
           "/api/*": api,
@@ -176,17 +176,17 @@ describe("defineStaticSite extraction", () => {
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs[0]!.routePatterns).toEqual(["/api/*", "/auth/*"]);
   });
 
-  it("should extract route patterns from default export", () => {
+  it("should extract route patterns from default export", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
-      import { api } from "./api";
+      const api = {} as any;
 
-      export default defineStaticSite({
+      export default defineStaticSite()({
         dir: "dist",
         routes: {
           "/api/*": api,
@@ -194,121 +194,54 @@ describe("defineStaticSite extraction", () => {
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.routePatterns).toEqual(["/api/*"]);
   });
 
-  it("should preserve errorPage in extracted config", () => {
+  it("should preserve errorPage in extracted config", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite({
+      export const docs = defineStaticSite()({
         dir: "dist",
         errorPage: "404.html",
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.config.errorPage).toBe("404.html");
   });
 
-  it("should not have errorPage in config when not specified", () => {
+  it("should not have errorPage in config when not specified", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite({
+      export const docs = defineStaticSite()({
         dir: "dist",
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
 
     expect(configs[0]!.config.errorPage).toBeUndefined();
   });
 
-  it("should not match defineApp or other define* calls", () => {
+  it("should not match defineApp or other define* calls", async () => {
     const source = `
       import { defineApp } from "effortless-aws";
 
-      export const app = defineApp({
+      export const app = defineApp()({
         path: "/app",
         dir: "src/webapp",
       });
     `;
 
-    const configs = extractStaticSiteConfigs(source);
+    const configs = await extractStaticSiteConfigs(source);
     expect(configs).toHaveLength(0);
-  });
-
-  // ============ Auth config extraction ============
-
-  it("should extract auth config from inline defineAuth() call", () => {
-    const source = `
-      import { defineStaticSite, defineAuth } from "effortless-aws";
-
-      export const webapp = defineStaticSite({
-        dir: "dist",
-        spa: true,
-        auth: defineAuth({
-          loginPath: "/login",
-          public: ["/login", "/assets/*", "/favicon.ico"],
-          expiresIn: "7d",
-        }),
-      });
-    `;
-
-    const configs = extractStaticSiteConfigs(source);
-
-    expect(configs).toHaveLength(1);
-    expect(configs[0]!.authConfig).toEqual({
-      loginPath: "/login",
-      public: ["/login", "/assets/*", "/favicon.ico"],
-      expiresIn: "7d",
-    });
-    // auth should be stripped from serialized config
-    expect(configs[0]!.config).not.toHaveProperty("auth");
-  });
-
-  it("should extract auth config from variable reference", () => {
-    const source = `
-      import { defineStaticSite, defineAuth } from "effortless-aws";
-
-      const protect = defineAuth({
-        loginPath: "/login",
-        public: ["/login"],
-      });
-
-      export const webapp = defineStaticSite({
-        dir: "dist",
-        auth: protect,
-      });
-    `;
-
-    const configs = extractStaticSiteConfigs(source);
-
-    expect(configs).toHaveLength(1);
-    expect(configs[0]!.authConfig).toEqual({
-      loginPath: "/login",
-      public: ["/login"],
-    });
-  });
-
-  it("should not have authConfig when no auth is specified", () => {
-    const source = `
-      import { defineStaticSite } from "effortless-aws";
-
-      export const docs = defineStaticSite({
-        dir: "dist",
-      });
-    `;
-
-    const configs = extractStaticSiteConfigs(source);
-
-    expect(configs[0]!.authConfig).toBeUndefined();
   });
 
 });

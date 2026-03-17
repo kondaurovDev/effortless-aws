@@ -6,11 +6,9 @@ import { builtinModules } from "module";
 import { createRequire } from "module";
 import archiver from "archiver";
 import { globSync } from "glob";
-import { generateEntryPoint, generateMiddlewareEntryPoint, extractHandlerConfigs, type HandlerType, type ExtractedConfig, type AuthConfig } from "./handler-registry";
+import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry } from "./handler-registry";
 import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig } from "effortless-aws";
-
-/** Must match AUTH_COOKIE_NAME in effortless-aws/src/handlers/auth.ts */
-const AUTH_COOKIE_NAME = "__eff_session";
+import * as os from "os";
 
 export type BundleInput = {
   projectDir: string;
@@ -18,40 +16,150 @@ export type BundleInput = {
   file: string;
 };
 
-// ============ Config extraction (uses registry) ============
+// ============ Config extraction (via runtime import) ============
 
 export type ExtractedTableFunction = ExtractedConfig<TableConfig>;
 export type ExtractedAppFunction = ExtractedConfig<AppConfig>;
 export type ExtractedStaticSiteFunction = ExtractedConfig<StaticSiteConfig>;
-
-export const extractTableConfigs = (source: string): ExtractedTableFunction[] =>
-  extractHandlerConfigs<TableConfig>(source, "table");
-
-export const extractAppConfigs = (source: string): ExtractedAppFunction[] =>
-  extractHandlerConfigs<AppConfig>(source, "app");
-
-export const extractStaticSiteConfigs = (source: string): ExtractedStaticSiteFunction[] =>
-  extractHandlerConfigs<StaticSiteConfig>(source, "staticSite");
-
 export type ExtractedFifoQueueFunction = ExtractedConfig<FifoQueueConfig>;
-
-export const extractFifoQueueConfigs = (source: string): ExtractedFifoQueueFunction[] =>
-  extractHandlerConfigs<FifoQueueConfig>(source, "fifoQueue");
-
 export type ExtractedBucketFunction = ExtractedConfig<BucketConfig>;
-
-export const extractBucketConfigs = (source: string): ExtractedBucketFunction[] =>
-  extractHandlerConfigs<BucketConfig>(source, "bucket");
-
 export type ExtractedMailerFunction = ExtractedConfig<MailerConfig>;
-
-export const extractMailerConfigs = (source: string): ExtractedMailerFunction[] =>
-  extractHandlerConfigs<MailerConfig>(source, "mailer");
-
 export type ExtractedApiFunction = ExtractedConfig<ApiConfig>;
 
-export const extractApiConfigs = (source: string): ExtractedApiFunction[] =>
-  extractHandlerConfigs<ApiConfig>(source, "api");
+/** Convert camelCase to kebab-case for SSM key derivation. */
+const toKebabCase = (str: string): string =>
+  str.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+
+/** Brand → handler type mapping */
+const BRAND_TO_TYPE: Record<string, HandlerType> = {
+  "effortless-table": "table",
+  "effortless-app": "app",
+  "effortless-static-site": "staticSite",
+  "effortless-fifo-queue": "fifoQueue",
+  "effortless-bucket": "bucket",
+  "effortless-mailer": "mailer",
+  "effortless-api": "api",
+};
+
+/** Properties that indicate a handler has an active Lambda function */
+const HANDLER_PROPS: Record<HandlerType, readonly string[]> = {
+  table: ["onRecord", "onRecordBatch"],
+  app: [],
+  staticSite: ["middleware"],
+  fifoQueue: ["onMessage", "onMessageBatch"],
+  bucket: ["onObjectCreated", "onObjectRemoved"],
+  mailer: [],
+  api: ["routes"],
+};
+
+/** Extract SecretEntry[] from a handler's resolved config object */
+const extractSecretEntriesFromConfig = (config: Record<string, unknown> | undefined): SecretEntry[] => {
+  if (!config) return [];
+  const entries: SecretEntry[] = [];
+  for (const [propName, ref] of Object.entries(config)) {
+    if (ref && typeof ref === "object" && (ref as any).__brand === "effortless-secret") {
+      const secretRef = ref as { key?: string; generate?: string };
+      const ssmKey = secretRef.key ?? toKebabCase(propName);
+      entries.push({ propName, ssmKey, ...(secretRef.generate ? { generate: secretRef.generate } : {}) });
+    }
+  }
+  return entries;
+};
+
+/** Extract deps keys from a handler's deps property */
+const extractDepsKeysFromHandler = (deps: unknown): string[] => {
+  if (!deps) return [];
+  const resolved = typeof deps === "function" ? (deps as () => Record<string, unknown>)() : deps;
+  if (typeof resolved !== "object" || resolved === null) return [];
+  return Object.keys(resolved);
+};
+
+/** Extract route patterns from parsed routes */
+const extractRoutePatternsFromRoutes = (routes: unknown): string[] => {
+  if (!Array.isArray(routes)) return [];
+  return routes
+    .map((r: any) => r.path as string | undefined)
+    .filter((p): p is string => !!p);
+};
+
+/** Extract route patterns from a static site's routes map */
+const extractRouteMapPatterns = (routes: unknown): string[] => {
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return [];
+  return Object.keys(routes);
+};
+
+/** Props to strip from __spec when building static config */
+const SPEC_RUNTIME_PROPS: Record<string, readonly string[]> = {
+  staticSite: ["middleware", "routes"],
+  app: [],
+};
+
+/** Extract an ExtractedConfig from a runtime handler object */
+const extractFromHandler = (exportName: string, handler: any, type: HandlerType): ExtractedConfig<any> => {
+  const rawSpec = handler.__spec ?? {};
+  // Some handler types store all props in __spec (e.g. staticSite, app)
+  const checkTarget = type === "staticSite" || type === "app" ? rawSpec : handler;
+  // Strip runtime-only props from spec for the config output
+  const stripProps = SPEC_RUNTIME_PROPS[type] ?? [];
+  const config = stripProps.length > 0
+    ? Object.fromEntries(Object.entries(rawSpec).filter(([k]) => !stripProps.includes(k)))
+    : rawSpec;
+  return {
+    exportName,
+    config,
+    hasHandler: HANDLER_PROPS[type].some(p => checkTarget[p] != null),
+    depsKeys: extractDepsKeysFromHandler(handler.deps),
+    secretEntries: extractSecretEntriesFromConfig(handler.config),
+    staticGlobs: Array.isArray(handler.static) ? handler.static : [],
+    routePatterns: type === "staticSite" ? extractRouteMapPatterns(rawSpec.routes) : extractRoutePatternsFromRoutes(handler.routes),
+  };
+};
+
+/**
+ * Import a handler file, extract all configs of a specific handler type.
+ * Replaces the old AST-based extract*Configs functions.
+ */
+export const extractConfigsFromFile = async <T>(
+  file: string,
+  projectDir: string,
+  type: HandlerType,
+): Promise<ExtractedConfig<T>[]> => {
+  const mod = await importHandlerModule(file, projectDir);
+  const results: ExtractedConfig<T>[] = [];
+  for (const [exportName, value] of Object.entries(mod)) {
+    if (!value || typeof value !== "object" || !("__brand" in value)) continue;
+    const handlerType = BRAND_TO_TYPE[(value as any).__brand as string];
+    if (handlerType !== type) continue;
+    results.push(extractFromHandler(exportName, value, type) as ExtractedConfig<T>);
+  }
+  return results;
+};
+
+/**
+ * Bundle a handler file with esbuild to a temp .mjs, import() it, and extract
+ * metadata from the exported handler objects.
+ */
+const importHandlerModule = async (file: string, projectDir: string): Promise<Record<string, any>> => {
+  const tmpFile = path.join(os.tmpdir(), `eff-discover-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
+  try {
+    const result = await esbuild.build({
+      entryPoints: [file],
+      bundle: true,
+      platform: "node",
+      target: "node22",
+      write: false,
+      format: "esm",
+      external: ["@aws-sdk/*", "@smithy/*", ...builtinModules.flatMap(m => [m, `node:${m}`])],
+      absWorkingDir: projectDir,
+    });
+    const output = result.outputFiles?.[0];
+    if (!output) throw new Error(`esbuild produced no output for ${file}`);
+    fsSync.writeFileSync(tmpFile, output.text);
+    return await import(tmpFile);
+  } finally {
+    try { fsSync.unlinkSync(tmpFile); } catch {}
+  }
+};
 
 // ============ Bundle (uses registry) ============
 
@@ -192,116 +300,6 @@ export const bundleMiddleware = (input: { projectDir: string; file: string }) =>
     return output.text;
   });
 
-/**
- * Generate and bundle a self-contained auth middleware for Lambda@Edge.
- * The HMAC secret is injected at build time via esbuild `define`.
- * No external imports needed (uses Node.js built-in crypto).
- */
-export const bundleAuthMiddleware = (input: { authConfig: AuthConfig; secret: string }) =>
-  Effect.gen(function* () {
-    const { authConfig, secret } = input;
-    const loginPath = authConfig.loginPath;
-    const publicPatterns = authConfig.public ?? [];
-
-    const entryPoint = `
-import { createHmac } from "crypto";
-
-const SECRET = ${JSON.stringify(secret)};
-const LOGIN_PATH = ${JSON.stringify(loginPath)};
-const PUBLIC = ${JSON.stringify(publicPatterns)};
-const COOKIE = ${JSON.stringify(AUTH_COOKIE_NAME)};
-
-const isPublic = (uri) => {
-  for (const p of PUBLIC) {
-    if (p.endsWith("/*")) {
-      if (uri.startsWith(p.slice(0, -1))) return true;
-    } else if (p.endsWith("*")) {
-      if (uri.startsWith(p.slice(0, -1))) return true;
-    } else {
-      if (uri === p) return true;
-    }
-  }
-  return false;
-};
-
-const verify = (cookie) => {
-  if (!cookie) return false;
-  const dot = cookie.indexOf(".");
-  if (dot === -1) return false;
-  const payload = cookie.slice(0, dot);
-  const sig = cookie.slice(dot + 1);
-  const expected = createHmac("sha256", SECRET).update(payload).digest("base64url");
-  if (sig !== expected) return false;
-  try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
-    return data.exp > Math.floor(Date.now() / 1000);
-  } catch { return false; }
-};
-
-const parseCookies = (headers) => {
-  const cookies = {};
-  const cookieHeaders = headers.cookie;
-  if (!cookieHeaders) return cookies;
-  for (const { value } of cookieHeaders) {
-    for (const pair of value.split(";")) {
-      const eq = pair.indexOf("=");
-      if (eq === -1) continue;
-      const name = pair.slice(0, eq).trim();
-      const val = pair.slice(eq + 1).trim();
-      if (name) cookies[name] = val;
-    }
-  }
-  return cookies;
-};
-
-const rewrite = (uri) => {
-  if (uri.endsWith("/")) return uri + "index.html";
-  if (!uri.includes(".")) return uri + "/index.html";
-  return uri;
-};
-
-export const handler = async (event) => {
-  const req = event.Records[0].cf.request;
-
-  if (isPublic(req.uri)) {
-    req.uri = rewrite(req.uri);
-    return req;
-  }
-
-  const cookies = parseCookies(req.headers);
-  if (verify(cookies[COOKIE])) {
-    req.uri = rewrite(req.uri);
-    return req;
-  }
-
-  return {
-    status: "302",
-    statusDescription: "Found",
-    headers: { location: [{ key: "Location", value: LOGIN_PATH }] },
-  };
-};
-`;
-
-    const result = yield* Effect.tryPromise({
-      try: () => esbuild.build({
-        stdin: { contents: entryPoint, loader: "js", resolveDir: process.cwd() },
-        bundle: true,
-        platform: "node",
-        target: "node22",
-        write: false,
-        minify: true,
-        sourcemap: false,
-        format: "esm",
-        external: ["crypto"],
-      }),
-      catch: (error) => new Error(`esbuild failed (auth middleware): ${error}`),
-    });
-
-    const output = result.outputFiles?.[0];
-    if (!output) throw new Error("esbuild produced no output for auth middleware");
-    return output.text;
-  });
-
 export type StaticFile = {
   content: Buffer;
   zipPath: string;
@@ -405,7 +403,7 @@ export type DiscoveredHandlers = {
   apiHandlers: { file: string; exports: ExtractedApiFunction[] }[];
 };
 
-export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
+export const discoverHandlers = async (files: string[], projectDir: string): Promise<DiscoveredHandlers> => {
   const tableHandlers: { file: string; exports: ExtractedTableFunction[] }[] = [];
   const appHandlers: { file: string; exports: ExtractedAppFunction[] }[] = [];
   const staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[] = [];
@@ -415,25 +413,28 @@ export const discoverHandlers = (files: string[]): DiscoveredHandlers => {
   const apiHandlers: { file: string; exports: ExtractedApiFunction[] }[] = [];
 
   for (const file of files) {
-    // Skip directories
     if (!fsSync.statSync(file).isFile()) continue;
 
-    const source = fsSync.readFileSync(file, "utf-8");
-    const table = extractTableConfigs(source);
-    const app = extractAppConfigs(source);
-    const staticSite = extractStaticSiteConfigs(source);
-    const fifoQueue = extractFifoQueueConfigs(source);
-    const bucket = extractBucketConfigs(source);
-    const mailer = extractMailerConfigs(source);
-    const api = extractApiConfigs(source);
+    const mod = await importHandlerModule(file, projectDir);
 
-    if (table.length > 0) tableHandlers.push({ file, exports: table });
-    if (app.length > 0) appHandlers.push({ file, exports: app });
-    if (staticSite.length > 0) staticSiteHandlers.push({ file, exports: staticSite });
-    if (fifoQueue.length > 0) fifoQueueHandlers.push({ file, exports: fifoQueue });
-    if (bucket.length > 0) bucketHandlers.push({ file, exports: bucket });
-    if (mailer.length > 0) mailerHandlers.push({ file, exports: mailer });
-    if (api.length > 0) apiHandlers.push({ file, exports: api });
+    const byType: Record<HandlerType, ExtractedConfig<any>[]> = {
+      table: [], app: [], staticSite: [], fifoQueue: [], bucket: [], mailer: [], api: [],
+    };
+
+    for (const [exportName, value] of Object.entries(mod)) {
+      if (!value || typeof value !== "object" || !("__brand" in value)) continue;
+      const type = BRAND_TO_TYPE[(value as any).__brand as string];
+      if (!type) continue;
+      byType[type].push(extractFromHandler(exportName, value, type));
+    }
+
+    if (byType.table.length > 0) tableHandlers.push({ file, exports: byType.table });
+    if (byType.app.length > 0) appHandlers.push({ file, exports: byType.app });
+    if (byType.staticSite.length > 0) staticSiteHandlers.push({ file, exports: byType.staticSite });
+    if (byType.fifoQueue.length > 0) fifoQueueHandlers.push({ file, exports: byType.fifoQueue });
+    if (byType.bucket.length > 0) bucketHandlers.push({ file, exports: byType.bucket });
+    if (byType.mailer.length > 0) mailerHandlers.push({ file, exports: byType.mailer });
+    if (byType.api.length > 0) apiHandlers.push({ file, exports: byType.api });
   }
 
   return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };

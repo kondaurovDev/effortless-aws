@@ -1,4 +1,4 @@
-import { defineTable, param } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 
 type Order = {
   id: string;
@@ -9,20 +9,13 @@ type Order = {
 
 type Customer = { customerId: string; email: string; tier: string };
 
-// Event types for analytics
-type OrderEvent =
-  | { type: "order_created"; orderId: string; amount: number; customerId: string }
-  | { type: "order_updated"; orderId: string; oldStatus: string; newStatus: string; amountDelta: number }
-  | { type: "order_cancelled"; orderId: string; lostRevenue: number; customerId: string };
-
 // Dep: customers table (resource-only)
-export const customers = defineTable<Customer>({});
+export const customers = defineTable<Customer>()({});
 
 // Simulated external service
 const analyticsService = {
-  async sendBatch(events: OrderEvent[]): Promise<void> {
-    console.log(`[Analytics] Sending ${events.length} events to analytics service`);
-    console.log(JSON.stringify(events, null, 2));
+  async send(event: { type: string; orderId: string }): Promise<void> {
+    console.log(`[Analytics] Sending event: ${event.type} for ${event.orderId}`);
   }
 };
 
@@ -35,98 +28,43 @@ const notificationService = {
   }
 };
 
-export const orders = defineTable({
+export const orders = defineTable<Order>()({
   streamView: "NEW_AND_OLD_IMAGES",
   batchSize: 10,
   lambda: { memory: 256 },
 
-  schema: (input): Order => input as Order,
   deps: () => ({ customers }),
-  config: {
-    highValueThreshold: param("high-value-threshold", Number),
-  },
-  setup: ({ config }) => ({
+  config: ({ defineSecret }) => ({
+    highValueThreshold: defineSecret<number>({ key: "high-value-threshold", transform: Number }),
+  }),
+  setup: ({ deps, config }) => ({
     highValueThreshold: config.highValueThreshold,
+    customers: deps.customers,
   }),
 
-  onRecord: async ({ record, deps, config, ctx }): Promise<OrderEvent | null> => {
+  onRecord: async ({ record, highValueThreshold, customers }) => {
     const { eventName } = record;
     const newOrder = record.new?.data;
     const oldOrder = record.old?.data;
 
     if (eventName === "INSERT" && newOrder) {
-      // New order - track creation event
-      if (newOrder.amount > 1000) {
+      if (newOrder.amount > highValueThreshold) {
         await notificationService.notifyHighValueOrder(newOrder);
       }
-
-      return {
-        type: "order_created",
-        orderId: newOrder.id,
-        amount: newOrder.amount,
-        customerId: newOrder.customerId
-      };
+      await analyticsService.send({ type: "order_created", orderId: newOrder.id });
     }
 
     if (eventName === "MODIFY" && oldOrder && newOrder) {
-      // Order updated - track status changes and amount adjustments
-      const amountDelta = newOrder.amount - oldOrder.amount;
-
-      if (oldOrder.status !== newOrder.status || amountDelta !== 0) {
-        return {
-          type: "order_updated",
-          orderId: newOrder.id,
-          oldStatus: oldOrder.status,
-          newStatus: newOrder.status,
-          amountDelta
-        };
+      if (oldOrder.status !== newOrder.status) {
+        await analyticsService.send({ type: "order_updated", orderId: newOrder.id });
       }
     }
 
     if (eventName === "REMOVE" && oldOrder) {
-      // Order deleted - potential cancellation
       if (oldOrder.status !== "completed") {
         await notificationService.notifyChurn(oldOrder.customerId, oldOrder.amount);
-
-        return {
-          type: "order_cancelled",
-          orderId: oldOrder.id,
-          lostRevenue: oldOrder.amount,
-          customerId: oldOrder.customerId
-        };
+        await analyticsService.send({ type: "order_cancelled", orderId: oldOrder.id });
       }
     }
-
-    return null;
   },
-
-  onBatchComplete: async ({ results, failures }) => {
-    // Filter out nulls and send accumulated events
-    const events = results.filter((e): e is OrderEvent => e !== null);
-
-    if (events.length > 0) {
-      await analyticsService.sendBatch(events);
-
-      // Calculate batch statistics
-      const stats = {
-        created: events.filter(e => e.type === "order_created").length,
-        updated: events.filter(e => e.type === "order_updated").length,
-        cancelled: events.filter(e => e.type === "order_cancelled").length,
-        totalRevenue: events
-          .filter((e): e is Extract<OrderEvent, { type: "order_created" }> => e.type === "order_created")
-          .reduce((sum, e) => sum + e.amount, 0),
-        lostRevenue: events
-          .filter((e): e is Extract<OrderEvent, { type: "order_cancelled" }> => e.type === "order_cancelled")
-          .reduce((sum, e) => sum + e.lostRevenue, 0)
-      };
-
-      console.log(`[Batch Stats] Created: ${stats.created}, Updated: ${stats.updated}, Cancelled: ${stats.cancelled}`);
-      console.log(`[Batch Stats] Revenue: +$${stats.totalRevenue}, Lost: -$${stats.lostRevenue}`);
-    }
-
-    if (failures.length > 0) {
-      console.error(`[Batch] ${failures.length} records failed to process`);
-      // Could send to DLQ or alert here
-    }
-  }
 });

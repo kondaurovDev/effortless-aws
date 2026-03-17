@@ -21,13 +21,15 @@ const processUser = (input: unknown) =>
     Effect.runSync
   );
 
-export default defineApi({
+export default defineApi()({
   basePath: "/user",
-  post: async ({ req }) => {
-    const result = processUser(req.body);
-    return {
-      status: 200,
-      body: result
-    };
-  },
+  routes: [
+    {
+      path: "POST /process",
+      onRequest: async ({ input }) => ({
+        status: 200,
+        body: processUser(input),
+      }),
+    },
+  ],
 });

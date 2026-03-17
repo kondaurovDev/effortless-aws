@@ -5,12 +5,12 @@ type Task = { id: string; status: string; payload: string };
 type TaskMessage = { taskId: string; action: string };
 
 // unsafeAs enables T inference alongside deps inference
-export const tasks = defineTable({
-  schema: unsafeAs<Task>(),
+export const tasks = defineTable<Task>()({
   deps: () => ({ taskQueue }),
-  onRecord: async ({ record, deps }) => {
+  setup: ({ deps }) => ({ taskQueue: deps.taskQueue }),
+  onRecord: async ({ record, taskQueue }) => {
     if (record.eventName === "INSERT" && record.new?.data) {
-      await deps.taskQueue.send({
+      await taskQueue.send({
         body: { taskId: record.new.data.id, action: "process" },
         groupId: record.new.data.id,
       });
@@ -19,11 +19,11 @@ export const tasks = defineTable({
 });
 
 // Annotation on one handler breaks circular inference
-export const taskQueue: FifoQueueHandler = defineFifoQueue({
-  schema: unsafeAs<TaskMessage>(),
+export const taskQueue: FifoQueueHandler = defineFifoQueue<TaskMessage>()({
   deps: () => ({ tasks }),
-  onMessage: async ({ message, deps }) => {
-    const item = await deps.tasks.get({ pk: message.body.taskId, sk: "task" });
+  setup: ({ deps }) => ({ tasks: deps.tasks }),
+  onMessage: async ({ message, tasks }) => {
+    const item = await tasks.get({ pk: message.body.taskId, sk: "task" });
     console.log("Processing task:", item?.data?.status);
   },
 });

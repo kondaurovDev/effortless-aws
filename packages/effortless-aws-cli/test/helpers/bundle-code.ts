@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import { bundle, type BundleInput } from "~cli/build/bundle";
@@ -58,7 +59,7 @@ export const bundleCode = (input: BundleCodeInput) =>
 export const importBundle = async (input: BundleCodeInput) => {
   const result = await Effect.runPromise(bundleCode(input));
   const hash = crypto.createHash("md5").update(result.code).digest("hex").slice(0, 8);
-  const tempMjs = path.join(input.projectDir, `.temp-bundle-${hash}.mjs`);
+  const tempMjs = path.join(os.tmpdir(), `.temp-bundle-${hash}.mjs`);
   fs.writeFileSync(tempMjs, result.code);
   try {
     return await import(tempMjs);

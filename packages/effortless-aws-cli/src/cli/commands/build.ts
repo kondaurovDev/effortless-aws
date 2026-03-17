@@ -3,7 +3,7 @@ import { Effect, Console, Option } from "effect";
 import * as path from "path";
 import * as fs from "fs";
 
-import { bundle, extractApiConfigs, extractTableConfigs, findHandlerFiles, discoverHandlers } from "~/build/bundle";
+import { bundle, extractConfigsFromFile, findHandlerFiles, discoverHandlers } from "~/build/bundle";
 import { collectLayerPackages, readProductionDependencies } from "../../aws";
 import { verboseOption, outputOption, getPatternsFromConfig } from "~/cli/config";
 import { ProjectConfig } from "~/cli/project-config";
@@ -60,7 +60,7 @@ export const buildCommand = Command.make(
             }
 
             const files = findHandlerFiles(patterns, projectDir);
-            const discovered = discoverHandlers(files);
+            const discovered = yield* Effect.promise(() => discoverHandlers(files, projectDir));
 
             let builtCount = 0;
 
@@ -129,11 +129,10 @@ export const buildCommand = Command.make(
         onSome: (filePath) =>
           Effect.gen(function* () {
             const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(projectDir, filePath);
-            const source = fs.readFileSync(fullPath, "utf-8");
             const baseName = path.basename(fullPath, path.extname(fullPath));
 
             if (table) {
-              const configs = extractTableConfigs(source);
+              const configs = yield* Effect.promise(() => extractConfigsFromFile<import("effortless-aws").TableConfig>(fullPath, projectDir, "table"));
               if (configs.length === 0) {
                 yield* Console.error("No defineTable handlers found in file");
                 return;
@@ -165,7 +164,7 @@ export const buildCommand = Command.make(
                 }
               }
             } else {
-              const configs = extractApiConfigs(source);
+              const configs = yield* Effect.promise(() => extractConfigsFromFile<import("effortless-aws").ApiConfig>(fullPath, projectDir, "api"));
               if (configs.length === 0) {
                 yield* Console.error("No defineApi handlers found in file");
                 return;

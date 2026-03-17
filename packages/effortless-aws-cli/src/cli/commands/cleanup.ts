@@ -105,7 +105,7 @@ export const cleanupCommand = Command.make(
             return;
           }
           const files = findHandlerFiles(patterns, projectDir);
-          const discovered = discoverHandlers(files);
+          const discovered = yield* Effect.promise(() => discoverHandlers(files, projectDir));
           const codeNames = new Set(flattenHandlers(discovered).map(h => h.exportName));
           const INTERNAL_HANDLERS = new Set(["api", "platform"]);
 

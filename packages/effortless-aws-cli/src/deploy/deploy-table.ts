@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { toSeconds } from "effortless-aws";
-import { extractTableConfigs, type ExtractedTableFunction } from "~/build/bundle";
+import { extractConfigsFromFile, type ExtractedTableFunction } from "~/build/bundle";
 import {
   Aws,
   ensureTable,
@@ -12,7 +12,6 @@ import {
 import {
   type DeployInput,
   type DeployTableResult,
-  readSource,
   deployCoreLambda,
   ensureLayerAndExternal
 } from "./shared";
@@ -94,8 +93,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
 
 export const deployTable = (input: DeployInput) =>
   Effect.gen(function* () {
-    const source = yield* readSource(input);
-    const configs = extractTableConfigs(source);
+    const configs = yield* Effect.promise(() => extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, input.projectDir, "table"));
 
     if (configs.length === 0) {
       return yield* Effect.fail(new Error("No defineTable exports found in source"));
@@ -134,8 +132,7 @@ export const deployTable = (input: DeployInput) =>
 
 export const deployAllTables = (input: DeployInput) =>
   Effect.gen(function* () {
-    const source = yield* readSource(input);
-    const functions = extractTableConfigs(source);
+    const functions = yield* Effect.promise(() => extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, input.projectDir, "table"));
 
     if (functions.length === 0) {
       return yield* Effect.fail(new Error("No defineTable exports found in source"));

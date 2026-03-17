@@ -55,7 +55,7 @@ export type AppHandler = {
  * });
  * ```
  */
-export const defineApp = (options: AppConfig): AppHandler => ({
+export const defineApp = () => (options: AppConfig): AppHandler => ({
   __brand: "effortless-app",
   __spec: options,
 });

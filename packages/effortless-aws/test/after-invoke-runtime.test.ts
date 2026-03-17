@@ -17,7 +17,7 @@ import type { TableHandler } from "~aws/handlers/define-table"
 import type { FifoQueueHandler } from "~aws/handlers/define-fifo-queue"
 
 const makeApiEvent = (overrides: Record<string, unknown> = {}) => ({
-  requestContext: { http: { method: "POST", path: "/test" } },
+  requestContext: { http: { method: "POST", path: "/test/run" } },
   headers: {},
   queryStringParameters: {},
   pathParameters: {},
@@ -72,7 +72,7 @@ describe("onAfterInvoke lifecycle hook", () => {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
         onAfterInvoke: afterInvoke,
-        post: async () => ({ status: 200, body: { ok: true } }),
+        routes: [{ method: "POST", path: "/run", onRequest: async () => ({ status: 200, body: { ok: true } }) }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -88,7 +88,7 @@ describe("onAfterInvoke lifecycle hook", () => {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
         onAfterInvoke: afterInvoke,
-        post: async () => { throw new Error("boom"); },
+        routes: [{ method: "POST", path: "/run", onRequest: async () => { throw new Error("boom"); } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -102,7 +102,7 @@ describe("onAfterInvoke lifecycle hook", () => {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
         onAfterInvoke: () => { throw new Error("afterInvoke error"); },
-        post: async () => ({ status: 200, body: { ok: true } }),
+        routes: [{ method: "POST", path: "/run", onRequest: async () => ({ status: 200, body: { ok: true } }) }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -123,14 +123,13 @@ describe("onAfterInvoke lifecycle hook", () => {
         setup: () => ({ env: "test" }),
         deps: { orders: { __brand: "effortless-table", config: {} } },
         onAfterInvoke: afterInvoke,
-        post: async () => ({ status: 200, body: { ok: true } }),
+        routes: [{ method: "POST", path: "/run", onRequest: async () => ({ status: 200, body: { ok: true } }) }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeApiEvent());
 
-      expect(capturedArgs.ctx).toEqual({ env: "test" });
-      expect(capturedArgs.deps.orders.tableName).toBe("test-orders");
+      expect(capturedArgs.env).toEqual("test");
     });
 
   });

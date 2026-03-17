@@ -1,8 +1,8 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig } from "./handler-options";
+import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, ConfigFactory } from "./handler-options";
+import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
 import type { BucketClient } from "../runtime/bucket-client";
-import type { HandlerArgs } from "./handler-args";
 
 /**
  * Configuration options for defineBucket.
@@ -34,20 +34,23 @@ export type BucketEvent = {
   bucketName: string;
 };
 
+/** Spread ctx into callback args (empty when no setup) */
+type SpreadCtx<C> = [C] extends [undefined] ? {} : C & {};
+
 /**
  * Callback function type for S3 ObjectCreated events
  */
-export type BucketObjectCreatedFn<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
-  (args: { event: BucketEvent; bucket: BucketClient }
-    & HandlerArgs<C, D, P, S>
+export type BucketObjectCreatedFn<C = undefined> =
+  (args: { event: BucketEvent }
+    & SpreadCtx<C>
   ) => Promise<void>;
 
 /**
  * Callback function type for S3 ObjectRemoved events
  */
-export type BucketObjectRemovedFn<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
-  (args: { event: BucketEvent; bucket: BucketClient }
-    & HandlerArgs<C, D, P, S>
+export type BucketObjectRemovedFn<C = undefined> =
+  (args: { event: BucketEvent }
+    & SpreadCtx<C>
   ) => Promise<void>;
 
 /**
@@ -68,16 +71,16 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
    * Error handler called when onObjectCreated or onObjectRemoved throws.
    * If not provided, defaults to `console.error`.
    */
-  onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
+  onError?: (args: { error: unknown } & SpreadCtx<C>) => void;
   /** Called after each invocation completes, right before Lambda freezes the process */
-  onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
+  onAfterInvoke?: (args: SpreadCtx<C>) => void | Promise<void>;
   /**
    * Factory function to initialize shared state for callbacks.
    * Called once on cold start, result is cached and reused across invocations.
    * Always receives `bucket: BucketClient` (self-client). When deps/config
    * are declared, receives them as well.
    */
-  setup?: SetupFactory<C, D, P, S>;
+  setup?: SetupFactory<C, NoInfer<D>, NoInfer<P>, NoInfer<S>>;
   /**
    * Dependencies on other handlers (tables, buckets, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -86,9 +89,9 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
   deps?: () => D & {};
   /**
    * SSM Parameter Store parameters.
-   * Declare with `param()` helper. Values are fetched and cached at cold start.
+   * Declare with `defineSecret()` helper. Values are fetched and cached at cold start.
    */
-  config?: P;
+  config?: ConfigFactory<P>;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
    * Files are accessible at runtime via the `files` callback argument.
@@ -98,8 +101,8 @@ type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends str
 
 /** With event handlers (at least one callback) */
 type DefineBucketWithHandlers<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineBucketBase<C, D, P, S> & {
-  onObjectCreated?: BucketObjectCreatedFn<C, D, P, S>;
-  onObjectRemoved?: BucketObjectRemovedFn<C, D, P, S>;
+  onObjectCreated?: BucketObjectCreatedFn<C>;
+  onObjectRemoved?: BucketObjectRemovedFn<C>;
 };
 
 /** Resource-only: no Lambda, just creates the bucket */
@@ -111,7 +114,7 @@ type DefineBucketResourceOnly<C = undefined, D = undefined, P = undefined, S ext
 export type DefineBucketOptions<
   C = undefined,
   D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined,
+  P extends Record<string, AnySecretRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 > =
   | DefineBucketWithHandlers<C, D, P, S>
@@ -169,15 +172,16 @@ export type BucketHandler<C = any> = {
  * });
  * ```
  */
-export const defineBucket = <
+export const defineBucket = () => <
   C = undefined,
   D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined,
+  P extends Record<string, AnySecretRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 >(
   options: DefineBucketOptions<C, D, P, S>
 ): BucketHandler<C> => {
-  const { onObjectCreated, onObjectRemoved, onError, onAfterInvoke, setup, deps, config, static: staticFiles, ...__spec } = options;
+  const { onObjectCreated, onObjectRemoved, onError, onAfterInvoke, setup, deps, config: configFactory, static: staticFiles, ...__spec } = options;
+  const config = configFactory ? resolveConfigFactory(configFactory) : undefined;
   return {
     __brand: "effortless-bucket",
     __spec,

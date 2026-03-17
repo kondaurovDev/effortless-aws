@@ -44,7 +44,7 @@ const loadRequiredParams = (
     }
 
     const files = findHandlerFiles(patterns, projectDir);
-    const handlers = discoverHandlers(files);
+    const handlers = yield* Effect.promise(() => discoverHandlers(files, projectDir));
     const finalStage = config?.stage ?? stage;
     const finalRegion = config?.region ?? region;
 

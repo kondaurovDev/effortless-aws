@@ -1,7 +1,7 @@
-import type { LambdaWithPermissions, AnyParamRef, ResolveConfig, Duration } from "./handler-options";
+import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, Duration, ConfigFactory } from "./handler-options";
+import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
-import type { HandlerArgs } from "./handler-args";
 
 /**
  * Parsed SQS FIFO message passed to the handler callbacks.
@@ -64,23 +64,27 @@ type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
     & ([S] extends [undefined] ? {} : { files: StaticFiles })
   ) => C | Promise<C>;
 
+/** Spread ctx into callback args (empty when no setup) */
+type SpreadCtx<C> = [C] extends [undefined] ? {} : C & {};
+
 /**
  * Per-message handler function.
  * Called once per message in the batch. Failures are reported individually.
  */
-export type FifoQueueMessageFn<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
+export type FifoQueueMessageFn<T = unknown, C = undefined> =
   (args: { message: FifoQueueMessage<T> }
-    & HandlerArgs<C, D, P, S>
+    & SpreadCtx<C>
   ) => Promise<void>;
 
 /**
  * Batch handler function.
  * Called once with all messages in the batch.
+ * Return `{ failures: string[] }` (messageIds) for partial batch failure reporting.
  */
-export type FifoQueueBatchFn<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> =
+export type FifoQueueBatchFn<T = unknown, C = undefined> =
   (args: { messages: FifoQueueMessage<T>[] }
-    & HandlerArgs<C, D, P, S>
-  ) => Promise<void>;
+    & SpreadCtx<C>
+  ) => Promise<void | { failures: string[] }>;
 
 /** Base options shared by all defineFifoQueue variants */
 type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = FifoQueueConfig & {
@@ -90,18 +94,18 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
    */
   schema?: (input: unknown) => T;
   /**
-   * Error handler called when onMessage or onBatch throws.
+   * Error handler called when onMessage or onMessageBatch throws.
    * If not provided, defaults to `console.error`.
    */
-  onError?: (args: { error: unknown } & HandlerArgs<C, D, P, S>) => void;
+  onError?: (args: { error: unknown } & SpreadCtx<C>) => void;
   /** Called after each invocation completes, right before Lambda freezes the process */
-  onAfterInvoke?: (args: HandlerArgs<C, D, P, S>) => void | Promise<void>;
+  onAfterInvoke?: (args: SpreadCtx<C>) => void | Promise<void>;
   /**
    * Factory function to initialize shared state for the handler.
    * Called once on cold start, result is cached and reused across invocations.
    * When deps/params are declared, receives them as argument.
    */
-  setup?: SetupFactory<C, D, P, S>;
+  setup?: SetupFactory<C, NoInfer<D>, NoInfer<P>, NoInfer<S>>;
   /**
    * Dependencies on other handlers (tables, queues, etc.).
    * Typed clients are injected into the handler via the `deps` argument.
@@ -110,9 +114,9 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
   deps?: () => D & {};
   /**
    * SSM Parameter Store parameters.
-   * Declare with `param()` helper. Values are fetched and cached at cold start.
+   * Declare with `defineSecret()` helper. Values are fetched and cached at cold start.
    */
-  config?: P;
+  config?: ConfigFactory<P>;
   /**
    * Static file glob patterns to bundle into the Lambda ZIP.
    * Files are accessible at runtime via the `files` callback argument.
@@ -122,13 +126,13 @@ type DefineFifoQueueBase<T = unknown, C = undefined, D = undefined, P = undefine
 
 /** Per-message processing */
 type DefineFifoQueueWithOnMessage<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineFifoQueueBase<T, C, D, P, S> & {
-  onMessage: FifoQueueMessageFn<T, C, D, P, S>;
-  onBatch?: never;
+  onMessage: FifoQueueMessageFn<T, C>;
+  onMessageBatch?: never;
 };
 
 /** Batch processing: all messages at once */
 type DefineFifoQueueWithOnBatch<T = unknown, C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineFifoQueueBase<T, C, D, P, S> & {
-  onBatch: FifoQueueBatchFn<T, C, D, P, S>;
+  onMessageBatch: FifoQueueBatchFn<T, C>;
   onMessage?: never;
 };
 
@@ -136,7 +140,7 @@ export type DefineFifoQueueOptions<
   T = unknown,
   C = undefined,
   D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined,
+  P extends Record<string, AnySecretRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 > =
   | DefineFifoQueueWithOnMessage<T, C, D, P, S>
@@ -157,7 +161,7 @@ export type FifoQueueHandler<T = unknown, C = any> = {
   readonly config?: Record<string, unknown>;
   readonly static?: string[];
   readonly onMessage?: (...args: any[]) => any;
-  readonly onBatch?: (...args: any[]) => any;
+  readonly onMessageBatch?: (...args: any[]) => any;
 };
 
 /**
@@ -184,22 +188,22 @@ export type FifoQueueHandler<T = unknown, C = any> = {
  * export const notifications = defineFifoQueue({
  *   schema: (input) => NotificationSchema.parse(input),
  *   batchSize: 5,
- *   onBatch: async ({ messages }) => {
+ *   onMessageBatch: async ({ messages }) => {
  *     await sendAll(messages.map(m => m.body));
  *   }
  * });
  * ```
  */
-export const defineFifoQueue = <
-  T = unknown,
+export const defineFifoQueue = <T = unknown>() => <
   C = undefined,
   D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnyParamRef> | undefined = undefined,
+  P extends Record<string, AnySecretRef> | undefined = undefined,
   S extends string[] | undefined = undefined
 >(
   options: DefineFifoQueueOptions<T, C, D, P, S>
 ): FifoQueueHandler<T, C> => {
-  const { onMessage, onBatch, onError, onAfterInvoke, schema, setup, deps, config, static: staticFiles, ...__spec } = options;
+  const { onMessage, onMessageBatch, onError, onAfterInvoke, schema, setup, deps, config: configFactory, static: staticFiles, ...__spec } = options;
+  const config = configFactory ? resolveConfigFactory(configFactory) : undefined;
   return {
     __brand: "effortless-fifo-queue",
     __spec,
@@ -211,6 +215,6 @@ export const defineFifoQueue = <
     ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
     ...(onMessage ? { onMessage } : {}),
-    ...(onBatch ? { onBatch } : {})
+    ...(onMessageBatch ? { onMessageBatch } : {})
   } as FifoQueueHandler<T, C>;
 };

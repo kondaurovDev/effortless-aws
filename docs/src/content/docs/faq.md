@@ -195,7 +195,7 @@ export const messages = defineTable({
 
 ### How do I react to data changes?
 
-Add `onRecord` to process each change, or `onBatch` for batch processing:
+Add `onRecord` to process each change, or `onRecordBatch` for batch processing:
 
 ```typescript
 export const orders = defineTable({

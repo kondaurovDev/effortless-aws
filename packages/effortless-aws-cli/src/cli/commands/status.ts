@@ -83,9 +83,9 @@ const getLambdaDetails = (functionName: string) =>
 
 // ============ Code discovery ============
 
-const discoverCodeHandlers = (projectDir: string, patterns: string[]): CodeHandler[] => {
+const discoverCodeHandlers = async (projectDir: string, patterns: string[]): Promise<CodeHandler[]> => {
   const files = findHandlerFiles(patterns, projectDir);
-  const discovered = discoverHandlers(files);
+  const discovered = await discoverHandlers(files, projectDir);
   return flattenHandlers(discovered).map(h => ({
     name: h.exportName,
     type: h.type as HandlerType,
@@ -208,7 +208,7 @@ export const statusCommand = Command.make(
 
       // Discover handlers from code
       const patterns = getPatternsFromConfig(config);
-      const codeHandlers = patterns ? discoverCodeHandlers(projectDir, patterns) : [];
+      const codeHandlers = patterns ? yield* Effect.promise(() => discoverCodeHandlers(projectDir, patterns)) : [];
       const codeHandlerNames = new Set(codeHandlers.map(h => h.name));
 
       yield* Effect.gen(function* () {

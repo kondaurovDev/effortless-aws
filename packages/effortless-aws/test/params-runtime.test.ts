@@ -30,7 +30,7 @@ import type { ApiHandler } from "~aws/handlers/define-api"
 import type { TableHandler } from "~aws/handlers/define-table"
 
 const makeHttpEvent = (overrides: Record<string, unknown> = {}) => ({
-  requestContext: { http: { method: "POST", path: "/test" } },
+  requestContext: { http: { method: "POST", path: "/test/run" } },
   headers: {},
   queryStringParameters: {},
   pathParameters: {},
@@ -93,10 +93,10 @@ describe("params runtime injection", () => {
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -127,10 +127,10 @@ describe("params runtime injection", () => {
             transform: (raw: string) => JSON.parse(raw),
           },
         },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedConfig = args.config;
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -156,16 +156,16 @@ describe("params runtime injection", () => {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         setup: ({ config }: any) => ({ poolUrl: config.dbUrl }),
-        post: async (args: any) => {
-          capturedCtx = args.ctx;
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
+          capturedCtx = args;
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
       await wrapped(makeHttpEvent());
 
-      expect(capturedCtx).toEqual({ poolUrl: "postgres://localhost/db" });
+      expect(capturedCtx.poolUrl).toEqual("postgres://localhost/db");
     });
 
     it("should work with params + deps together", async () => {
@@ -186,10 +186,10 @@ describe("params runtime injection", () => {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { ok: true } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -209,9 +209,9 @@ describe("params runtime injection", () => {
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           return { status: 200, body: {} };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -227,10 +227,10 @@ describe("params runtime injection", () => {
       const handler = {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           capturedArgs = args;
           return { status: 200, body: { hello: "world" } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -254,9 +254,9 @@ describe("params runtime injection", () => {
         config: {
           dbUrl: { __brand: "effortless-param", key: "database-url" },
         },
-        post: async (args: any) => {
+        routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
           return { status: 200, body: { url: args.config.dbUrl } };
-        },
+        } }],
       } as unknown as ApiHandler;
 
       const wrapped = wrapApi(handler);
@@ -271,7 +271,7 @@ describe("params runtime injection", () => {
 
   describe("Table stream handler (wrapTableStream)", () => {
 
-    it("should inject params into onRecord", async () => {
+    it("should pass params to setup, spread ctx into onRecord", async () => {
       process.env = {
         ...originalEnv,
         EFF_PARAM_webhookUrl: "/myapp/prod/webhook-url",
@@ -279,7 +279,7 @@ describe("params runtime injection", () => {
 
       setupSsmMock({ "/myapp/prod/webhook-url": "https://hooks.example.com" });
 
-      let capturedConfig: any = null;
+      let capturedArgs: any = null;
 
       const handler = {
         __brand: "effortless-table",
@@ -287,8 +287,9 @@ describe("params runtime injection", () => {
         config: {
           webhookUrl: { __brand: "effortless-param", key: "webhook-url" },
         },
+        setup: ({ config }: any) => ({ webhookUrl: config.webhookUrl }),
         onRecord: async (args: any) => {
-          capturedConfig = args.config;
+          capturedArgs = args;
         },
       } as unknown as TableHandler;
 
@@ -302,11 +303,10 @@ describe("params runtime injection", () => {
         },
       ]));
 
-      expect(capturedConfig).not.toBeNull();
-      expect(capturedConfig.webhookUrl).toBe("https://hooks.example.com");
+      expect(capturedArgs.webhookUrl).toBe("https://hooks.example.com");
     });
 
-    it("should inject params into onBatch", async () => {
+    it("should pass params to setup, spread ctx into onRecord", async () => {
       process.env = {
         ...originalEnv,
         EFF_PARAM_apiKey: "/myapp/prod/api-key",
@@ -322,7 +322,8 @@ describe("params runtime injection", () => {
         config: {
           apiKey: { __brand: "effortless-param", key: "api-key" },
         },
-        onBatch: async (args: any) => {
+        setup: ({ config }: any) => ({ apiKey: config.apiKey }),
+        onRecord: async (args: any) => {
           capturedArgs = args;
         },
       } as unknown as TableHandler;
@@ -337,11 +338,11 @@ describe("params runtime injection", () => {
         },
       ]));
 
-      expect(capturedArgs.config.apiKey).toBe("sk_test_123");
-      expect(capturedArgs.records).toHaveLength(1);
+      expect(capturedArgs.apiKey).toBe("sk_test_123");
+      expect(capturedArgs.record).toBeDefined();
     });
 
-    it("should pass params to setup in table handler", async () => {
+    it("should pass params to setup in table handler (ctx spread)", async () => {
       process.env = {
         ...originalEnv,
         EFF_PARAM_dbUrl: "/myapp/prod/database-url",
@@ -373,8 +374,7 @@ describe("params runtime injection", () => {
         },
       ]));
 
-      expect(capturedArgs.ctx).toEqual({ poolUrl: "postgres://localhost/db" });
-      expect(capturedArgs.config.dbUrl).toBe("postgres://localhost/db");
+      expect(capturedArgs.poolUrl).toEqual("postgres://localhost/db");
     });
 
     it("should not inject params when table handler has no params", async () => {

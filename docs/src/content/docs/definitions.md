@@ -11,11 +11,11 @@ Some definitions include a Lambda handler (a callback like `onRecord`, `onMessag
 
 | Definition | Creates | Handler required? |
 |---|---|---|
-| [defineApi](#defineapi) | Lambda Function URL (single Lambda, multiple routes) | Optional (`get` / `post`) |
-| [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onBatch` |
+| [defineApi](#defineapi) | Lambda Function URL (single Lambda, multiple routes) | Optional (`routes`) |
+| [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onRecordBatch` |
 | [defineApp](#defineapp) | CloudFront + Lambda Function URL serving SSR | No (built-in file server) |
 | [defineStaticSite](#definestaticsite) | S3 + CloudFront + optional Lambda@Edge | No (optional `middleware`) |
-| [defineFifoQueue](#definefifoqueue) | SQS FIFO + Lambda | Yes (`onMessage`/`onBatch`) |
+| [defineFifoQueue](#definefifoqueue) | SQS FIFO + Lambda | Yes (`onMessage`/`onMessageBatch`) |
 | [defineSchedule](#defineschedule) | EventBridge + Lambda | Yes — Planned |
 | [defineEvent](#defineevent) | EventBridge + Lambda | Yes — Planned |
 | [defineBucket](#definebucket) | S3 bucket + optional event Lambda | No — resource-only when no `onObjectCreated`/`onObjectRemoved` |
@@ -36,14 +36,20 @@ export const uploads = defineBucket({});
 export const api = defineApi({
   basePath: "/users",
   deps: () => ({ users, uploads }),
-  post: async ({ req, deps }) => {
-    await deps.users.put({
-      pk: "USER#1", sk: "PROFILE",
-      data: { tag: "user", name: "Alice", email: "alice@example.com" },
-    });
-    await deps.uploads.put("avatars/user-1.png", avatarBuffer);
-    return { status: 201 };
-  },
+  setup: ({ deps }) => ({ users: deps.users, uploads: deps.uploads }),
+  routes: [
+    {
+      path: "POST /upload",
+      onRequest: async ({ users, uploads }) => {
+        await users.put({
+          pk: "USER#1", sk: "PROFILE",
+          data: { tag: "user", name: "Alice", email: "alice@example.com" },
+        });
+        await uploads.put("avatars/user-1.png", avatarBuffer);
+        return { status: 201, body: { ok: true } };
+      },
+    },
+  ],
 });
 ```
 
@@ -72,14 +78,14 @@ export const orders = defineTable({
   config: {
     threshold: param("threshold", Number),
   },
-  setup: async ({ config }) => ({
+  setup: async ({ deps, config }) => ({
+    users: deps.users,
     db: createPool(config.threshold),
   }),
-  onRecord: async ({ record, ctx, deps, config }) => {
+  onRecord: async ({ record, table, users, db }) => {
     // record.new?.data is z.infer<typeof Order> | undefined
-    // ctx is { db: Pool }
-    // deps.users is TableClient<User>
-    // config.threshold is number
+    // users is TableClient<User> (from setup return)
+    // db is Pool (from setup return)
   },
 });
 ```
@@ -133,21 +139,26 @@ schema: unsafeAs<Order>(),
 
 ### `setup`
 
-Factory function called once on cold start. The return value is cached and passed as `ctx` to every invocation. Supports async. When `deps` or `config` are declared, receives them as argument.
+Factory function called once on cold start. The return value is cached and its properties are **spread directly into callback arguments** — no `ctx` wrapper. Supports async.
+
+When `deps`, `config`, or `files` are declared, receives them as argument. These are **only available in `setup`**, not in callbacks.
 
 ```typescript
 // No deps/config — zero-arg
 setup: () => ({ pool: createPool() }),
+// → callbacks receive: { pool, ...otherArgs }
 
-// With deps and/or config
+// With deps and/or config — only available in setup
 setup: async ({ deps, config }) => ({
+  users: deps.users,
   pool: createPool(config.dbUrl),
 }),
+// → callbacks receive: { users, pool, ...otherArgs }
 ```
 
 ### `deps`
 
-Dependencies on other handlers (tables, buckets, and mailers). The framework auto-wires environment variables, IAM permissions, and injects typed clients at runtime — `TableClient<T>` for tables, `BucketClient` for buckets, `EmailClient` for mailers.
+Dependencies on other handlers (tables, buckets, and mailers). The framework auto-wires environment variables, IAM permissions, and injects typed clients at runtime — `TableClient<T>` for tables, `BucketClient` for buckets, `EmailClient` for mailers. **Deps are available in `setup` only** — wire them into the setup return to use in callbacks.
 
 ```typescript
 import { orders } from "./orders.js";
@@ -162,7 +173,7 @@ deps: () => ({ orders, uploads, mailer }),
 
 ### `config`
 
-SSM Parameter Store values. Declare with `param()` for transforms, or plain strings for simple keys. Values are fetched once on cold start and cached.
+SSM Parameter Store values. Declare with `param()` for transforms, or plain strings for simple keys. Values are fetched once on cold start and cached. **Config values are available in `setup` only** — wire them into the setup return to use in callbacks.
 
 ```typescript
 import { param } from "effortless-aws";
@@ -203,7 +214,7 @@ Logging verbosity: `"error"` (errors only), `"info"` (+ execution summary), `"de
 Called when a handler callback throws. Receives `{ error, ...handlerArgs }`. For HTTP handlers, should return an `HttpResponse`. For stream/queue handlers, defaults to `console.error`.
 
 ```typescript
-onError: ({ error, ctx, deps }) => {
+onError: ({ error, pool }) => {
   console.error("Handler failed:", error);
   return { status: 500, body: { error: "Something went wrong" } };
 },
@@ -213,7 +224,7 @@ onError: ({ error, ctx, deps }) => {
 
 Called after each Lambda invocation completes, right before the process freezes. This is the only reliable place to run code between invocations — `setInterval` and background tasks don't execute while Lambda is frozen.
 
-Receives the same args as the handler (`ctx`, `deps`, `config`, `files` — when declared). Supports async. If `onAfterInvoke` throws, the error is logged but does **not** affect the handler's response.
+Receives the setup return properties spread as arguments. Supports async. If `onAfterInvoke` throws, the error is logged but does **not** affect the handler's response.
 
 ```typescript
 const buffer: LogEntry[] = [];
@@ -226,12 +237,15 @@ export default defineApi({
       await flush(buffer);
     }
   },
-  get: {
-    "/users": async ({ req }) => {
-      buffer.push({ path: req.path, time: Date.now() });
-      return { status: 200, body: users };
+  routes: [
+    {
+      path: "GET /users",
+      onRequest: async ({ req }) => {
+        buffer.push({ path: req.path, time: Date.now() });
+        return { status: 200, body: users };
+      },
     },
-  },
+  ],
 });
 ```
 
@@ -255,64 +269,126 @@ Creates: Lambda + Function URL with built-in routing
 
 `defineApi` is the primary way to build HTTP APIs. It deploys **one Lambda** with a Function URL that handles all routing internally — no API Gateway needed.
 
-- **GET routes** — query handlers keyed by relative path (e.g., `"/users/{id}"`)
-- **POST handler** — single command entry point with discriminated union schema
-- Shared `deps`, `config`, `setup`, `static`, `onError`, `onAfterInvoke` across all routes
+- **Route array** — typed route definitions with `"METHOD /path"` format
+- Shared `setup`, `deps`, `config`, `static`, `onError`, `onAfterInvoke` across all routes
+- `deps` and `config` are available in `setup` only — wire them into the setup return
+- Setup return properties are spread into route handler args
 - Unmatched routes return 404 automatically
 
 ```typescript
 export default defineApi({
   // Required
-  basePath: string,  // e.g. "/api" — prefix for all routes
+  basePath: `/${string}`,  // e.g. "/api" — prefix for all routes
 
-  // Optional
-  memory?: number,
-  timeout?: DurationInput,
-  permissions?: Permission[],
-  setup?: ({ deps, config }) => C,
-  deps?: { [key]: TableHandler },
-  config?: { [key]: param(...) },
+  // Optional — Lambda
+  lambda?: { memory?, timeout?, permissions? },
+  stream?: boolean,        // enable response streaming (SSE)
+
+  // Optional — wiring
+  setup?: ({ deps, config, files, enableAuth }) => C,
+  deps?: () => { [key]: Handler },
+  config?: { [key]: secret() | param(...) },
   static?: string[],
-  onError?: (error, req) => HttpResponse,
-  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
+  onError?: ({ error, req, ...ctx }) => HttpResponse,
+  onAfterInvoke?: (ctx) => void | Promise<void>,
 
-  // GET routes — queries
-  get?: {
-    "/path": async ({ req, ctx, deps, config }) => {
-      // req.params — path parameters extracted from {param} placeholders
-      return { status: 200, body: { ... } };
+  // Route definitions
+  routes?: [
+    {
+      path: "GET /users",
+      onRequest: async ({ req, input, ...ctx }) => {
+        return { status: 200, body: [...] };
+      },
     },
-  },
-
-  // POST — commands
-  schema?: (input: unknown) => T,     // validate & parse POST body
-  post?: async ({ req, data, ctx, deps, config }) => {
-    // data — parsed body (when schema is set)
-    return { status: 201, body: { ... } };
-  },
+    {
+      path: "POST /users",
+      onRequest: async ({ req, input, ...ctx }) => {
+        return { status: 201, body: { ... } };
+      },
+    },
+    {
+      path: "POST /login",
+      public: true,  // accessible without auth
+      onRequest: async ({ input, auth }) => {
+        return auth.createSession({ userId: "..." });
+      },
+    },
+  ],
 });
 ```
 
-### Schema validation
+### Route handler arguments
+
+All route handlers receive a single object with:
+
+| Arg | Type | Description |
+|-----|------|-------------|
+| `req` | `HttpRequest` | Full HTTP request (method, path, headers, query, body, rawBody, params) |
+| `input` | `unknown` | Merged query params + parsed body |
+| `stream` | `ResponseStream` | Response stream (only when `stream: true`) |
+| `...ctx` | spread | All properties from setup return, spread directly |
+| `auth` | `AuthHelpers<A>` | Session helpers (only when `enableAuth` is used in setup) |
+
+### Authentication
+
+Auth is configured via the `enableAuth` helper injected into `setup` args. The HMAC secret must be explicit — use `secret()` in `config`:
 
 ```typescript
-export const users = defineApi({
-  basePath: "/users",
-  schema: (input) => {
-    const obj = input as any;
-    if (!obj?.name) throw new Error("name is required");
-    return { name: obj.name as string };
-  },
-  post: async ({ data }) => {
-    // data is { name: string } — typed from schema return type
-    return { status: 201, body: { created: data.name } };
-  },
+import { defineApi, defineTable, secret } from "effortless-aws";
+
+export const apiKeys = defineTable<ApiKey>({});
+
+export const api = defineApi({
+  basePath: "/api",
+  deps: () => ({ apiKeys }),
+  config: { sessionSecret: secret() },
+  setup: ({ deps, config, enableAuth }) => ({
+    auth: enableAuth<Session>({
+      secret: config.sessionSecret,
+      expiresIn: "7d",
+      apiToken: {
+        header: "x-api-key",
+        verify: async (value) => {
+          const items = await deps.apiKeys.query({ pk: value });
+          const key = items[0];
+          if (!key) return null;
+          return { userId: key.sk, role: key.data.role };
+        },
+        cacheTtl: "5m",
+      },
+    }),
+  }),
+  routes: [
+    {
+      path: "GET /me",
+      onRequest: async ({ auth }) => ({
+        status: 200,
+        body: { session: auth.session },
+      }),
+    },
+    {
+      path: "POST /login",
+      public: true,
+      onRequest: async ({ input, auth }) => {
+        return auth.createSession({ userId: input.userId, role: input.role });
+      },
+    },
+    {
+      path: "POST /logout",
+      onRequest: async ({ auth }) => auth.clearSession(),
+    },
+  ],
 });
 ```
 
-When `schema` throws, the framework returns a 400 response automatically with the error message.
+Auth helpers in route args:
+- `auth.createSession(data)` — create signed session cookie
+- `auth.clearSession()` — clear session cookie
+- `auth.session` — current session data (`A | undefined`)
+- Routes without `public: true` require a valid session (401 if missing)
+- API token takes priority over cookie when both are present
 
-### Dependencies
+### Dependencies via setup
 
 ```typescript
 import { orders } from "./orders.js";
@@ -320,74 +396,29 @@ import { orders } from "./orders.js";
 export const api = defineApi({
   basePath: "/orders",
   deps: () => ({ orders }),
-  post: async ({ req, deps }) => {
-    // deps.orders is TableClient<Order> — typed from the table's generic
-    await deps.orders.put({
-      pk: "USER#123", sk: "ORDER#456",
-      data: { tag: "order", amount: 99, status: "pending" },
-    });
-    return { status: 201 };
-  },
+  setup: ({ deps }) => ({ orders: deps.orders }),
+  routes: [
+    {
+      path: "POST /create",
+      onRequest: async ({ orders, input }) => {
+        await orders.put({
+          pk: "USER#123", sk: "ORDER#456",
+          data: { tag: "order", ...input },
+        });
+        return { status: 201, body: { ok: true } };
+      },
+    },
+  ],
 });
 ```
 
-Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. See [architecture](./architecture#inter-handler-dependencies-deps) for details.
-
-### CQRS with discriminated unions
-
-The `schema` + `post` pattern works great with discriminated unions — one POST endpoint handles all commands:
-
-```typescript
-import { defineApi, defineTable, unsafeAs } from "effortless-aws";
-import { z } from "zod";
-
-type User = { tag: string; name: string; email: string };
-
-export const users = defineTable({ schema: unsafeAs<User>() });
-
-const Action = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("create"), name: z.string(), email: z.string() }),
-  z.object({ action: z.literal("delete"), id: z.string() }),
-]);
-
-export default defineApi({
-  basePath: "/api",
-  deps: () => ({ users }),
-
-  get: {
-    "/users": async ({ deps }) => ({
-      status: 200,
-      body: await deps.users.queryByTag({ tag: "user" }),
-    }),
-    "/users/{id}": async ({ req, deps }) => ({
-      status: 200,
-      body: await deps.users.get({ pk: `USER#${req.params.id}`, sk: "PROFILE" }),
-    }),
-  },
-
-  schema: (input) => Action.parse(input),
-  post: async ({ data, deps }) => {
-    switch (data.action) {
-      case "create": {
-        const id = crypto.randomUUID();
-        await deps.users.put({ pk: `USER#${id}`, sk: "PROFILE", data: { tag: "user", ...data } });
-        return { status: 201, body: { id } };
-      }
-      case "delete": {
-        await deps.users.delete({ pk: `USER#${data.id}`, sk: "PROFILE" });
-        return { status: 200, body: { ok: true } };
-      }
-    }
-  },
-});
-```
+Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. Deps are available in `setup` only — spread them into callbacks via the setup return.
 
 **Built-in best practices**:
 - **Lambda Function URL** — no API Gateway overhead, lower latency, zero cost for the URL itself.
 - **Single Lambda** — shared cold start, deps, and setup across all routes. One function to deploy and keep warm.
 - **Built-in CORS** — permissive CORS headers configured automatically on the Function URL.
 - **Cold start optimization** — the `setup` factory runs once on cold start and is cached across invocations.
-- **Schema validation** — when `schema` is set, the POST body is parsed and validated before your handler runs. Invalid requests get a 400 response automatically.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>`, `BucketClient`, and `EmailClient` instances with auto-wired IAM permissions.
 - **Auto-infrastructure** — Lambda, Function URL, and IAM permissions are created on deploy.
 
@@ -424,22 +455,19 @@ export const orders = defineTable({
   startingPosition?: "LATEST" | "TRIM_HORIZON",  // default: LATEST
 
   // Optional — lambda
-  memory?: number,
-  timeout?: DurationInput,
-  permissions?: Permission[],         // additional IAM permissions
-  setup?: ({ deps, config }) => C,    // factory for shared state (cached on cold start)
-  deps?: { [key]: TableHandler },     // inter-handler dependencies
-  config?: { [key]: param(...) },     // SSM parameters
-  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
+  lambda?: { memory?, timeout?, permissions? },
+  setup?: ({ table, deps, config, files }) => C,   // deps/config only in setup
+  deps?: () => { [key]: Handler },
+  config?: { [key]: secret() | param(...) },
+  onAfterInvoke?: (ctx) => void | Promise<void>,
 
   // Stream handler — choose one mode:
 
   // Mode 1: per-record processing
-  onRecord: async ({ record, table, ctx, deps, config }) => { ... },
-  onBatchComplete?: async ({ results, failures, table, ctx, deps, config }) => { ... },
+  onRecord: async ({ record, batch, table, ...ctx }) => { ... },
 
-  // Mode 2: batch processing
-  onBatch: async ({ records, table, ctx, deps, config }) => { ... },
+  // Mode 2: batch processing (return { failures } for partial batch failure)
+  onRecordBatch: async ({ records, table, ...ctx }) => { ... },
 });
 ```
 
@@ -480,15 +508,15 @@ export const orders = defineTable({
 
 ### Callback arguments
 
-All stream callbacks (`onRecord`, `onBatch`, `onBatchComplete`) receive:
+All stream callbacks (`onRecord`, `onRecordBatch`) receive:
 
 | Arg | Type | Description |
 |-----|------|-------------|
 | `record` / `records` | `TableRecord<T>` / `TableRecord<T>[]` | Stream records with typed `new`/`old` `TableItem<T>` values |
 | `table` | `TableClient<T>` | Typed client for **this** table (auto-injected) |
-| `ctx` | `C` | Result from `setup()` factory (if provided) |
-| `deps` | `{ [key]: TableClient }` | Typed clients for dependent tables (if `deps` is set) |
-| `config` | `ResolveConfig<P>` | SSM parameter values (if `config` is set) |
+| `...ctx` | spread | All properties from setup return, spread directly |
+
+`deps` and `config` are available in `setup` only — wire them into the setup return to use in callbacks.
 
 Stream records follow the `TableItem<T>` structure:
 
@@ -523,7 +551,7 @@ Each record is processed individually. If one fails, only that record is retried
 export const events = defineTable({
   schema: unsafeAs<ClickEvent>(),
   batchSize: 100,
-  onBatch: async ({ records }) => {
+  onRecordBatch: async ({ records }) => {
     const inserts = records
       .filter(r => r.eventName === "INSERT")
       .map(r => r.new!.data);
@@ -532,7 +560,7 @@ export const events = defineTable({
 });
 ```
 
-All records in a batch are processed together. If the handler throws, all records are reported as failed.
+All records in a batch are processed together. If the handler throws, all records are reported as failed. Return `{ failures: string[] }` with sequence numbers for partial batch failure reporting.
 
 ### TableClient
 
@@ -619,27 +647,13 @@ import { users } from "./users.js";
 export const orders = defineTable({
   schema: unsafeAs<Order>(),
   deps: () => ({ users }),
-  onRecord: async ({ record, deps }) => {
+  setup: ({ deps }) => ({ users: deps.users }),
+  onRecord: async ({ record, users }) => {
     const userId = record.new?.data.userId;
     if (userId) {
-      const user = await deps.users.get({ pk: `USER#${userId}`, sk: "PROFILE" });
+      const user = await users.get({ pk: `USER#${userId}`, sk: "PROFILE" });
       console.log(`Order by ${user?.data.name}`);
     }
-  }
-});
-```
-
-### Batch accumulation
-
-```typescript
-export const ordersWithBatch = defineTable({
-  schema: unsafeAs<Order>(),
-  onRecord: async ({ record }) => {
-    return { amount: record.new?.data.amount ?? 0 };
-  },
-  onBatchComplete: async ({ results, failures }) => {
-    const total = results.reduce((sum, r) => sum + r.amount, 0);
-    console.log(`Batch total: $${total}, failed: ${failures.length}`);
   }
 });
 ```
@@ -660,11 +674,10 @@ export const users = defineTable({
 - **Table self-client** — `table` arg provides a typed `TableClient<T>` for the handler's own table, auto-injected with no config.
 - **Smart updates** — `update()` auto-prefixes `data.` for domain fields, so you can do partial updates without reading the full item.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for other tables with auto-wired IAM and env vars.
-- **Batch accumulation** — `onRecord` return values are collected into `results` for `onBatchComplete`. Use this for bulk writes, aggregations, or reporting.
 - **Auto-TTL** — TTL is always enabled on the `ttl` attribute. Set it on `put()` or `update()` and DynamoDB auto-deletes expired items.
 - **Conditional writes** — use `{ ifNotExists: true }` on `put()` for idempotent inserts.
 - **Cold start optimization** — the `setup` factory runs once and is cached across invocations.
-- **Progressive complexity** — omit handlers for table-only. Add `onRecord` for stream processing. Add `onBatch` for batch mode. Add `deps` for cross-table access.
+- **Progressive complexity** — omit handlers for table-only. Add `onRecord` for stream processing. Add `onRecordBatch` for batch mode. Add `deps` for cross-table access.
 - **Auto-infrastructure** — DynamoDB table, stream, Lambda, event source mapping, and IAM permissions are all created on deploy from this single definition.
 
 ---
@@ -962,31 +975,31 @@ export const orderQueue = defineFifoQueue({
   timeout?: number,
   permissions?: Permission[],           // additional IAM permissions
   schema?: (input: unknown) => T,       // validate & parse message body
-  setup?: ({ deps, config }) => C,      // factory for shared state (cached on cold start)
-  deps?: { [key]: TableHandler },       // inter-handler dependencies
-  config?: { [key]: param(...) },       // SSM parameters
-  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
+  setup?: ({ deps, config }) => C,      // deps/config only in setup
+  deps?: () => { [key]: Handler },
+  config?: { [key]: secret() | param(...) },
+  onAfterInvoke?: (ctx) => void | Promise<void>,
 
   // Handler — choose one mode:
 
   // Mode 1: per-message processing
-  onMessage: async ({ message, ctx, deps, config }) => { ... },
+  onMessage: async ({ message, ...ctx }) => { ... },
 
-  // Mode 2: batch processing
-  onBatch: async ({ messages, ctx, deps, config }) => { ... },
+  // Mode 2: batch processing (return { failures } for partial batch failure)
+  onMessageBatch: async ({ messages, ...ctx }) => { ... },
 });
 ```
 
 ### Callback arguments
 
-All queue callbacks (`onMessage`, `onBatch`) receive:
+All queue callbacks (`onMessage`, `onMessageBatch`) receive:
 
 | Arg | Type | Description |
 |-----|------|-------------|
 | `message` / `messages` | `FifoQueueMessage<T>` / `FifoQueueMessage<T>[]` | Parsed messages with typed `body` |
-| `ctx` | `C` | Result from `setup()` factory (if provided) |
-| `deps` | `{ [key]: TableClient }` | Typed clients for dependent tables (if `deps` is set) |
-| `config` | `ResolveConfig<P>` | SSM parameter values (if `config` is set) |
+| `...ctx` | spread | All properties from setup return, spread directly |
+
+`deps` and `config` are available in `setup` only — wire them into the setup return to use in callbacks.
 
 The `FifoQueueMessage<T>` object:
 
@@ -1022,13 +1035,13 @@ Each message is processed individually. If one fails, only that message is retri
 export const notifications = defineFifoQueue({
   schema: unsafeAs<Notification>(),
   batchSize: 5,
-  onBatch: async ({ messages }) => {
+  onMessageBatch: async ({ messages }) => {
     await sendAll(messages.map(m => m.body));
   },
 });
 ```
 
-All messages in a batch are processed together. If the handler throws, all messages are reported as failed.
+All messages in a batch are processed together. If the handler throws, all messages are reported as failed. Return `{ failures: string[] }` with messageIds for partial batch failure reporting.
 
 ### Schema validation
 
@@ -1055,9 +1068,10 @@ import { orders } from "./orders.js";
 export const orderProcessor = defineFifoQueue({
   schema: unsafeAs<OrderEvent>(),
   deps: () => ({ orders }),
-  onMessage: async ({ message, deps }) => {
-    // deps.orders is TableClient<Order>
-    await deps.orders.put({
+  setup: ({ deps }) => ({ orders: deps.orders }),
+  onMessage: async ({ message, orders }) => {
+    // orders is TableClient<Order>
+    await orders.put({
       pk: `ORDER#${message.body.orderId}`, sk: "STATUS",
       data: { tag: "order", status: "processing" },
     });
@@ -1151,14 +1165,14 @@ export const uploads = defineBucket({
   memory?: number,
   timeout?: DurationInput,
   permissions?: Permission[],           // additional IAM permissions
-  setup?: ({ bucket, deps, config }) => C,  // factory for shared state (cached on cold start)
-  deps?: { [key]: Handler },            // inter-handler dependencies
-  config?: { [key]: param(...) },       // SSM parameters
-  onAfterInvoke?: ({ ctx, deps, config, files }) => void | Promise<void>,
+  setup?: ({ bucket, deps, config }) => C,  // deps/config only in setup
+  deps?: () => { [key]: Handler },
+  config?: { [key]: secret() | param(...) },
+  onAfterInvoke?: (ctx) => void | Promise<void>,
 
   // Event handlers — both optional
-  onObjectCreated?: async ({ event, bucket, ctx, deps, config }) => { ... },
-  onObjectRemoved?: async ({ event, bucket, ctx, deps, config }) => { ... },
+  onObjectCreated?: async ({ event, bucket, ...ctx }) => { ... },
+  onObjectRemoved?: async ({ event, bucket, ...ctx }) => { ... },
 });
 ```
 
@@ -1185,9 +1199,9 @@ All event callbacks (`onObjectCreated`, `onObjectRemoved`) receive:
 |-----|------|-------------|
 | `event` | `BucketEvent` | S3 event record |
 | `bucket` | `BucketClient` | Typed client for **this** bucket (auto-injected) |
-| `ctx` | `C` | Result from `setup()` factory (if provided) |
-| `deps` | `{ [key]: TableClient \| BucketClient }` | Typed clients for dependent handlers (if `deps` is set) |
-| `config` | `ResolveConfig<P>` | SSM parameter values (if `config` is set) |
+| `...ctx` | spread | All properties from setup return, spread directly |
+
+`deps` and `config` are available in `setup` only — wire them into the setup return to use in callbacks.
 
 ### BucketClient
 
@@ -1255,9 +1269,10 @@ import { orders } from "./orders.js";
 
 export const invoices = defineBucket({
   deps: () => ({ orders }),
-  onObjectCreated: async ({ event, deps }) => {
-    // deps.orders is TableClient<Order>
-    await deps.orders.put({
+  setup: ({ deps }) => ({ orders: deps.orders }),
+  onObjectCreated: async ({ event, orders }) => {
+    // orders is TableClient<Order>
+    await orders.put({
       pk: "INVOICE#1", sk: "FILE",
       data: { tag: "invoice", key: event.key, size: event.size ?? 0 },
     });
@@ -1280,11 +1295,17 @@ import { assets } from "./assets.js";
 export const api = defineApi({
   basePath: "/uploads",
   deps: () => ({ assets }),
-  post: async ({ req, deps }) => {
-    // deps.assets is BucketClient
-    await deps.assets.put("uploads/file.txt", req.body);
-    return { status: 201 };
-  },
+  setup: ({ deps }) => ({ assets: deps.assets }),
+  routes: [
+    {
+      path: "POST /upload",
+      onRequest: async ({ req, assets }) => {
+        // assets is BucketClient
+        await assets.put("uploads/file.txt", req.body);
+        return { status: 201, body: { ok: true } };
+      },
+    },
+  ],
 });
 ```
 
@@ -1324,15 +1345,21 @@ import { mailer } from "./mailer.js";
 export const api = defineApi({
   basePath: "/welcome",
   deps: () => ({ mailer }),
-  post: async ({ req, deps }) => {
-    await deps.mailer.send({
-      from: "hello@myapp.com",
-      to: req.body.email,
-      subject: "Welcome!",
-      html: "<h1>Welcome aboard!</h1>",
-    });
-    return { status: 200, body: { sent: true } };
-  },
+  setup: ({ deps }) => ({ mailer: deps.mailer }),
+  routes: [
+    {
+      path: "POST /send",
+      onRequest: async ({ req, mailer }) => {
+        await mailer.send({
+          from: "hello@myapp.com",
+          to: req.body.email,
+          subject: "Welcome!",
+          html: "<h1>Welcome aboard!</h1>",
+        });
+        return { status: 200, body: { sent: true } };
+      },
+    },
+  ],
 });
 ```
 

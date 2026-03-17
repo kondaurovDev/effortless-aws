@@ -1,6 +1,11 @@
 // Public helpers — this file must have ZERO heavy imports (no effect, no AWS SDK, no deploy code).
 // It is the source of truth for param(), unsafeAs(), and related types used by the public API.
 
+// ============ Generate spec ============
+
+/** Generator spec for auto-creating secrets at deploy time. */
+export type GenerateSpec = `hex:${number}` | `base64:${number}` | "uuid";
+
 // ============ Permissions ============
 
 type AwsService =
@@ -87,7 +92,7 @@ export type AnySecretRef = SecretRef<any>;
 export type SecretRef<T = string> = {
   readonly __brand: "effortless-secret";
   readonly key?: string;
-  readonly generate?: () => string;
+  readonly generate?: GenerateSpec;
   readonly transform?: (raw: string) => T;
 };
 
@@ -101,116 +106,76 @@ export type ResolveConfig<P> = {
   [K in keyof P]: P[K] extends SecretRef<infer T> ? T : string;
 };
 
-/** Options for `secret()` without a transform. */
-export type SecretOptions = {
+/** Options for `defineSecret()` without a transform. */
+export type DefineSecretOptions = {
   /** Custom SSM key (default: derived from config property name in kebab-case) */
   key?: string;
-  /** Generator function called at deploy time if the SSM parameter doesn't exist yet */
-  generate?: () => string;
+  /** Generator spec for auto-creating the secret at deploy time: `"hex:32"`, `"base64:32"`, `"uuid"` */
+  generate?: GenerateSpec;
 };
 
-/** Options for `secret()` with a transform. */
-export type SecretOptionsWithTransform<T> = SecretOptions & {
+/** Options for `defineSecret()` with a transform. */
+export type DefineSecretOptionsWithTransform<T> = DefineSecretOptions & {
   /** Transform the raw SSM string value into a typed value */
   transform: (raw: string) => T;
 };
 
-/**
- * Declare an SSM Parameter Store secret.
- *
- * The SSM key is derived from the config property name (camelCase → kebab-case)
- * unless overridden with `key`. The full SSM path is `/${project}/${stage}/${key}`.
- *
- * @param options - Optional configuration (key override, generator, transform)
- * @returns A SecretRef used by the deployment and runtime systems
- *
- * @example Simple secret
- * ```typescript
- * config: {
- *   dbUrl: secret(),
- *   // → SSM path: /${project}/${stage}/db-url
- * }
- * ```
- *
- * @example Auto-generated secret
- * ```typescript
- * config: {
- *   authSecret: secret({ generate: generateHex(64) }),
- *   // → auto-creates SSM param if missing
- * }
- * ```
- *
- * @example With transform
- * ```typescript
- * config: {
- *   appConfig: secret({ transform: TOML.parse }),
- * }
- * ```
- */
-export function secret(): SecretRef<string>;
-export function secret(options: SecretOptions): SecretRef<string>;
-export function secret<T>(options: SecretOptionsWithTransform<T>): SecretRef<T>;
-export function secret<T = string>(
-  options?: SecretOptions | SecretOptionsWithTransform<T>
-): SecretRef<T> {
+/** The defineSecret helper function type, injected into config callbacks. */
+export type DefineSecretFn = {
+  (): SecretRef<string>;
+  (options: DefineSecretOptions): SecretRef<string>;
+  <T>(options: DefineSecretOptionsWithTransform<T>): SecretRef<T>;
+};
+
+/** Helpers injected into the `config` callback. */
+export type ConfigHelpers = {
+  defineSecret: DefineSecretFn;
+};
+
+/** Config factory: a function receiving helpers and returning a record of SecretRefs. */
+export type ConfigFactory<P> = (helpers: ConfigHelpers) => P;
+
+/** The `defineSecret` implementation, passed to config callbacks. */
+export const defineSecret: DefineSecretFn = <T = string>(
+  options?: DefineSecretOptions | DefineSecretOptionsWithTransform<T>
+): SecretRef<T> => {
   return {
     __brand: "effortless-secret",
     ...(options?.key ? { key: options.key } : {}),
     ...(options?.generate ? { generate: options.generate } : {}),
-    ...("transform" in (options ?? {}) ? { transform: (options as SecretOptionsWithTransform<T>).transform } : {}),
+    ...("transform" in (options ?? {}) ? { transform: (options as DefineSecretOptionsWithTransform<T>).transform } : {}),
   } as SecretRef<T>;
-}
-
-// ============ Secret generators ============
-
-/**
- * Returns a generator that produces a random hex string.
- * @param bytes - Number of random bytes (output will be 2x this length in hex chars)
- */
-export const generateHex = (bytes: number) => (): string => {
-  const crypto = require("crypto") as typeof import("crypto");
-  return crypto.randomBytes(bytes).toString("hex");
 };
 
-/**
- * Returns a generator that produces a random base64url string.
- * @param bytes - Number of random bytes
- */
-export const generateBase64 = (bytes: number) => (): string => {
-  const crypto = require("crypto") as typeof import("crypto");
-  return crypto.randomBytes(bytes).toString("base64url");
-};
+/** Internal helpers object passed to config callbacks. */
+export const configHelpers: ConfigHelpers = { defineSecret };
 
-/**
- * Returns a generator that produces a random UUID v4.
- */
-export const generateUuid = () => (): string => {
-  const crypto = require("crypto") as typeof import("crypto");
-  return crypto.randomUUID();
-};
+/** Resolve a config factory to a plain record of SecretRefs. */
+export const resolveConfigFactory = <P>(config: ConfigFactory<P>): P =>
+  config(configHelpers);
 
 // ============ Backwards compatibility ============
 
+/** @deprecated Use `defineSecret()` inside a config callback instead. */
+export const secret = defineSecret;
 /** @deprecated Use `SecretRef` instead */
 export type ParamRef<T = string> = SecretRef<T>;
 /** @deprecated Use `AnySecretRef` instead */
 export type AnyParamRef = AnySecretRef;
-
-/**
- * @deprecated Use `secret()` instead. `param("key")` is equivalent to `secret({ key: "key" })`.
- */
-export function param(key: string): SecretRef<string>;
-export function param<T>(key: string, transform: (raw: string) => T): SecretRef<T>;
-export function param<T = string>(
-  key: string,
-  transform?: (raw: string) => T
-): SecretRef<T> {
+/** @deprecated Use `defineSecret()` instead. */
+export const param = <T = string>(key: string, transform?: (raw: string) => T): SecretRef<T> => {
   return {
     __brand: "effortless-secret",
     key,
     ...(transform ? { transform } : {}),
   } as SecretRef<T>;
-}
+};
+/** @deprecated Use `defineSecret({ generate: "hex:N" })` instead. */
+export const generateHex = (bytes: number) => `hex:${bytes}`;
+/** @deprecated Use `defineSecret({ generate: "base64:N" })` instead. */
+export const generateBase64 = (bytes: number) => `base64:${bytes}`;
+/** @deprecated Use `defineSecret({ generate: "uuid" })` instead. */
+export const generateUuid = () => "uuid";
 
 // ============ Single-table types ============
 

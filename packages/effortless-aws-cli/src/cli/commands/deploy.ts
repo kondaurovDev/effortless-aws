@@ -142,7 +142,7 @@ export const deployCommand = Command.make(
               }
 
               const files = findHandlerFiles(patterns, projectDir);
-              const discovered = discoverHandlers(files);
+              const discovered = yield* Effect.promise(() => discoverHandlers(files, projectDir));
 
               const allHandlers = flattenHandlers(discovered);
               const found = allHandlers.find(h => h.exportName === targetValue);

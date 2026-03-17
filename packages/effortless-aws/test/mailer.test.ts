@@ -32,7 +32,7 @@ import type { ApiHandler } from "~aws/handlers/define-api"
 import { defineMailer } from "~aws/handlers/define-mailer"
 
 const makeHttpEvent = (overrides: Record<string, unknown> = {}) => ({
-  requestContext: { http: { method: "POST", path: "/test" } },
+  requestContext: { http: { method: "POST", path: "/send/run" } },
   headers: {},
   queryStringParameters: {},
   pathParameters: {},
@@ -131,7 +131,7 @@ describe("EmailClient", () => {
 describe("defineMailer", () => {
 
   it("should return a branded handler with config", () => {
-    const mailer = defineMailer({ domain: "myapp.com" });
+    const mailer = defineMailer()({ domain: "myapp.com" });
 
     expect(mailer.__brand).toBe("effortless-mailer");
     expect(mailer.__spec).toEqual({ domain: "myapp.com" });
@@ -160,7 +160,7 @@ describe("mailer as dep in HTTP handler", () => {
       __brand: "effortless-api",
       __spec: { basePath: "/send" },
       deps: { mailer: { __brand: "effortless-mailer", __spec: { domain: "myapp.com" } } },
-      post: async (args: any) => {
+      routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
         capturedDeps = args.deps;
         await args.deps.mailer.send({
           from: "hello@myapp.com",
@@ -169,7 +169,7 @@ describe("mailer as dep in HTTP handler", () => {
           html: "<h1>Hello</h1>",
         });
         return { status: 200, body: { ok: true } };
-      },
+      } }],
     } as unknown as ApiHandler;
 
     const wrapped = wrapApi(handler);
@@ -197,10 +197,10 @@ describe("mailer as dep in HTTP handler", () => {
         mailer: { __brand: "effortless-mailer", __spec: { domain: "myapp.com" } },
         orders: { __brand: "effortless-table", config: {} },
       },
-      post: async (args: any) => {
+      routes: [{ method: "POST", path: "/run", onRequest: async (args: any) => {
         capturedDeps = args.deps;
         return { status: 200, body: { ok: true } };
-      },
+      } }],
     } as unknown as ApiHandler;
 
     const wrapped = wrapApi(handler);

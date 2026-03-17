@@ -75,7 +75,7 @@ Quick reference for navigating the codebase. All paths are relative to `src/`.
 
 | Directory            | Role                                                                      |
 |----------------------|---------------------------------------------------------------------------|
-| `handlers/`          | **User-facing API** — `defineApi`, `defineTable`, `defineFifoQueue`, `defineApp`, `defineStaticSite`, `param` |
+| `handlers/`          | **User-facing API** — `defineApi`, `defineTable`, `defineFifoQueue`, `defineApp`, `defineStaticSite`, `param`, `secret` |
 | `build/`             | **Build phase** — ts-morph AST parsing (`handler-registry.ts`) + esbuild bundling (`bundle.ts`) |
 | `deploy/`            | **Deploy phase** — orchestration (`deploy.ts`), core Lambda (`shared.ts`), per-type deployers |
 | `runtime/`           | **Runtime phase** — Lambda wrappers (`wrap-*.ts`), shared utils (`handler-utils.ts`), clients |
@@ -135,14 +135,23 @@ The build system has two phases: **static analysis** (ts-morph) and **bundling**
 export const users = defineApi({
   basePath: "/api",          // ← static config (extracted by ts-morph)
   memory: 512,               // ← static config
-  schema: S.decodeUnknownSync(UserSchema),  // ← runtime (bundled by esbuild)
-  onError: (err, req) => ({ ... }),         // ← runtime
-  setup: () => ({ db }),                    // ← runtime
-  get: {                                    // ← runtime
-    "/users": async ({ req, ctx }) => ...,
-    "/users/{id}": async ({ req, ctx }) => ...,
-  },
-  post: async ({ data, ctx }) => ...,       // ← runtime
+  setup: ({ deps }) => ({    // ← runtime
+    users: deps.users,
+  }),
+  routes: [                  // ← runtime
+    {
+      path: "GET /users",
+      onRequest: async ({ req, users }) => ...,
+    },
+    {
+      path: "GET /users/{id}",
+      onRequest: async ({ req, users }) => ...,
+    },
+    {
+      path: "POST /users",
+      onRequest: async ({ input, users }) => ...,
+    },
+  ],
 });
 ```
 
@@ -151,9 +160,10 @@ export const users = defineApi({
 `extractHandlerConfigs()` parses the source code as AST and extracts only the serializable config properties (basePath, memory, timeout, permissions). Runtime properties (functions, closures) are stripped via the `RUNTIME_PROPS` list.
 
 ```
-RUNTIME_PROPS = ["get", "post", "onRecord", "onBatch", "onBatchComplete",
-                 "onMessage", "setup", "schema", "onError", "onAfterInvoke",
-                 "deps", "config", "static", "middleware"]
+RUNTIME_PROPS = ["onRecord", "onRecordBatch", "onMessage", "onMessageBatch",
+                 "onObjectCreated", "onObjectRemoved", "setup", "schema",
+                 "onError", "onAfterInvoke", "deps", "config", "static",
+                 "middleware", "auth", "routes"]
 ```
 
 This static config is used by the **deploy phase** to configure AWS resources (Lambda Function URLs, Lambda memory/timeout, etc.) without needing to execute user code.
@@ -224,9 +234,9 @@ User code                    Build system                      Output
 
 defineApi({            ┌─► ts-morph extracts static config ─► deploy phase
   basePath: "/api",    │      { basePath, memory }             (Function URL, Lambda)
-  schema: ...,         │
-  get: { ... },        │
-  post: ...,        ───┤
+  memory: 512,         │
+  setup: ...,          │
+  routes: [...],    ───┤
 })                     │
                        └─► esbuild bundles everything ──────► index.mjs
                             (handler + wrapper + deps)         (uploaded to Lambda)

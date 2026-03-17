@@ -150,7 +150,7 @@ Effortless creates the DynamoDB stream, the Lambda function, and the event sourc
 
 Processing records one by one is fine for most cases. But when you need to handle high throughput — indexing to Elasticsearch, writing to a data lake, aggregating metrics — you want to work with batches.
 
-Use `onBatch` to receive all records at once.
+Use `onRecordBatch` to receive all records at once.
 
 ```typescript
 // src/analytics.ts
@@ -161,7 +161,7 @@ type ClickEvent = { tag: string; page: string; userId: string; timestamp: string
 export const clickEvents = defineTable({
   schema: unsafeAs<ClickEvent>(),
   batchSize: 100,
-  onBatch: async ({ records }) => {
+  onRecordBatch: async ({ records }) => {
     const inserts = records
       .filter(r => r.eventName === "INSERT")
       .map(r => r.new!.data);
@@ -173,21 +173,22 @@ export const clickEvents = defineTable({
 });
 ```
 
-You can also combine `onRecord` with `onBatchComplete` for a process-then-summarize pattern:
+If the handler throws, all records in the batch are reported as failed. For partial failure support, return `{ failures: string[] }` with the sequence numbers of failed records:
 
 ```typescript
 export const payments = defineTable({
   schema: unsafeAs<Payment>(),
-  onRecord: async ({ record }) => {
-    await processPayment(record.new!.data);
-    return { amount: record.new!.data.amount };
-  },
-  onBatchComplete: async ({ results, failures }) => {
-    const total = results.reduce((sum, r) => sum + r.amount, 0);
-    console.log(`Processed: $${total}, Failed: ${failures.length}`);
-    if (failures.length > 0) {
-      await alertOnFailures(failures);
+  batchSize: 50,
+  onRecordBatch: async ({ records }) => {
+    const failures: string[] = [];
+    for (const record of records) {
+      try {
+        await processPayment(record.new!.data);
+      } catch {
+        if (record.sequenceNumber) failures.push(record.sequenceNumber);
+      }
     }
+    if (failures.length > 0) return { failures };
   },
 });
 ```
@@ -273,24 +274,28 @@ import { users } from "./users";
 export const getUser = defineApi({
   basePath: "/users",
   deps: () => ({ users }),
-  get: {
-    "/{id}": async ({ req, deps }) => {
-      const user = await deps.users.get({
-        pk: `USER#${req.params.id}`,
-        sk: "PROFILE",
-      });
-      if (!user) return { status: 404, body: { error: "User not found" } };
-      return { status: 200, body: user.data };
+  setup: ({ deps }) => ({ users: deps.users }),
+  routes: [
+    {
+      path: "GET /{id}",
+      onRequest: async ({ req, users }) => {
+        const user = await users.get({
+          pk: `USER#${req.params.id}`,
+          sk: "PROFILE",
+        });
+        if (!user) return { status: 404, body: { error: "User not found" } };
+        return { status: 200, body: user.data };
+      },
     },
-  },
+  ],
 });
 ```
 
-`deps.users` is a `TableClient<User>` — typed from the table's schema. The Lambda gets IAM permissions for DynamoDB operations on that specific table, all wired automatically.
+`users` is a `TableClient<User>` — wired through `setup` from `deps`. The Lambda gets IAM permissions for DynamoDB operations on that specific table, all wired automatically.
 
 ## Resource-only table
 
-Sometimes you need a table but don't need stream processing — it's just a data store. Skip the `onRecord`/`onBatch` handler and you get a table without a stream Lambda.
+Sometimes you need a table but don't need stream processing — it's just a data store. Skip the `onRecord`/`onRecordBatch` handler and you get a table without a stream Lambda.
 
 ```typescript
 export const cache = defineTable({

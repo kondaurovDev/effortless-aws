@@ -173,7 +173,7 @@ type AnalyticsEvent = { id: string; event: string; timestamp: number };
 export const analytics = defineTable({
   schema: unsafeAs<AnalyticsEvent>(),
   batchSize: 100,
-  onBatch: async ({ records }) => {
+  onRecordBatch: async ({ records }) => {
     const inserts = records.filter(r => r.eventName === "INSERT");
     await bulkIndexToElasticsearch(inserts.map(r => r.new!));
   },

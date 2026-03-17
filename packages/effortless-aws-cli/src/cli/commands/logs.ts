@@ -107,7 +107,7 @@ export const logsCommand = Command.make(
       const patterns = getPatternsFromConfig(config);
       if (patterns) {
         const files = findHandlerFiles(patterns, projectDir);
-        const discovered = discoverHandlers(files);
+        const discovered = yield* Effect.promise(() => discoverHandlers(files, projectDir));
 
         const allHandlerNames = flattenHandlers(discovered).map(h => h.exportName);
 
