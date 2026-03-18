@@ -334,19 +334,32 @@ export const zip = (input: ZipInput) =>
 
 // ============ Static file resolution ============
 
-export const resolveStaticFiles = (globs: string[], projectDir: string): StaticFile[] => {
+export const resolveStaticFiles = (paths: string[], projectDir: string): { files: StaticFile[]; missing: string[] } => {
   const files: StaticFile[] = [];
-  for (const pattern of globs) {
-    const matches = globSync(pattern, { cwd: projectDir, nodir: true });
-    for (const match of matches) {
-      const absPath = path.join(projectDir, match);
-      files.push({
-        content: fsSync.readFileSync(absPath),
-        zipPath: match
-      });
+  const missing: string[] = [];
+
+  const collectFiles = (absPath: string, relPath: string) => {
+    const stat = fsSync.statSync(absPath, { throwIfNoEntry: false });
+    if (!stat) {
+      missing.push(relPath);
+      return;
     }
+    if (stat.isDirectory()) {
+      for (const entry of fsSync.readdirSync(absPath, { withFileTypes: true })) {
+        collectFiles(path.join(absPath, entry.name), path.join(relPath, entry.name));
+      }
+    } else {
+      files.push({ content: fsSync.readFileSync(absPath), zipPath: relPath });
+    }
+  };
+
+  for (const p of paths) {
+    // Strip leading slash — paths are always relative to project root
+    const rel = p.replace(/^\//, "");
+    collectFiles(path.join(projectDir, rel), rel);
   }
-  return files;
+
+  return { files, missing };
 };
 
 // ============ Directory ZIP (for SSR frameworks) ============

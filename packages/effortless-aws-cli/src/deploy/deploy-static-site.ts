@@ -45,6 +45,7 @@ export type DeployStaticSiteResult = {
   exportName: string;
   handlerName: string;
   url: string;
+  distributionDomain: string;
   distributionId: string;
   bucketName: string;
   seoGenerated?: string[];
@@ -373,6 +374,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       exportName,
       handlerName,
       url: siteUrl,
+      distributionDomain: domainName,
       distributionId,
       bucketName,
       seoGenerated: seoGenerated.length > 0 ? seoGenerated : undefined,

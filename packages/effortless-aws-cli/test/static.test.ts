@@ -145,21 +145,23 @@ describe("static extraction", () => {
 
 describe("resolveStaticFiles", () => {
 
-  it("should resolve glob to actual files", () => {
-    const files = resolveStaticFiles(["test/fixtures/*.txt"], projectDir);
+  it("should resolve a file path", () => {
+    const { files, missing } = resolveStaticFiles(["test/fixtures/hello.txt"], projectDir);
 
     expect(files).toHaveLength(1);
     expect(files[0]!.zipPath).toBe("test/fixtures/hello.txt");
     expect(files[0]!.content.toString("utf-8")).toBe("Hello from static file!");
+    expect(missing).toHaveLength(0);
   });
 
-  it("should return empty array for non-matching glob", () => {
-    const files = resolveStaticFiles(["test/fixtures/*.xyz"], projectDir);
+  it("should report missing paths", () => {
+    const { files, missing } = resolveStaticFiles(["test/fixtures/nope.xyz"], projectDir);
     expect(files).toHaveLength(0);
+    expect(missing).toEqual(["test/fixtures/nope.xyz"]);
   });
 
-  it("should resolve recursive glob skipping directories", () => {
-    const files = resolveStaticFiles(["test/fixtures/site/**/*"], projectDir);
+  it("should resolve directory recursively, skipping subdirectory entries", () => {
+    const { files, missing } = resolveStaticFiles(["test/fixtures/site"], projectDir);
 
     const paths = files.map(f => f.zipPath).sort();
 
@@ -178,6 +180,13 @@ describe("resolveStaticFiles", () => {
       expect(Buffer.isBuffer(f.content)).toBe(true);
       expect(f.content.length).toBeGreaterThan(0);
     }
+    expect(missing).toHaveLength(0);
+  });
+
+  it("should strip leading slash from paths", () => {
+    const { files } = resolveStaticFiles(["/test/fixtures/hello.txt"], projectDir);
+    expect(files).toHaveLength(1);
+    expect(files[0]!.zipPath).toBe("test/fixtures/hello.txt");
   });
 
 });
@@ -187,7 +196,7 @@ describe("resolveStaticFiles", () => {
 describe("zip with static files", () => {
 
   it("should include static files in zip archive", async () => {
-    const staticFiles = resolveStaticFiles(["test/fixtures/*.txt"], projectDir);
+    const { files: staticFiles } = resolveStaticFiles(["test/fixtures/hello.txt"], projectDir);
     const zipBuffer = await Effect.runPromise(zip({
       content: "export const handler = () => {};",
       staticFiles

@@ -12,7 +12,7 @@ import { projectOption, stageOption, regionOption, verboseOption, getPatternsFro
 import { ProjectConfig } from "~/cli/project-config";
 import { c } from "~/cli/colors";
 
-const { lambda } = Aws;
+const { lambda, cloudfront } = Aws;
 
 // ============ Types ============
 
@@ -38,6 +38,8 @@ type StatusEntry = {
   method?: string;
   path?: string;
   lambda?: LambdaDetails;
+  distributionDomain?: string;
+  customDomain?: string;
 };
 
 // ============ Helpers ============
@@ -81,6 +83,19 @@ const getLambdaDetails = (functionName: string) =>
     Effect.catchAll(() => Effect.succeed({} as LambdaDetails))
   );
 
+const getDistributionInfo = (distributionArn: string) =>
+  Effect.gen(function* () {
+    const distributionId = distributionArn.split("/").pop()!;
+    const result = yield* cloudfront.make("get_distribution", { Id: distributionId });
+    const dist = result.Distribution;
+    return {
+      domain: dist?.DomainName,
+      customDomain: dist?.DistributionConfig?.Aliases?.Items?.[0],
+    };
+  }).pipe(
+    Effect.catchAll(() => Effect.succeed({ domain: undefined, customDomain: undefined }))
+  );
+
 // ============ Code discovery ============
 
 const discoverCodeHandlers = async (projectDir: string, patterns: string[]): Promise<CodeHandler[]> => {
@@ -98,6 +113,7 @@ type AwsHandler = {
   name: string;
   type: string;
   lambdaArn?: string;
+  distributionArn?: string;
 };
 
 const discoverAwsHandlers = (
@@ -112,6 +128,9 @@ const discoverAwsHandlers = (
     const lambdaResource = handlerResources.find(r =>
       r.Tags?.find(t => t.Key === "effortless:type" && t.Value === "lambda")
     );
+    const cfResource = handlerResources.find(r =>
+      r.Tags?.find(t => t.Key === "effortless:type" && t.Value === "cloudfront-distribution")
+    );
     const typeTag = handlerResources[0]?.Tags?.find(t => t.Key === "effortless:type");
     const type = typeTag?.Value ?? "unknown";
 
@@ -119,6 +138,7 @@ const discoverAwsHandlers = (
       name,
       type,
       lambdaArn: lambdaResource?.ResourceARN ?? undefined,
+      distributionArn: cfResource?.ResourceARN ?? undefined,
     });
   }
 
@@ -170,6 +190,13 @@ const formatEntry = (entry: StatusEntry): string => {
   const parts = [status, type, name];
   if (route) parts.push(route);
 
+  if (entry.customDomain) {
+    parts.push(c.cyan(entry.customDomain));
+  }
+  if (entry.distributionDomain) {
+    parts.push(c.dim(entry.distributionDomain));
+  }
+
   if (entry.lambda?.lastModified) {
     const time = formatDate(entry.lambda.lastModified);
     const mem = entry.lambda.memory ? `${entry.lambda.memory}MB` : "";
@@ -201,6 +228,7 @@ export const statusCommand = Command.make(
 
       const clientsLayer = Aws.makeClients({
         lambda: { region: finalRegion },
+        cloudfront: { region: "us-east-1" },
         resource_groups_tagging_api: { region: finalRegion },
       });
 
@@ -235,6 +263,14 @@ export const statusCommand = Command.make(
               }
             }
 
+            let distributionDomain: string | undefined;
+            let customDomain: string | undefined;
+            if (inAws.distributionArn) {
+              const info = yield* getDistributionInfo(inAws.distributionArn);
+              distributionDomain = info.domain;
+              customDomain = info.customDomain;
+            }
+
             entries.push({
               status: "deployed",
               name: handler.name,
@@ -242,6 +278,8 @@ export const statusCommand = Command.make(
               method: handler.method,
               path: handler.path,
               lambda: lambdaDetails,
+              distributionDomain,
+              customDomain,
             });
           } else {
             // New

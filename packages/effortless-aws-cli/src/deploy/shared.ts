@@ -176,9 +176,14 @@ export const deployCoreLambda = ({
       ...(bundleType ? { type: bundleType } : {}),
       ...(external && external.length > 0 ? { external } : {})
     });
-    const staticFiles = staticGlobs && staticGlobs.length > 0
-      ? resolveStaticFiles(staticGlobs, input.projectDir)
-      : undefined;
+    let staticFiles: import("../build/bundle").StaticFile[] | undefined;
+    if (staticGlobs && staticGlobs.length > 0) {
+      const resolved = resolveStaticFiles(staticGlobs, input.projectDir);
+      if (resolved.missing.length > 0) {
+        yield* Effect.logWarning(`Static files not found for "${handlerName}": ${resolved.missing.join(", ")}`);
+      }
+      staticFiles = resolved.files.length > 0 ? resolved.files : undefined;
+    }
     const bundleSize = Buffer.byteLength(bundleResult.code, "utf-8");
 
     // Log bundle composition when size exceeds 500KB

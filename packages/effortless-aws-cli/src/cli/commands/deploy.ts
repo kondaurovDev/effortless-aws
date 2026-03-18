@@ -82,6 +82,9 @@ export const deployCommand = Command.make(
             }
             for (const r of results.staticSiteResults) {
               let line = `  ${c.cyan("[site]")}  ${c.bold(r.exportName)}: ${c.cyan(r.url)}`;
+              if (!r.url.includes(r.distributionDomain)) {
+                line += `  ${c.dim(r.distributionDomain)}`;
+              }
               const extras: string[] = [];
               if (r.seoGenerated) extras.push(`seo: ${r.seoGenerated.join(", ")}`);
               if (r.indexingResult) {
