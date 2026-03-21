@@ -1,5 +1,18 @@
 # effortless-aws
 
+## 0.30.0
+
+### Minor Changes
+
+- [`65c9078`](https://github.com/kondaurovDev/effortless-aws/commit/65c9078c80995b84f35516aa648ebd8d09194dfe) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Redesign handler API to builder pattern with per-step type inference
+
+  - **defineApi**: single options object `defineApi({ basePath })`, chained route methods `.get()/.post()/.put()/.patch()/.delete()` instead of `.routes([])` array
+  - **defineTable/defineFifoQueue/defineBucket**: builder pattern with `.deps()`, `.config()`, `.setup()` methods instead of curried `define*()({...})` syntax
+  - **Terminal methods**: `.onRecord()`, `.onMessage()`, `.onObjectCreated()`, `.routes()` finalize the handler — no `.build()` needed (except resource-only)
+  - **Response helpers**: `ok(body, status?)` and `fail(message, status?)` injected into route args, setup, and onError — replaces `result.json()`
+  - **onCleanup**: renamed from `onAfterInvoke`, moved to builder method with setup context access
+  - **CLI warning**: detect unfinalized builders and suggest the correct terminal method
+
 ## 0.29.0
 
 ### Minor Changes
