@@ -274,21 +274,16 @@ import { users } from "./users";
 export const getUser = defineApi({
   basePath: "/users",
   deps: () => ({ users }),
-  setup: ({ deps }) => ({ users: deps.users }),
-  routes: [
-    {
-      path: "GET /{id}",
-      onRequest: async ({ req, users }) => {
-        const user = await users.get({
-          pk: `USER#${req.params.id}`,
-          sk: "PROFILE",
-        });
-        if (!user) return { status: 404, body: { error: "User not found" } };
-        return { status: 200, body: user.data };
-      },
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ users: deps.users }))
+  .get("/{id}", async ({ req, users }) => {
+    const user = await users.get({
+      pk: `USER#${req.params.id}`,
+      sk: "PROFILE",
+    });
+    if (!user) return { status: 404, body: { error: "User not found" } };
+    return { status: 200, body: user.data };
+  });
 ```
 
 `users` is a `TableClient<User>` — wired through `setup` from `deps`. The Lambda gets IAM permissions for DynamoDB operations on that specific table, all wired automatically.

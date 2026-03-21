@@ -10,15 +10,14 @@ const LoginSchema = S.Struct({
 type ApiKey = { pk: string; sk: string; role: "admin" | "user" };
 type Session = { userId: string; role: "admin" | "user" };
 
-export const apiKeys = defineTable<ApiKey>()({});
+export const apiKeys = defineTable<ApiKey>().build();
 
 // --- Case 1: simple setup return ---
 
-export const api = defineApi()({
-  basePath: "/api",
-  deps: () => ({ apiKeys }),
-  config: ({ defineSecret }) => ({ appName: defineSecret(), sessionSecret: defineSecret() }),
-  setup: ({ deps, config, enableAuth }) => ({
+export const api = defineApi({ basePath: "/api" })
+  .deps(() => ({ apiKeys }))
+  .config(({ defineSecret }) => ({ appName: defineSecret(), sessionSecret: defineSecret() }))
+  .setup(({ deps, config, enableAuth }) => ({
     appName: config.appName,
     auth: enableAuth<Session>({
       secret: config.sessionSecret,
@@ -34,29 +33,16 @@ export const api = defineApi()({
         cacheTtl: "5m",
       },
     }),
-  }),
-  routes: [
-    {
-      path: "GET /me",
-      onRequest: async ({ appName, auth }) => ({
-        status: 200,
-        body: { session: auth.session, app: appName },
-      }),
-    },
-    {
-      path: "POST /login",
-      public: true,
-      onRequest: async ({ input, auth }) => {
-        const data = S.decodeUnknownSync(LoginSchema)(input);
-        return auth.createSession({ userId: data.userId, role: data.role });
-      },
-    },
-    {
-      path: "POST /logout",
-      onRequest: async ({ auth }) => auth.clearSession(),
-    },
-  ],
-});
+  }))
+  .get("/me", async ({ appName, auth }) => ({
+    status: 200,
+    body: { session: auth.session, app: appName },
+  }))
+  .post("/login", async ({ input, auth }) => {
+    const data = S.decodeUnknownSync(LoginSchema)(input);
+    return auth.createSession({ userId: data.userId, role: data.role });
+  }, { public: true })
+  .post("/logout", async ({ auth }) => auth.clearSession());
 
 // --- Case 2: complex setup with generic method (family-budget pattern) ---
 
@@ -65,18 +51,17 @@ type TableData =
   | { readonly tag: "invoke-config"; readonly spreadsheet_id: string; readonly chat_id: string }
   | { readonly tag: "user"; readonly name: string; readonly token: string; readonly password: string };
 
-export const table = defineTable<TableData>()({});
+export const table = defineTable<TableData>().build();
 
-export const api2 = defineApi()({
-  basePath: "/api",
-  deps: () => ({ table }),
-  config: ({ defineSecret }) => ({
+export const api2 = defineApi({ basePath: "/api" })
+  .deps(() => ({ table }))
+  .config(({ defineSecret }) => ({
     tgToken: defineSecret(),
     openaiToken: defineSecret(),
     adminPassword: defineSecret(),
     sessionSecret: defineSecret(),
-  }),
-  setup: ({ deps, config, enableAuth }) => ({
+  }))
+  .setup(({ deps, config, enableAuth }) => ({
     table: deps.table,
     adminPassword: config.adminPassword,
     run: <A, E>(effect: Effect.Effect<A, E>) =>
@@ -93,32 +78,19 @@ export const api2 = defineApi()({
         },
       },
     }),
-  }),
-  routes: [
-    {
-      path: "GET /check",
-      onRequest: ({ input, run }) => {
-        void input;
-        return run({} as Effect.Effect<{ ok: boolean }, never>);
-      },
-    },
-    {
-      path: "POST /login",
-      public: true,
-      onRequest: async ({ input, adminPassword, auth }) => {
-        void input;
-        if (adminPassword === "test") {
-          return auth.createSession({ userId: "admin" });
-        }
-        return auth.createSession({ userId: "user" });
-      },
-    },
-    {
-      path: "POST /logout",
-      onRequest: ({ auth }) => auth.clearSession(),
-    },
-  ],
-});
+  }))
+  .get("/check", ({ input, run }) => {
+    void input;
+    return run({} as Effect.Effect<{ ok: boolean }, never>);
+  })
+  .post("/login", async ({ input, adminPassword, auth }) => {
+    void input;
+    if (adminPassword === "test") {
+      return auth.createSession({ userId: "admin" });
+    }
+    return auth.createSession({ userId: "user" });
+  }, { public: true })
+  .post("/logout", ({ auth }) => auth.clearSession());
 
 export const site = defineStaticSite()({
   build: "pnpm build",

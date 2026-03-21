@@ -15,18 +15,11 @@ You want to return a JSON response at `GET /hello/{name}`.
 // src/api.ts
 import { defineApi } from "effortless-aws";
 
-export const hello = defineApi({
-  basePath: "/hello",
-  routes: [
-    {
-      path: "GET /{name}",
-      onRequest: async ({ req }) => ({
-        status: 200,
-        body: { message: `Hello, ${req.params.name}!` },
-      }),
-    },
-  ],
-});
+export const hello = defineApi({ basePath: "/hello" })
+  .get("/{name}", async ({ req }) => ({
+    status: 200,
+    body: { message: `Hello, ${req.params.name}!` },
+  }));
 ```
 
 After `eff deploy`, you get a Function URL. Every request to `GET /hello/world` runs your function and returns `{ message: "Hello, world!" }`.
@@ -36,7 +29,7 @@ The `req` object gives you everything from the HTTP request:
 - `req.query` — query string parameters
 - `req.headers` — request headers
 
-For POST/PUT/PATCH routes, the parsed request body is available as `input`.
+For POST/PUT/PATCH routes, the parsed request body is available as `input`. Routes are defined using chained method calls (`.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`) with path patterns as the first argument.
 
 ## CRUD with a database
 
@@ -44,7 +37,7 @@ Most APIs need a database. Traditionally that means: create a DynamoDB table in 
 
 With Effortless, you define the table and reference it in your API handler via `deps`. The framework wires everything — table name, IAM permissions, typed client. Tables use a [single-table design](/use-cases/database/) with a fixed envelope: `pk`, `sk`, `tag`, `data`, and optional `ttl`.
 
-Use `setup` to initialize shared resources once at cold start. Whatever `setup` returns is spread directly into every route handler's arguments.
+Use `.setup()` to initialize shared resources once at cold start. Whatever `.setup()` returns is spread directly into every route handler's arguments.
 
 ```typescript
 // src/tasks.ts
@@ -59,42 +52,31 @@ export const tasks = defineTable({
 export default defineApi({
   basePath: "/tasks",
   deps: () => ({ tasks }),
-  setup: ({ deps }) => ({ tasks: deps.tasks }),
-  routes: [
-    {
-      path: "GET /",
-      onRequest: async ({ tasks }) => ({
-        status: 200,
-        body: await tasks.query({ pk: "TASKS", sk: { begins_with: "TASK#" } }),
-      }),
-    },
-    {
-      path: "GET /{id}",
-      onRequest: async ({ req, tasks }) => {
-        const item = await tasks.get({ pk: `TASK#${req.params.id}`, sk: "DETAIL" });
-        if (!item) return { status: 404, body: { error: "Not found" } };
-        return { status: 200, body: { id: req.params.id, ...item.data } };
-      },
-    },
-    {
-      path: "POST /create",
-      onRequest: async ({ input, tasks }) => {
-        const { title } = input as { title: string };
-        const id = crypto.randomUUID();
-        await tasks.put({
-          pk: `TASK#${id}`, sk: "DETAIL",
-          data: { tag: "task", title, done: false, createdAt: new Date().toISOString() },
-        });
-        return { status: 201, body: { id, title } };
-      },
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ tasks: deps.tasks }))
+  .get("/", async ({ tasks }) => ({
+    status: 200,
+    body: await tasks.query({ pk: "TASKS", sk: { begins_with: "TASK#" } }),
+  }))
+  .get("/{id}", async ({ req, tasks }) => {
+    const item = await tasks.get({ pk: `TASK#${req.params.id}`, sk: "DETAIL" });
+    if (!item) return { status: 404, body: { error: "Not found" } };
+    return { status: 200, body: { id: req.params.id, ...item.data } };
+  })
+  .post("/create", async ({ input, tasks }) => {
+    const { title } = input as { title: string };
+    const id = crypto.randomUUID();
+    await tasks.put({
+      pk: `TASK#${id}`, sk: "DETAIL",
+      data: { tag: "task", title, done: false, createdAt: new Date().toISOString() },
+    });
+    return { status: 201, body: { id, title } };
+  });
 ```
 
 All of this lives in one file, one Lambda. The framework auto-wires DynamoDB permissions — `PutItem`, `GetItem`, `DeleteItem`, `UpdateItem`, `Query` — only what's needed. No manual IAM policies.
 
-Notice that `deps` and `config` are only available inside `setup`, not in individual route handlers. The `setup` function returns an object whose properties are spread into every route handler's arguments alongside `req` and `input`.
+Notice that `deps` and `config` are only available inside `.setup()`, not in individual route handlers. The `.setup()` method returns an object whose properties are spread into every route handler's arguments alongside `req` and `input`.
 
 ### Why one Lambda for all routes?
 
@@ -105,13 +87,13 @@ Notice that `deps` and `config` are only available inside `setup`, not in indivi
 - **Fewer resources** — one Lambda, one Function URL, one IAM role
 - **Simpler deploys** — one bundle to build and upload
 
-Each route is defined with an HTTP method and path in the `path` field (e.g. `"GET /users"`, `"POST /create"`), and routing is handled internally.
+Routes are defined using chained method calls (`.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`) with path patterns as the first argument, and routing is handled internally.
 
 ## Using secrets
 
 Your API calls Stripe, SendGrid, or another service that requires an API key. You don't want to hardcode secrets or manage environment variables.
 
-With `param()`, you reference an SSM Parameter Store key. Effortless fetches the value once at Lambda cold start, caches it, and injects it via `setup`. IAM permissions for SSM are added automatically.
+With `param()`, you reference an SSM Parameter Store key. Effortless fetches the value once at Lambda cold start, caches it, and injects it via `.setup()`. IAM permissions for SSM are added automatically.
 
 ```typescript
 import { defineApi, param } from "effortless-aws";
@@ -121,20 +103,15 @@ export const payments = defineApi({
   config: {
     stripeKey: param("stripe/secret-key"),
   },
-  setup: ({ config }) => ({ stripeKey: config.stripeKey }),
-  routes: [
-    {
-      path: "POST /charge",
-      onRequest: async ({ input, stripeKey }) => {
-        const { amount, currency } = input as { amount: number; currency: string };
-        // stripeKey is fetched from SSM at cold start, cached across invocations
-        const stripe = new Stripe(stripeKey);
-        const intent = await stripe.paymentIntents.create({ amount, currency });
-        return { status: 200, body: { clientSecret: intent.client_secret } };
-      },
-    },
-  ],
-});
+})
+  .setup(({ config }) => ({ stripeKey: config.stripeKey }))
+  .post("/charge", async ({ input, stripeKey }) => {
+    const { amount, currency } = input as { amount: number; currency: string };
+    // stripeKey is fetched from SSM at cold start, cached across invocations
+    const stripe = new Stripe(stripeKey);
+    const intent = await stripe.paymentIntents.create({ amount, currency });
+    return { status: 200, body: { clientSecret: intent.client_secret } };
+  });
 ```
 
 Create the secret in SSM using the CLI:

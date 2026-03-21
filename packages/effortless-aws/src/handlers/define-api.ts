@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, Duration, ConfigFactory } from "./handler-options";
+import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles, ResponseStream } from "./shared";
@@ -38,7 +38,14 @@ export const enableAuth: EnableAuth = <A = unknown>(options: AuthOptions<A>): Ap
 type ExtractAuth<C> = C extends { auth: ApiAuthConfig<infer A> } ? A : undefined;
 
 /** Property names reserved by the framework — cannot be used in setup return */
-type ReservedKeys = 'req' | 'input' | 'stream';
+type ReservedKeys = 'req' | 'input' | 'stream' | 'ok' | 'fail';
+
+// ============ Response helpers ============
+
+/** Success response helper: `ok({ data })` → `{ status: 200, body: { data } }` */
+export type OkHelper = (body?: unknown, status?: number) => HttpResponse;
+/** Error response helper: `fail("message")` → `{ status: 400, body: { error: "message" } }` */
+export type FailHelper = (message: string, status?: number) => HttpResponse;
 
 // ============ Route types ============
 
@@ -60,29 +67,26 @@ type SpreadCtx<C> =
 /** Callback args available inside each route — ctx is spread into args */
 type RouteArgs<C, ST> =
   & SpreadCtx<C>
-  & { req: HttpRequest; input: unknown }
+  & { req: HttpRequest; input: unknown; ok: OkHelper; fail: FailHelper }
   & ([ST] extends [true] ? { stream: ResponseStream } : {});
 
-/** Route definition with typed args */
-type RouteDefinition<C, ST> = {
-  path: `${HttpMethod} /${string}`;
-  onRequest: (args: RouteArgs<C, ST>) => Promise<HttpResponse | void> | HttpResponse | void;
-  public?: boolean;
-};
+/** Route handler function */
+type RouteHandler<C, ST> = (args: RouteArgs<C, ST>) => Promise<HttpResponse | void> | HttpResponse | void;
 
-// ============ Setup factory ============
+/** Route options (e.g. public) */
+type RouteOptions = { public?: boolean };
+
+// ============ Setup args ============
+
+/** Setup factory — receives deps/config/files/enableAuth based on what was declared */
+type SetupArgs<D, P, HasFiles extends boolean> =
+  & { enableAuth: EnableAuth; ok: OkHelper; fail: FailHelper }
+  & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+  & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+  & (HasFiles extends true ? { files: StaticFiles } : {});
 
 /** Validate that setup return type does not use reserved property names */
 type ValidateSetupReturn<C> = C & { [K in ReservedKeys]?: never };
-
-/** Setup factory — receives deps/config/files/enableAuth when declared */
-type SetupFactory<C, D, P, S extends string[] | undefined = undefined> =
-  (args:
-    & { enableAuth: EnableAuth }
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
-  ) => ValidateSetupReturn<C> | Promise<ValidateSetupReturn<C>>;
 
 // ============ Static config ============
 
@@ -96,38 +100,6 @@ export type ApiConfig = {
   stream?: boolean;
 };
 
-// ============ Options ============
-
-export type DefineApiOptions<
-  C = undefined,
-  D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnySecretRef> | undefined = undefined,
-  S extends string[] | undefined = undefined,
-  ST extends boolean | undefined = undefined,
-> = {
-  /** Lambda function settings (memory, timeout, permissions, etc.) */
-  lambda?: LambdaWithPermissions;
-  /** Base path prefix for all routes (e.g., "/api") */
-  basePath: `/${string}`;
-  /** Enable response streaming. When true, routes receive a `stream` arg for SSE. */
-  stream?: ST;
-  /** Factory function to initialize shared state. Called once on cold start. */
-  setup?: SetupFactory<C, NoInfer<D>, NoInfer<P>, NoInfer<S>>;
-  /** Dependencies on other handlers (tables, queues, etc.): `deps: () => ({ users })` */
-  deps?: () => D & {};
-  /** SSM Parameter Store parameters. Receives `{ defineSecret }` helper. */
-  config?: ConfigFactory<P>;
-  /** Static file glob patterns to bundle into the Lambda ZIP */
-  static?: S;
-  /** Error handler called when a route throws */
-  onError?: (args: { error: unknown; req: HttpRequest } & SpreadCtx<C>) => HttpResponse;
-  /** Called after each invocation completes */
-  onAfterInvoke?: (args: SpreadCtx<C>) => void | Promise<void>;
-
-  /** Route definitions — plain array of route objects */
-  routes?: RouteDefinition<C, ST>[];
-};
-
 // ============ Internal handler object ============
 
 /** Internal handler object created by defineApi */
@@ -135,7 +107,7 @@ export type ApiHandler<C = undefined> = {
   readonly __brand: "effortless-api";
   readonly __spec: ApiConfig;
   readonly onError?: (...args: any[]) => any;
-  readonly onAfterInvoke?: (...args: any[]) => any;
+  readonly onCleanup?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
@@ -143,76 +115,221 @@ export type ApiHandler<C = undefined> = {
   readonly routes?: RouteEntry[];
 };
 
+// ============ Builder options (plain values, no inference) ============
+
+/** Options passed to `defineApi()` */
+type ApiOptions = {
+  /** Base path prefix for all routes (e.g., "/api") */
+  basePath: `/${string}`;
+  /** Lambda memory in MB (default: 256) */
+  memory?: number;
+  /** Lambda timeout (default: 30s). Accepts seconds or duration string: `"30s"`, `"5m"` */
+  timeout?: Duration;
+  /** Additional IAM permissions for the Lambda */
+  permissions?: Permission[];
+  /** Logging verbosity: "error" (errors only), "info" (+ execution summary), "debug" (+ input/output). Default: "info" */
+  logLevel?: LogLevel;
+  /** Enable response streaming. When true, routes receive a `stream` arg for SSE. */
+  stream?: boolean;
+  /** Static file glob patterns to bundle into the Lambda ZIP */
+  static?: string[];
+};
+
+// ============ ApiRoutes — returned after first route method ============
+
 /**
- * Define an API with typed routes.
+ * Finalized API handler with route-adding methods.
+ * Has `__brand` so CLI discovers it. Each `.get()/.post()` adds a route and returns self.
+ */
+export interface ApiRoutes<C = undefined, ST extends boolean = false> extends ApiHandler<C> {
+  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  post(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  put(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  patch(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  delete(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+}
+
+// ============ Builder ============
+
+/**
+ * Builder interface for defining API handlers.
  *
- * Setup return is spread into route args — all properties are directly accessible.
- * Reserved names (`req`, `input`, `stream`) cannot be used in setup return.
- * Auth is configured via an `auth` property in setup return — runtime replaces it with `AuthHelpers`.
+ * Each method sets exactly one generic, so inference happens one step at a time.
+ * This prevents cascading type errors when one property has a mistake.
+ */
+interface ApiBuilder<
+  D = undefined,
+  P = undefined,
+  C = undefined,
+  ST extends boolean = false,
+  HasFiles extends boolean = false,
+> {
+  /** Declare handler dependencies (tables, queues, buckets, mailers) */
+  deps<D2 extends Record<string, AnyDepHandler>>(
+    fn: () => D2
+  ): ApiBuilder<D2, P, C, ST, HasFiles>;
+
+  /** Declare SSM secrets */
+  config<P2 extends Record<string, AnySecretRef>>(
+    fn: ConfigFactory<P2>
+  ): ApiBuilder<D, P2, C, ST, HasFiles>;
+
+  /** Initialize shared state on cold start. Receives deps/config/files based on what was declared. */
+  setup<C2>(
+    fn: (args: SetupArgs<D, P, HasFiles>) => ValidateSetupReturn<C2> | Promise<ValidateSetupReturn<C2>>
+  ): ApiBuilder<D, P, C2, ST, HasFiles>;
+
+  /** Handle errors thrown by routes */
+  onError(
+    fn: (args: { error: unknown; req: HttpRequest; ok: OkHelper; fail: FailHelper } & SpreadCtx<C>) => HttpResponse
+  ): ApiBuilder<D, P, C, ST, HasFiles>;
+
+  /** Cleanup callback — runs after each invocation, before Lambda freezes */
+  onCleanup(
+    fn: (args: SpreadCtx<C>) => void | Promise<void>
+  ): ApiBuilder<D, P, C, ST, HasFiles>;
+
+  /** Add a GET route (terminal — returns finalized handler with route methods) */
+  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  /** Add a POST route (terminal) */
+  post(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  /** Add a PUT route (terminal) */
+  put(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  /** Add a PATCH route (terminal) */
+  patch(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  /** Add a DELETE route (terminal) */
+  delete(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+}
+
+// ============ Implementation ============
+
+/**
+ * Define an API with typed routes using a builder pattern.
  *
  * @example
  * ```typescript
- * export default defineApi({
- *   basePath: "/api",
- *   deps: () => ({ users }),
- *   setup: ({ deps }) => ({
+ * // Minimal
+ * export default defineApi({ basePath: "/hello" })
+ *   .get("/", async ({ req, ok }) => ok({ message: "Hello!" }))
+ *
+ * // Full
+ * export const api = defineApi({ basePath: "/api", timeout: "30s" })
+ *   .deps(() => ({ users }))
+ *   .config(({ defineSecret }) => ({ dbUrl: defineSecret() }))
+ *   .setup(async ({ deps, config, enableAuth }) => ({
  *     users: deps.users,
- *     auth: {
- *       schema: unsafeAs<Session>(),
- *       apiToken: {
- *         verify: async (value) => {
- *           const user = await deps.users.query({ pk: value });
- *           return user[0] ? { userId: user[0].sk } : null;
- *         },
- *       },
- *     },
- *   }),
- *   routes: [
- *     {
- *       path: "GET /me",
- *       onRequest: async ({ users, auth }) => ({
- *         status: 200,
- *         body: { user: await users.get(auth.session.userId) },
- *       }),
- *     },
- *   ],
- * })
+ *     auth: enableAuth<Session>({ secret: config.dbUrl }),
+ *   }))
+ *   .onError(({ error, fail }) => fail(String(error), 500))
+ *   .get("/me", async ({ users, auth, ok }) => ok(auth.session))
+ *   .post("/login", async ({ auth, ok }) => ok(await auth.createSession()), { public: true })
  * ```
  */
-export const defineApi = () => <
-  C = undefined,
-  D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnySecretRef> | undefined = undefined,
-  S extends string[] | undefined = undefined,
-  ST extends boolean | undefined = undefined,
->(
-  options: DefineApiOptions<C, D, P, S, ST>
-): ApiHandler<C> => {
-  const { routes, onError, onAfterInvoke, setup, deps, config: configFactory, static: staticFiles, ...__spec } = options;
-  const config = configFactory ? resolveConfigFactory(configFactory) : undefined;
-  const parsed = routes ? routes.map(parseRoute) : undefined;
-  return {
-    __brand: "effortless-api",
-    __spec,
-    ...(parsed ? { routes: parsed } : {}),
-    ...(onError ? { onError } : {}),
-    ...(onAfterInvoke ? { onAfterInvoke } : {}),
-    ...(setup ? { setup } : {}),
-    ...(deps ? { deps } : {}),
-    ...(config ? { config } : {}),
-    ...(staticFiles ? { static: staticFiles } : {}),
-  } as ApiHandler<C>;
-};
+export function defineApi(options: ApiOptions & { static: string[] }): ApiBuilder<undefined, undefined, undefined, false, true>;
+export function defineApi<const O extends ApiOptions>(
+  options: O,
+): ApiBuilder<undefined, undefined, undefined, O["stream"] extends true ? true : false, O["static"] extends string[] ? true : false>;
+export function defineApi(
+  options: ApiOptions,
+): ApiBuilder {
+  const { basePath, stream, static: staticFiles, ...lambdaConfig } = options;
+  const hasLambda = Object.keys(lambdaConfig).length > 0;
 
-/** Parse "METHOD /path" into RouteEntry */
-const parseRoute = (route: { path: string; onRequest: Function; public?: boolean }): RouteEntry => {
-  const spaceIdx = route.path.indexOf(" ");
-  const method = route.path.slice(0, spaceIdx) as HttpMethod;
-  const path = route.path.slice(spaceIdx + 1);
-  return {
-    method,
-    path,
-    onRequest: route.onRequest as any,
-    ...(route.public ? { public: true } : {}),
+  const state: {
+    spec: ApiConfig;
+    deps?: () => Record<string, unknown>;
+    config?: Record<string, unknown>;
+    static?: string[];
+    setup?: (...args: any[]) => any;
+    onError?: (...args: any[]) => any;
+    onCleanup?: (...args: any[]) => any;
+    routes: RouteEntry[];
+  } = {
+    spec: {
+      basePath,
+      ...(hasLambda ? { lambda: lambdaConfig } : {}),
+      ...(stream ? { stream } : {}),
+    },
+    ...(staticFiles ? { static: staticFiles } : {}),
+    routes: [],
   };
-};
+
+  const addRoute = (method: HttpMethod, path: string, handler: Function, opts?: RouteOptions) => {
+    state.routes.push({
+      method,
+      path,
+      onRequest: handler as any,
+      ...(opts?.public ? { public: true } : {}),
+    });
+  };
+
+  const finalize = (): ApiRoutes => {
+    const handler: any = {
+      __brand: "effortless-api",
+      __spec: state.spec,
+      routes: state.routes,
+      ...(state.onError ? { onError: state.onError } : {}),
+      ...(state.onCleanup ? { onCleanup: state.onCleanup } : {}),
+      ...(state.setup ? { setup: state.setup } : {}),
+      ...(state.deps ? { deps: state.deps } : {}),
+      ...(state.config ? { config: state.config } : {}),
+      ...(state.static ? { static: state.static } : {}),
+    };
+
+    // Add route methods to the finalized handler
+    for (const m of ["get", "post", "put", "patch", "delete"] as const) {
+      handler[m] = (path: string, fn: Function, opts?: RouteOptions) => {
+        addRoute(m.toUpperCase() as HttpMethod, path, fn, opts);
+        handler.routes = state.routes;
+        return handler;
+      };
+    }
+
+    return handler as ApiRoutes;
+  };
+
+  const builder: ApiBuilder = {
+    deps(fn) {
+      state.deps = fn as any;
+      return builder as any;
+    },
+    config(fn) {
+      state.config = resolveConfigFactory(fn) as any;
+      return builder as any;
+    },
+    setup(fn) {
+      state.setup = fn as any;
+      return builder as any;
+    },
+    onError(fn) {
+      state.onError = fn as any;
+      return builder as any;
+    },
+    onCleanup(fn) {
+      state.onCleanup = fn as any;
+      return builder as any;
+    },
+    get(path, handler, opts) {
+      addRoute("GET", path, handler, opts);
+      return finalize() as any;
+    },
+    post(path, handler, opts) {
+      addRoute("POST", path, handler, opts);
+      return finalize() as any;
+    },
+    put(path, handler, opts) {
+      addRoute("PUT", path, handler, opts);
+      return finalize() as any;
+    },
+    patch(path, handler, opts) {
+      addRoute("PATCH", path, handler, opts);
+      return finalize() as any;
+    },
+    delete(path, handler, opts) {
+      addRoute("DELETE", path, handler, opts);
+      return finalize() as any;
+    },
+  };
+
+  return builder;
+}

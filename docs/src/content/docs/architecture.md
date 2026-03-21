@@ -135,24 +135,13 @@ The build system has two phases: **static analysis** (ts-morph) and **bundling**
 export const users = defineApi({
   basePath: "/api",          // ← static config (extracted by ts-morph)
   memory: 512,               // ← static config
-  setup: ({ deps }) => ({    // ← runtime
+})
+  .setup(({ deps }) => ({    // ← runtime
     users: deps.users,
-  }),
-  routes: [                  // ← runtime
-    {
-      path: "GET /users",
-      onRequest: async ({ req, users }) => ...,
-    },
-    {
-      path: "GET /users/{id}",
-      onRequest: async ({ req, users }) => ...,
-    },
-    {
-      path: "POST /users",
-      onRequest: async ({ input, users }) => ...,
-    },
-  ],
-});
+  }))
+  .get("/users", async ({ req, users }) => ...)        // ← runtime
+  .get("/users/{id}", async ({ req, users }) => ...)   // ← runtime
+  .post("/users", async ({ input, users }) => ...);    // ← runtime
 ```
 
 ### Phase 1: Static analysis (ts-morph)
@@ -162,8 +151,8 @@ export const users = defineApi({
 ```
 RUNTIME_PROPS = ["onRecord", "onRecordBatch", "onMessage", "onMessageBatch",
                  "onObjectCreated", "onObjectRemoved", "setup", "schema",
-                 "onError", "onAfterInvoke", "deps", "config", "static",
-                 "middleware", "auth", "routes"]
+                 "onError", "onCleanup", "deps", "config", "static",
+                 "middleware", "auth", "get", "post", "put", "delete", "patch"]
 ```
 
 This static config is used by the **deploy phase** to configure AWS resources (Lambda Function URLs, Lambda memory/timeout, etc.) without needing to execute user code.
@@ -188,8 +177,8 @@ Source code  →  ts-morph AST  →  { basePath: "/api", memory: 512 }
          │                              │
          ▼                              ▼
    User's handler code           Framework runtime wrapper
-   (defineApi + get/post         (wrapApi: parses Lambda event,
-    + schema + setup)             matches routes, validates schema,
+   (defineApi + get/post/        (wrapApi: parses Lambda event,
+    schema + setup)               matches routes, validates schema,
                                   calls handler, formats response)
          │                              │
          └──────────┬───────────────────┘
@@ -235,9 +224,10 @@ User code                    Build system                      Output
 defineApi({            ┌─► ts-morph extracts static config ─► deploy phase
   basePath: "/api",    │      { basePath, memory }             (Function URL, Lambda)
   memory: 512,         │
-  setup: ...,          │
-  routes: [...],    ───┤
 })                     │
+  .setup(...)          │
+  .get(...)         ───┤
+  .post(...)           │
                        └─► esbuild bundles everything ──────► index.mjs
                             (handler + wrapper + deps)         (uploaded to Lambda)
 ```

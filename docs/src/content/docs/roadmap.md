@@ -35,11 +35,11 @@ export const payments = defineApi({
     key: (req) => req.body.paymentId,
     ttl: "1 hour",
   },
-  post: async ({ req }) => {
+})
+  .post("/", async ({ req }) => {
     await chargeCustomer(req.body);
     return { status: 200, body: { ok: true } };
-  },
-});
+  });
 
 export const processOrders = defineFifoQueue({
   schema: (input) => OrderSchema.parse(input),
@@ -71,17 +71,22 @@ export const processOrders = defineFifoQueue({
 ```typescript
 export const api = defineApi({
   basePath: "/orders",
-  params: {
+  config: {
     dbUrl: param("/prod/database-url"),
     stripeKey: secret("prod/stripe-api-key"),
     features: appConfig("my-app", "feature-flags"),
   },
-  get: async ({ req, params }) => {
-    // params.dbUrl    — string, cached, from SSM Parameter Store
-    // params.stripeKey — string, cached, from Secrets Manager
-    // params.features  — object, cached, from AppConfig
-  },
-});
+})
+  .setup(({ config }) => ({
+    dbUrl: config.dbUrl,
+    stripeKey: config.stripeKey,
+    features: config.features,
+  }))
+  .get("/", async ({ dbUrl, stripeKey, features }) => {
+    // dbUrl    — string, cached, from SSM Parameter Store
+    // stripeKey — string, cached, from Secrets Manager
+    // features  — object, cached, from AppConfig
+  });
 ```
 
 **What effortless auto-adds on deploy**:
@@ -107,7 +112,8 @@ export const api = defineApi({
     level: "info",
     sampleRate: 0.1,  // 10% of requests also log DEBUG
   },
-  post: async ({ req, log }) => {
+})
+  .post("/", async ({ req, log }) => {
     log.info("Processing order", { orderId: req.body.id });
     // output: {"level":"INFO","message":"Processing order","orderId":"abc-123",
     //          "requestId":"xxx","functionName":"createOrder","coldStart":false,
@@ -115,8 +121,7 @@ export const api = defineApi({
 
     log.debug("Full payload", { body: req.body });
     // only logged for 10% of requests (when sampleRate triggers)
-  },
-});
+  });
 ```
 
 **Automatic enrichment (no config needed)**:
@@ -143,7 +148,8 @@ export const api = defineApi({
   metrics: {
     namespace: "MyApp",  // or default to project name
   },
-  post: async ({ req, metrics }) => {
+})
+  .post("/", async ({ req, metrics }) => {
     const order = await createOrder(req.body);
 
     metrics.add("OrderCreated", 1);
@@ -152,8 +158,7 @@ export const api = defineApi({
 
     // dimensions added automatically: handler, stage
     // flushed as EMF to stdout when handler returns
-  },
-});
+  });
 ```
 
 **Status**: Planned
@@ -170,22 +175,20 @@ export const api = defineApi({
 export const api = defineApi({
   basePath: "/users",
   tracing: true,
-  get: {
-    "/:id": async ({ req, tracer }) => {
-      // handler automatically traced as a segment
+})
+  .get("/{id}", async ({ req, tracer }) => {
+    // handler automatically traced as a segment
 
-      const user = await tracer.trace("fetchUser", () =>
-        db.get({ id: req.params.id })
-      );
+    const user = await tracer.trace("fetchUser", () =>
+      db.get({ id: req.params.id })
+    );
 
-      const enriched = await tracer.trace("enrichProfile", () =>
-        enrichWithExternalData(user)
-      );
+    const enriched = await tracer.trace("enrichProfile", () =>
+      enrichWithExternalData(user)
+    );
 
-      return { status: 200, body: enriched };
-    },
-  },
-});
+    return { status: 200, body: enriched };
+  });
 ```
 
 **What effortless auto-configures on deploy**:
@@ -211,10 +214,10 @@ export const api = defineApi({
     compress(),  // gzip responses > 1KB
     rateLimit({ max: 100, window: "1 minute" }),  // uses DynamoDB counter
   ],
-  post: async ({ req }) => {
+})
+  .post("/", async ({ req }) => {
     return { status: 200, body: { ok: true } };
-  },
-});
+  });
 ```
 
 **Status**: Planned (design phase — needs pipeline architecture)
@@ -237,14 +240,12 @@ export const processOrder = defineFifoQueue({
   },
 });
 
-export const orders = defineApi({
-  basePath: "/orders",
-  post: async ({ req }) => {
+export const orders = defineApi({ basePath: "/orders" })
+  .post("/", async ({ req }) => {
     // type-safe — payload shape inferred from processOrder's messageSchema
     await processOrder.send({ orderId: "abc-123", amount: 99 });
     return { status: 202, body: { queued: true } };
-  },
-});
+  });
 ```
 
 The same pattern applies to all resource types:
@@ -337,13 +338,11 @@ export const processOrder = defineFunction({
   },
 });
 
-export const orders = defineApi({
-  basePath: "/orders",
-  post: async ({ req }) => {
+export const orders = defineApi({ basePath: "/orders" })
+  .post("/", async ({ req }) => {
     const execId = await processOrder.start({ orderId: req.body.id });
     return { status: 202, body: { executionId: execId } };
-  },
-});
+  });
 ```
 
 Two invocation modes:

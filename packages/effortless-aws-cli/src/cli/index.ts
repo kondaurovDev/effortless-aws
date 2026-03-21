@@ -16,6 +16,7 @@ import { checkForUpdate } from "./update-check";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json");
+const versionString = `${version} (${new URL(".", import.meta.url).pathname})`;
 
 const mainCommand = Command.make("eff").pipe(
   Command.withSubcommands([deployCommand, statusCommand, logsCommand, cleanupCommand, layerCommand, configCommand, buildCommand]),
@@ -24,7 +25,7 @@ const mainCommand = Command.make("eff").pipe(
 
 const cli = Command.run(mainCommand, {
   name: "effortless",
-  version,
+  version: versionString,
 });
 
 const updateCheck = checkForUpdate(version);

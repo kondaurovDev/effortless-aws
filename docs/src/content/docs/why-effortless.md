@@ -51,15 +51,16 @@ export const orders = defineTable({
 export const api = defineApi({
   basePath: "/orders",
   deps: () => ({ orders }),
-  post: async ({ req, deps }) => {
-    await deps.orders.put({
+})
+  .setup(({ deps }) => ({ orders: deps.orders }))
+  .post("/", async ({ req, orders }) => {
+    await orders.put({
       id: crypto.randomUUID(),
       product: req.body.product,
       amount: req.body.amount,
     });
     return { status: 201, body: { ok: true } };
-  },
-});
+  });
 ```
 
 ```bash
@@ -117,28 +118,24 @@ export const users = defineTable({
 export const api = defineApi({
   basePath: "/users",
   deps: () => ({ users }),
-
-  get: {
-    "/{id}": async ({ req, deps }) => {
-      const user = await deps.users.get({ id: req.params.id });
-      if (!user) return { status: 404, body: { error: "Not found" } };
-      return { status: 200, body: user };
-    },
-  },
-
-  schema: (input: unknown) =>
-    z.object({ email: z.string(), name: z.string() }).parse(input),
-  post: async ({ data, deps }) => {
+})
+  .setup(({ deps }) => ({ users: deps.users }))
+  .get("/{id}", async ({ req, users }) => {
+    const user = await users.get({ id: req.params.id });
+    if (!user) return { status: 404, body: { error: "Not found" } };
+    return { status: 200, body: user };
+  })
+  .post("/", async ({ input, users }) => {
+    const data = z.object({ email: z.string(), name: z.string() }).parse(input);
     const user: User = {
       id: crypto.randomUUID(),
       email: data.email,    // typed from schema
       name: data.name,
       createdAt: new Date().toISOString(),
     };
-    await deps.users.put(user);  // typed client, auto IAM
+    await users.put(user);  // typed client, auto IAM
     return { status: 201, body: user };
-  },
-});
+  });
 ```
 
 What you get without writing any infrastructure:
@@ -198,14 +195,10 @@ export const app = defineApp({
 });
 
 // API endpoints in the same project
-export const api = defineApi({
-  basePath: "/api",
-  get: {
-    "/items": async () => {
-      return { status: 200, body: await fetchItems() };
-    },
-  },
-});
+export const api = defineApi({ basePath: "/api" })
+  .get("/items", async () => {
+    return { status: 200, body: await fetchItems() };
+  });
 ```
 
 Or for static sites, use CloudFront + S3:
@@ -233,12 +226,13 @@ export const checkout = defineApi({
     stripeKey: param("stripe/secret-key"),
     webhookSecret: param("stripe/webhook-secret"),
   },
-  post: async ({ config }) => {
-    // config.stripeKey is fetched from SSM once, cached across invocations
-    const stripe = new Stripe(config.stripeKey);
+})
+  .setup(({ config }) => ({ stripeKey: config.stripeKey }))
+  .post("/", async ({ stripeKey }) => {
+    // stripeKey is fetched from SSM once, cached across invocations
+    const stripe = new Stripe(stripeKey);
     // ...
-  },
-});
+  });
 ```
 
 No manual SSM calls. No `GetParameter` permission writing. No environment variable plumbing.

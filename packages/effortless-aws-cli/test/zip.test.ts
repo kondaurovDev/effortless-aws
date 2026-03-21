@@ -13,12 +13,10 @@ describe("zip", () => {
     const handlerCode = `
       import { defineApi } from "effortless-aws";
 
-      export default defineApi({
-        basePath: "/zip-test",
-        get: {
-          "/": async () => ({ status: 200, body: { ok: true } })
-        }
-      });
+      export default defineApi({ basePath: "/zip-test" })
+        .routes([
+          { path: "GET /", onRequest: async () => ({ status: 200, body: { ok: true } }) },
+        ]);
     `;
 
     const result = await Effect.runPromise(bundleCode({ code: handlerCode, projectDir }));

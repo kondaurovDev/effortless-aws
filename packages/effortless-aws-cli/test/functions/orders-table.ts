@@ -10,7 +10,7 @@ type Order = {
 type Customer = { customerId: string; email: string; tier: string };
 
 // Dep: customers table (resource-only)
-export const customers = defineTable<Customer>()({});
+export const customers = defineTable<Customer>().build();
 
 // Simulated external service
 const analyticsService = {
@@ -28,21 +28,20 @@ const notificationService = {
   }
 };
 
-export const orders = defineTable<Order>()({
+export const orders = defineTable<Order>({
   streamView: "NEW_AND_OLD_IMAGES",
   batchSize: 10,
-  lambda: { memory: 256 },
-
-  deps: () => ({ customers }),
-  config: ({ defineSecret }) => ({
+  memory: 256,
+})
+  .deps(() => ({ customers }))
+  .config(({ defineSecret }) => ({
     highValueThreshold: defineSecret<number>({ key: "high-value-threshold", transform: Number }),
-  }),
-  setup: ({ deps, config }) => ({
+  }))
+  .setup(({ deps, config }) => ({
     highValueThreshold: config.highValueThreshold,
     customers: deps.customers,
-  }),
-
-  onRecord: async ({ record, highValueThreshold, customers }) => {
+  }))
+  .onRecord(async ({ record, highValueThreshold, customers }) => {
     const { eventName } = record;
     const newOrder = record.new?.data;
     const oldOrder = record.old?.data;
@@ -66,5 +65,4 @@ export const orders = defineTable<Order>()({
         await analyticsService.send({ type: "order_cancelled", orderId: oldOrder.id });
       }
     }
-  },
-});
+  });

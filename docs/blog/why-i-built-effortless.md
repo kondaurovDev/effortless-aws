@@ -51,15 +51,11 @@ Here's what the simplest handler looks like:
 ```typescript
 import { defineApi } from "effortless-aws";
 
-export const hello = defineApi({
-  basePath: "/hello",
-  get: {
-    "/": async () => ({
-      status: 200,
-      body: { message: "Hello World!" },
-    }),
-  },
-});
+export const hello = defineApi({ basePath: "/hello" })
+  .get("/", async () => ({
+    status: 200,
+    body: { message: "Hello World!" },
+  }));
 ```
 
 That's your **Lambda** function, its **Function URL**, and its **IAM** role — all in one file. Run `eff deploy` and it's live.
@@ -107,13 +103,12 @@ export const orders = defineTable({
 export const api = defineApi({
   basePath: "/orders",
   deps: () => ({ orders }),
-  get: {
-    "/": async ({ deps }) => {
-      const items = await deps.orders.scan();
-      return { status: 200, body: items };
-    },
-  },
-});
+})
+  .setup(({ deps }) => ({ orders: deps.orders }))
+  .get("/", async ({ orders }) => {
+    const items = await orders.scan();
+    return { status: 200, body: items };
+  });
 ```
 
 Run `eff deploy`. Done. The table, the function, the route, the IAM permissions — all created in **seconds**.

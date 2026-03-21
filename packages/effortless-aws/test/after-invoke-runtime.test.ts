@@ -51,7 +51,7 @@ const makeSqsEvent = (messages: Array<{ body: string; messageId?: string }>) => 
   })),
 });
 
-describe("onAfterInvoke lifecycle hook", () => {
+describe("onCleanup lifecycle hook", () => {
 
   const originalEnv = process.env;
 
@@ -65,13 +65,13 @@ describe("onAfterInvoke lifecycle hook", () => {
 
   describe("API handler (wrapApi)", () => {
 
-    it("should call onAfterInvoke after successful invocation", async () => {
+    it("should call onCleanup after successful invocation", async () => {
       const afterInvoke = vi.fn();
 
       const handler = {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
-        onAfterInvoke: afterInvoke,
+        onCleanup: afterInvoke,
         routes: [{ method: "POST", path: "/run", onRequest: async () => ({ status: 200, body: { ok: true } }) }],
       } as unknown as ApiHandler;
 
@@ -81,13 +81,13 @@ describe("onAfterInvoke lifecycle hook", () => {
       expect(afterInvoke).toHaveBeenCalledOnce();
     });
 
-    it("should call onAfterInvoke after handler error", async () => {
+    it("should call onCleanup after handler error", async () => {
       const afterInvoke = vi.fn();
 
       const handler = {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
-        onAfterInvoke: afterInvoke,
+        onCleanup: afterInvoke,
         routes: [{ method: "POST", path: "/run", onRequest: async () => { throw new Error("boom"); } }],
       } as unknown as ApiHandler;
 
@@ -97,11 +97,11 @@ describe("onAfterInvoke lifecycle hook", () => {
       expect(afterInvoke).toHaveBeenCalledOnce();
     });
 
-    it("should not throw when onAfterInvoke itself throws", async () => {
+    it("should not throw when onCleanup itself throws", async () => {
       const handler = {
         __brand: "effortless-api",
         __spec: { basePath: "/test" },
-        onAfterInvoke: () => { throw new Error("afterInvoke error"); },
+        onCleanup: () => { throw new Error("afterInvoke error"); },
         routes: [{ method: "POST", path: "/run", onRequest: async () => ({ status: 200, body: { ok: true } }) }],
       } as unknown as ApiHandler;
 
@@ -111,7 +111,7 @@ describe("onAfterInvoke lifecycle hook", () => {
       expect(result.statusCode).toBe(200);
     });
 
-    it("should receive ctx and deps in onAfterInvoke args", async () => {
+    it("should receive ctx and deps in onCleanup args", async () => {
       process.env = { ...originalEnv, EFF_DEP_orders: "table:test-orders" };
 
       let capturedArgs: any = null;
@@ -122,7 +122,7 @@ describe("onAfterInvoke lifecycle hook", () => {
         __spec: { basePath: "/test" },
         setup: () => ({ env: "test" }),
         deps: { orders: { __brand: "effortless-table", config: {} } },
-        onAfterInvoke: afterInvoke,
+        onCleanup: afterInvoke,
         routes: [{ method: "POST", path: "/run", onRequest: async () => ({ status: 200, body: { ok: true } }) }],
       } as unknown as ApiHandler;
 
@@ -136,13 +136,13 @@ describe("onAfterInvoke lifecycle hook", () => {
 
   describe("Table stream handler (wrapTableStream)", () => {
 
-    it("should call onAfterInvoke after processing records", async () => {
+    it("should call onCleanup after processing records", async () => {
       const afterInvoke = vi.fn();
 
       const handler = {
         __brand: "effortless-table",
         __spec: {},
-        onAfterInvoke: afterInvoke,
+        onCleanup: afterInvoke,
         onRecord: async () => {},
       } as unknown as TableHandler;
 
@@ -157,13 +157,13 @@ describe("onAfterInvoke lifecycle hook", () => {
       expect(afterInvoke).toHaveBeenCalledOnce();
     });
 
-    it("should call onAfterInvoke even when records fail", async () => {
+    it("should call onCleanup even when records fail", async () => {
       const afterInvoke = vi.fn();
 
       const handler = {
         __brand: "effortless-table",
         __spec: {},
-        onAfterInvoke: afterInvoke,
+        onCleanup: afterInvoke,
         onRecord: async () => { throw new Error("record error"); },
       } as unknown as TableHandler;
 
@@ -183,13 +183,13 @@ describe("onAfterInvoke lifecycle hook", () => {
 
   describe("FIFO queue handler (wrapFifoQueue)", () => {
 
-    it("should call onAfterInvoke after processing messages", async () => {
+    it("should call onCleanup after processing messages", async () => {
       const afterInvoke = vi.fn();
 
       const handler = {
         __brand: "effortless-fifo-queue",
         __spec: {},
-        onAfterInvoke: afterInvoke,
+        onCleanup: afterInvoke,
         onMessage: async () => {},
       } as unknown as FifoQueueHandler;
 
@@ -199,13 +199,13 @@ describe("onAfterInvoke lifecycle hook", () => {
       expect(afterInvoke).toHaveBeenCalledOnce();
     });
 
-    it("should call onAfterInvoke even when messages fail", async () => {
+    it("should call onCleanup even when messages fail", async () => {
       const afterInvoke = vi.fn();
 
       const handler = {
         __brand: "effortless-fifo-queue",
         __spec: {},
-        onAfterInvoke: afterInvoke,
+        onCleanup: afterInvoke,
         onMessage: async () => { throw new Error("message error"); },
       } as unknown as FifoQueueHandler;
 

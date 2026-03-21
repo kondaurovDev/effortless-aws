@@ -11,11 +11,9 @@ describe("deps extraction", () => {
         import { defineApi } from "effortless-aws";
         const orders = {} as any;
 
-        export const createOrder = defineApi()({
-          basePath: "/orders",
-          deps: () => ({ orders }),
-          post: async ({ req, deps }) => ({ status: 201 })
-        });
+        export const createOrder = defineApi({ basePath: "/orders" })
+          .deps(() => ({ orders }))
+          .post("/create", async ({ req }) => ({ status: 201 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -30,11 +28,9 @@ describe("deps extraction", () => {
         const orders = {} as any;
         const users = {} as any;
 
-        export const api = defineApi()({
-          basePath: "/api",
-          deps: () => ({ orders, users }),
-          post: async ({ req, deps }) => ({ status: 200 })
-        });
+        export const api = defineApi({ basePath: "/api" })
+          .deps(() => ({ orders, users }))
+          .post("/create", async ({ req }) => ({ status: 200 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -48,11 +44,9 @@ describe("deps extraction", () => {
         import { defineApi } from "effortless-aws";
         const orders = {} as any;
 
-        export const api = defineApi()({
-          basePath: "/api",
-          deps: () => ({ orders: orders }),
-          post: async ({ req }) => ({ status: 200 })
-        });
+        export const api = defineApi({ basePath: "/api" })
+          .deps(() => ({ orders: orders }))
+          .post("/create", async ({ req }) => ({ status: 200 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -65,10 +59,8 @@ describe("deps extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const hello = defineApi()({
-          basePath: "/hello",
-          queries: { index: async ({ input }) => ({ status: 200 }) }
-        });
+        export const hello = defineApi({ basePath: "/hello" })
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -82,11 +74,9 @@ describe("deps extraction", () => {
         import { defineApi } from "effortless-aws";
         const orders = {} as any;
 
-        export default defineApi()({
-          basePath: "/orders",
-          deps: () => ({ orders }),
-          post: async ({ req }) => ({ status: 201 })
-        });
+        export default defineApi({ basePath: "/orders" })
+          .deps(() => ({ orders }))
+          .post("/create", async ({ req }) => ({ status: 201 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -101,11 +91,9 @@ describe("deps extraction", () => {
         import { defineApi } from "effortless-aws";
         const orders = {} as any;
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          deps: () => ({ orders }),
-          routes: []
-        });
+        export const api = defineApi({ basePath: "/orders" })
+          .deps(() => ({ orders }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -123,10 +111,9 @@ describe("deps extraction", () => {
         import { defineTable } from "effortless-aws";
         const users = {} as any;
 
-        export const orders = defineTable()({
-          deps: () => ({ users }),
-          onRecord: async ({ record, deps }) => {}
-        });
+        export const orders = defineTable()
+          .deps(() => ({ users }))
+          .onRecord(async ({ record, deps }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -139,10 +126,8 @@ describe("deps extraction", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
-          name: "orders",
-          onRecord: async ({ record }) => {}
-        });
+        export const orders = defineTable()
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -156,10 +141,9 @@ describe("deps extraction", () => {
         import { defineTable } from "effortless-aws";
         const users = {} as any;
 
-        export const orders = defineTable()({
-          deps: () => ({ users }),
-          onRecord: async ({ record }) => {}
-        });
+        export const orders = defineTable()
+          .deps(() => ({ users }))
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);

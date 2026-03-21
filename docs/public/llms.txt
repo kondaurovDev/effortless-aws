@@ -61,7 +61,7 @@ Pass a validation function or `typed<T>()` for type-only. Validated data arrives
 
 Creates Lambda + Function URL with route-based routing. Deploys a single Lambda that handles all routes internally.
 
-`defineApi` uses a `routes` array where each route specifies `path` (method + path pattern) and `onRequest` handler. Shared `deps`, `config`, `setup`, `static` across all routes.
+`defineApi` uses chained method calls (`.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`) with path patterns as the first argument. Shared `deps`, `config`, `static` in the options object; `.setup()` is chained.
 
 ```typescript
 import { defineApi, defineTable, typed, param } from "effortless-aws";
@@ -78,65 +78,45 @@ const DeleteUser = z.object({ id: z.string() });
 export default defineApi({
   deps: () => ({ users }),
   config: { dbUrl: param("database-url") },
-  setup: async ({ deps, config }) => {
+})
+  .setup(async ({ deps, config }) => {
     const pool = createPool(config.dbUrl);
     // enableAuth makes auth helpers available in route callbacks
     const auth = enableAuth<Session>({ expiresIn: "7d" });
     return { pool, auth };
-  },
-
-  routes: [
-    {
-      path: "GET /api/users",
-      onRequest: async ({ pool, auth }) => ({
-        status: 200,
-        body: await pool.query("SELECT * FROM users"),
-      }),
-    },
-    {
-      path: "GET /api/me",
-      onRequest: async ({ auth }) => ({
-        status: 200,
-        body: { userId: auth.session?.userId },
-      }),
-    },
-    {
-      path: "POST /api/createUser",
-      schema: (input) => CreateUser.parse(input),
-      onRequest: async ({ data, pool }) => {
-        const id = crypto.randomUUID();
-        await pool.query("INSERT INTO users ...", [id, data.name, data.email]);
-        return { status: 201, body: { id } };
-      },
-    },
-    {
-      path: "POST /api/deleteUser",
-      schema: (input) => DeleteUser.parse(input),
-      onRequest: async ({ data, pool }) => {
-        await pool.query("DELETE FROM users WHERE id = $1", [data.id]);
-        return { status: 200, body: { ok: true } };
-      },
-    },
-    {
-      path: "POST /api/login",
-      public: true,  // accessible without session
-      schema: (input) => z.object({ password: z.string() }).parse(input),
-      onRequest: async ({ data, auth }) => {
-        if (data.password !== "secret") return { status: 401, body: { error: "Invalid" } };
-        return auth.createSession({ userId: "admin", role: "admin" });
-      },
-    },
-  ],
-});
+  })
+  .get("/api/users", async ({ pool, auth }) => ({
+    status: 200,
+    body: await pool.query("SELECT * FROM users"),
+  }))
+  .get("/api/me", async ({ auth }) => ({
+    status: 200,
+    body: { userId: auth.session?.userId },
+  }))
+  .post("/api/createUser", async ({ input, pool }) => {
+    const data = CreateUser.parse(input);
+    const id = crypto.randomUUID();
+    await pool.query("INSERT INTO users ...", [id, data.name, data.email]);
+    return { status: 201, body: { id } };
+  })
+  .post("/api/deleteUser", async ({ input, pool }) => {
+    const data = DeleteUser.parse(input);
+    await pool.query("DELETE FROM users WHERE id = $1", [data.id]);
+    return { status: 200, body: { ok: true } };
+  })
+  .post("/api/login", async ({ input, auth }) => {
+    const data = z.object({ password: z.string() }).parse(input);
+    if (data.password !== "secret") return { status: 401, body: { error: "Invalid" } };
+    return auth.createSession({ userId: "admin", role: "admin" });
+  }, { public: true });
 ```
 
 **Key features:**
-- `routes` — array of `{ path, onRequest, schema?, public? }` entries
-- `path` — `"METHOD /pattern"` string (e.g. `"GET /api/users"`, `"POST /api/create"`)
-- `schema` — optional validation for request body; validated value arrives as `data` in callback
-- `public: true` on a route — bypasses auth gate
-- `enableAuth` injected via `setup` return — makes auth helpers available as spread args in route callbacks
-- Shared `deps`, `config`, `setup`, `static`, `onError`, `onAfterInvoke` across all routes
+- Routes defined via chained `.get()`, `.post()`, `.put()`, `.delete()`, `.patch()` methods with path as the first argument
+- Simple route: `.get("/path", async (args) => response)`
+- Public route: `.post("/path", async (args) => response, { public: true })`
+- `enableAuth` injected via `.setup()` return — makes auth helpers available as spread args in route callbacks
+- Shared `deps`, `config`, `static`, `onError`, `onCleanup` in the options object; `.setup()` is chained
 - Unmatched routes/methods get 404, missing session gets 401
 
 **`enableAuth` — typed authentication (injected via setup):**
@@ -297,21 +277,18 @@ export const orderQueue = defineFifoQueue({
 
 ```typescript
 export const orders = defineApi({
+  basePath: "/orders",
   deps: () => ({ orderQueue }),
-  routes: [
-    {
-      path: "POST /orders/create",
-      schema: (input) => OrderSchema.parse(input),
-      onRequest: async ({ data, deps }) => {
-        await deps.orderQueue.send({
-          body: { orderId: data.id, action: "created" },
-          messageGroupId: `order-${data.id}`,
-        });
-        return { status: 200, body: { ok: true } };
-      },
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ orderQueue: deps.orderQueue }))
+  .post("/create", async ({ input, orderQueue }) => {
+    const data = OrderSchema.parse(input);
+    await orderQueue.send({
+      body: { orderId: data.id, action: "created" },
+      messageGroupId: `order-${data.id}`,
+    });
+    return { status: 200, body: { ok: true } };
+  });
 ```
 
 ### defineBucket — S3 bucket

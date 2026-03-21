@@ -1,7 +1,8 @@
-import type { LambdaWithPermissions, ResolveConfig, TableItem, Duration, ConfigFactory } from "./handler-options";
+import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
+import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { TableClient } from "../runtime/table-client";
-import type { ResolveDeps } from "./handler-deps";
+import type { TableItem } from "./handler-options";
 import type { StaticFiles } from "./shared";
 
 /** DynamoDB attribute types for keys */
@@ -28,7 +29,7 @@ export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEY
  */
 export type TableConfig = {
   /** Lambda function settings (memory, timeout, permissions, etc.) */
-  lambda?: LambdaWithPermissions;
+  lambda?: { memory?: number; timeout?: Duration; logLevel?: LogLevel; permissions?: Permission[] };
   /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
   /** Stream view type - what data to include in stream records (default: "NEW_AND_OLD_IMAGES") */
@@ -71,17 +72,14 @@ export type TableRecord<T = Record<string, unknown>> = {
   timestamp?: number;
 };
 
-/**
- * Setup factory type for table handlers.
- * Receives `table: TableClient<T>` (self-client for the handler's own table).
- * Also receives `deps` and/or `config` when declared.
- */
-type SetupFactory<C, T, D, P, S extends string[] | undefined = undefined> = (args:
-    & { table: TableClient<T> }
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
-  ) => C | Promise<C>;
+// ============ Setup args ============
+
+/** Setup factory — receives table/deps/config/files based on what was declared */
+type SetupArgs<T, D, P, HasFiles extends boolean> =
+  & { table: TableClient<T> }
+  & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+  & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+  & (HasFiles extends true ? { files: StaticFiles } : {});
 
 /** Spread ctx into callback args (empty when no setup) */
 type SpreadCtx<C> = [C] extends [undefined] ? {} : C & {};
@@ -105,86 +103,16 @@ export type TableBatchFn<T = Record<string, unknown>, C = undefined> =
     & SpreadCtx<C>
   ) => Promise<void | { failures: string[] }>;
 
-/** Base options shared by all defineTable variants */
-type DefineTableBase<
-  T = Record<string, unknown>,
-  C = undefined,
-  D = undefined,
-  P = undefined,
-  S extends string[] | undefined = undefined
-> = Omit<TableConfig, "tagField"> & {
-  /** Name of the field in `data` that serves as the entity type discriminant (default: `"tag"`). */
-  tagField?: Extract<keyof T, string>;
-  /**
-   * Decode/validate function for the `data` portion of stream record items.
-   * Called with the unmarshalled `data` attribute; should return typed data or throw on validation failure.
-   * When provided, T is inferred from the return type — no need to specify generic parameters.
-   */
-  schema?: (input: unknown) => T;
-  /**
-   * Error handler called when onRecord/onRecordBatch throws.
-   * If not provided, defaults to `console.error`.
-   */
-  onError?: (args: { error: unknown } & SpreadCtx<C>) => void;
-  /** Called after each invocation completes, right before Lambda freezes the process */
-  onAfterInvoke?: (args: SpreadCtx<C>) => void | Promise<void>;
-  /**
-   * Factory function to initialize shared state for callbacks.
-   * Called once on cold start, result is cached and reused across invocations.
-   * Receives `table` (self-client), plus `deps`/`config`/`files` when declared.
-   */
-  setup?: SetupFactory<C, T, NoInfer<D>, NoInfer<P>, NoInfer<S>>;
-  /**
-   * Dependencies on other handlers (tables, queues, etc.).
-   * Typed clients are injected into setup via the `deps` argument.
-   * Pass a function returning the deps object: `deps: () => ({ orders })`.
-   */
-  deps?: () => D & {};
-  /**
-   * SSM Parameter Store parameters.
-   * Declare with `defineSecret()` helper. Values are fetched and cached at cold start.
-   */
-  config?: ConfigFactory<P>;
-  /**
-   * Static file glob patterns to bundle into the Lambda ZIP.
-   * Files are accessible at runtime via the `files` argument in setup.
-   */
-  static?: S;
-};
+// ============ Static config ============
+
+/** Static config extracted by AST (no runtime callbacks) */
+// TableConfig is already defined above and used as the extracted config type.
+
+// ============ Handler type (base interface for runtime wrappers and annotations) ============
 
 /**
- * Options for defineTable.
- * `onRecord` and `onRecordBatch` are mutually exclusive. Both are optional (table-only mode).
- */
-export type DefineTableOptions<
-  T = Record<string, unknown>,
-  C = undefined,
-  D = undefined,
-  P = undefined,
-  S extends string[] | undefined = undefined
-> = DefineTableBase<T, C, D, P, S> & (
-  | {
-      /**
-       * Per-record stream handler. Called once per record in the batch.
-       * Runtime handles partial batch failure reporting automatically.
-       * Records are processed with configurable `concurrency` (default: 1 — sequential).
-       */
-      onRecord?: TableRecordFn<T, C>;
-      onRecordBatch?: never;
-    }
-  | {
-      /**
-       * Batch stream handler. Called once with all records in the batch.
-       * Return `{ failures: string[] }` with sequence numbers for partial batch failure.
-       */
-      onRecordBatch?: TableBatchFn<T, C>;
-      onRecord?: never;
-    }
-  | { onRecord?: never; onRecordBatch?: never }
-);
-
-/**
- * Internal handler object created by defineTable
+ * Handler object created by defineTable.
+ * Used by runtime wrappers and as type annotation for circular deps.
  * @internal
  */
 export type TableHandler<T = Record<string, unknown>, C = any> = {
@@ -192,7 +120,7 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
   readonly __spec: TableConfig;
   readonly schema?: (input: unknown) => T;
   readonly onError?: (...args: any[]) => any;
-  readonly onAfterInvoke?: (...args: any[]) => any;
+  readonly onCleanup?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
@@ -200,6 +128,88 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
   readonly onRecord?: (...args: any[]) => any;
   readonly onRecordBatch?: (...args: any[]) => any;
 };
+
+// ============ Builder options ============
+
+/** Options passed to `defineTable()` — static config, no generics needed for inference */
+type TableOptions<T> = {
+  /** Lambda memory in MB (default: 256) */
+  memory?: number;
+  /** Lambda timeout (default: 30s). Accepts seconds or duration string: `"30s"`, `"5m"` */
+  timeout?: Duration;
+  /** Additional IAM permissions for the Lambda */
+  permissions?: Permission[];
+  /** Logging verbosity */
+  logLevel?: LogLevel;
+  /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
+  billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
+  /** Stream view type (default: "NEW_AND_OLD_IMAGES") */
+  streamView?: StreamView;
+  /** Number of records to process in each Lambda invocation (1-10000, default: 100) */
+  batchSize?: number;
+  /** Maximum time to gather records before invoking (default: "2s") */
+  batchWindow?: Duration;
+  /** Where to start reading the stream (default: "LATEST") */
+  startingPosition?: "LATEST" | "TRIM_HORIZON";
+  /** Number of records to process concurrently within a batch (default: 1) */
+  concurrency?: number;
+  /** Name of the field in `data` that serves as the entity type discriminant (default: "tag") */
+  tagField?: Extract<keyof T, string>;
+  /** Decode/validate function for the `data` portion of stream records */
+  schema?: (input: unknown) => T;
+  /** Static file glob patterns to bundle into the Lambda ZIP */
+  static?: string[];
+};
+
+// ============ Builder ============
+
+interface TableBuilder<
+  T = Record<string, unknown>,
+  D = undefined,
+  P = undefined,
+  C = undefined,
+  HasFiles extends boolean = false,
+> {
+  /** Declare handler dependencies (tables, queues, buckets, mailers) */
+  deps<D2 extends Record<string, AnyDepHandler>>(
+    fn: () => D2
+  ): TableBuilder<T, D2, P, C, HasFiles>;
+
+  /** Declare SSM secrets */
+  config<P2 extends Record<string, AnySecretRef>>(
+    fn: ConfigFactory<P2>
+  ): TableBuilder<T, D, P2, C, HasFiles>;
+
+  /** Initialize shared state on cold start. Receives table (self-client), deps, config, files. */
+  setup<C2>(
+    fn: (args: SetupArgs<T, D, P, HasFiles>) => C2 | Promise<C2>
+  ): TableBuilder<T, D, P, C2, HasFiles>;
+
+  /** Handle errors thrown by onRecord/onRecordBatch */
+  onError(
+    fn: (args: { error: unknown } & SpreadCtx<C>) => void
+  ): TableBuilder<T, D, P, C, HasFiles>;
+
+  /** Cleanup callback — runs after each invocation, before Lambda freezes */
+  onCleanup(
+    fn: (args: SpreadCtx<C>) => void | Promise<void>
+  ): TableBuilder<T, D, P, C, HasFiles>;
+
+  /** Per-record stream handler (terminal — returns finalized handler) */
+  onRecord(
+    fn: TableRecordFn<T, C>
+  ): TableHandler<T, C>;
+
+  /** Batch stream handler (terminal — returns finalized handler) */
+  onRecordBatch(
+    fn: TableBatchFn<T, C>
+  ): TableHandler<T, C>;
+
+  /** Finalize as resource-only table (no Lambda) */
+  build(): TableHandler<T, C>;
+}
+
+// ============ Implementation ============
 
 /**
  * Define a DynamoDB table with optional stream handler (single-table design).
@@ -209,52 +219,111 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
  *
  * @example Table with stream handler
  * ```typescript
- * export const orders = defineTable<OrderData>()({
- *   batchSize: 10,
- *   concurrency: 5,
- *   setup: ({ table }) => ({ table }),
- *   onRecord: async ({ record, batch, table }) => {
+ * export const orders = defineTable<OrderData>({ batchSize: 10, concurrency: 5 })
+ *   .setup(({ table }) => ({ table }))
+ *   .onRecord(async ({ record, table }) => {
  *     if (record.eventName === "INSERT") {
  *       console.log("New order:", record.new?.data);
  *     }
- *   }
- * });
- * ```
- *
- * @example Table with runtime validation
- * ```typescript
- * export const orders = defineTable<OrderData>()({
- *   schema: (input) => OrderSchema.parse(input),
- *   onRecord: async ({ record }) => { ... }
- * });
+ *   })
  * ```
  *
  * @example Table only (no Lambda)
  * ```typescript
- * export const users = defineTable()({});
+ * export const users = defineTable<User>().build()
+ * ```
+ *
+ * @example Table as dependency (resource-only, no Lambda)
+ * ```typescript
+ * export const sessions = defineTable<Session>().build()
  * ```
  */
-export const defineTable = <T = Record<string, unknown>>() => <
-  C = undefined,
-  D = undefined,
-  P = undefined,
-  S extends string[] | undefined = undefined
->(
-  options: DefineTableOptions<T, C, D, P, S>
-): TableHandler<T, C> => {
-  const { onRecord, onRecordBatch, onError, onAfterInvoke, schema, setup, deps, config: configFactory, static: staticFiles, ...__spec } = options;
-  const config = configFactory ? resolveConfigFactory(configFactory) : undefined;
-  return {
-    __brand: "effortless-table",
-    __spec,
+export function defineTable<T = Record<string, unknown>>(): TableBuilder<T>;
+export function defineTable<T = Record<string, unknown>>(
+  options: TableOptions<T> & { static: string[] },
+): TableBuilder<T, undefined, undefined, undefined, true>;
+export function defineTable<T = Record<string, unknown>>(
+  options: TableOptions<T>,
+): TableBuilder<T>;
+export function defineTable<T = Record<string, unknown>>(
+  options?: TableOptions<T>,
+): TableBuilder<T> {
+  const {
+    memory, timeout, permissions, logLevel,
+    schema, static: staticFiles,
+    ...tableConfig
+  } = options ?? {} as TableOptions<T>;
+
+  const hasLambda = memory != null || timeout != null || permissions != null || logLevel != null;
+  const spec: TableConfig = {
+    ...tableConfig,
+    ...(hasLambda ? { lambda: { ...(memory != null ? { memory } : {}), ...(timeout != null ? { timeout } : {}), ...(permissions ? { permissions } : {}), ...(logLevel ? { logLevel } : {}) } } : {}),
+  };
+
+  const state: {
+    spec: TableConfig;
+    deps?: () => Record<string, unknown>;
+    config?: Record<string, unknown>;
+    static?: string[];
+    schema?: (input: unknown) => T;
+    setup?: (...args: any[]) => any;
+    onError?: (...args: any[]) => any;
+    onCleanup?: (...args: any[]) => any;
+    onRecord?: (...args: any[]) => any;
+    onRecordBatch?: (...args: any[]) => any;
+  } = {
+    spec,
     ...(schema ? { schema } : {}),
-    ...(onError ? { onError } : {}),
-    ...(onAfterInvoke ? { onAfterInvoke } : {}),
-    ...(setup ? { setup } : {}),
-    ...(deps ? { deps } : {}),
-    ...(config ? { config } : {}),
     ...(staticFiles ? { static: staticFiles } : {}),
-    ...(onRecord ? { onRecord } : {}),
-    ...(onRecordBatch ? { onRecordBatch } : {}),
-  } as TableHandler<T, C>;
-};
+  };
+
+  const finalize = (): TableHandler<T> => ({
+    __brand: "effortless-table",
+    __spec: state.spec,
+    ...(state.schema ? { schema: state.schema } : {}),
+    ...(state.onError ? { onError: state.onError } : {}),
+    ...(state.onCleanup ? { onCleanup: state.onCleanup } : {}),
+    ...(state.setup ? { setup: state.setup } : {}),
+    ...(state.deps ? { deps: state.deps } : {}),
+    ...(state.config ? { config: state.config } : {}),
+    ...(state.static ? { static: state.static } : {}),
+    ...(state.onRecord ? { onRecord: state.onRecord } : {}),
+    ...(state.onRecordBatch ? { onRecordBatch: state.onRecordBatch } : {}),
+  }) as TableHandler<T>;
+
+  const builder: TableBuilder<T> = {
+    deps(fn) {
+      state.deps = fn as any;
+      return builder as any;
+    },
+    config(fn) {
+      state.config = resolveConfigFactory(fn) as any;
+      return builder as any;
+    },
+    setup(fn) {
+      state.setup = fn as any;
+      return builder as any;
+    },
+    onRecord(fn) {
+      state.onRecord = fn as any;
+      return finalize() as any;
+    },
+    onRecordBatch(fn) {
+      state.onRecordBatch = fn as any;
+      return finalize() as any;
+    },
+    onError(fn) {
+      state.onError = fn as any;
+      return builder as any;
+    },
+    onCleanup(fn) {
+      state.onCleanup = fn as any;
+      return builder as any;
+    },
+    build() {
+      return finalize() as any;
+    },
+  };
+
+  return builder;
+}

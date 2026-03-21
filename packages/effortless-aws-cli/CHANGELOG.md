@@ -1,11 +1,5 @@
 # @effortless-aws/cli
 
-## 0.12.1
-
-### Patch Changes
-
-- [`d4f7d4e`](https://github.com/kondaurovDev/effortless-aws/commit/d4f7d4ed6d01c7369328069706dc3ba0b2847f6d) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Replace glob-based static file resolution with explicit path/directory resolution with missing file warnings; show CloudFront distribution domain in deploy output and status command
-
 ## 0.12.0
 
 ### Minor Changes

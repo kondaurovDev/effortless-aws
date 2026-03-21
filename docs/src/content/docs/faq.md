@@ -220,12 +220,11 @@ import { orders } from "./db";
 export const api = defineApi({
   basePath: "/orders",
   deps: () => ({ orders }),
-  get: {
-    "/": async ({ deps }) => {
-      // deps.orders has typed .get(), .put(), .delete()
-    },
-  },
-});
+})
+  .setup(({ deps }) => ({ orders: deps.orders }))
+  .get("/", async ({ orders }) => {
+    // orders has typed .get(), .put(), .delete()
+  });
 ```
 
 ---
@@ -242,17 +241,11 @@ import { z } from "zod";
 const userSchema = (input: unknown) =>
   z.object({ email: z.string(), name: z.string() }).parse(input);
 
-export const users = defineApi({
-  basePath: "/users",
-  post: {
-    "/": {
-      schema: userSchema,
-      handler: async ({ data }) => {
-        // data.email and data.name are typed and validated
-      },
-    },
-  },
-});
+export const users = defineApi({ basePath: "/users" })
+  .post("/", async ({ input }) => {
+    const data = userSchema(input);
+    // data.email and data.name are typed and validated
+  });
 ```
 
 Invalid requests get a 400 response before your handler runs. See [HTTP API — Validating input](/use-cases/http-api/#validating-input).
@@ -262,14 +255,10 @@ Invalid requests get a 400 response before your handler runs. See [HTTP API — 
 They come from `req.params`:
 
 ```typescript
-export const users = defineApi({
-  basePath: "/users",
-  get: {
-    "/{id}": async ({ req }) => {
-      const userId = req.params.id;
-    },
-  },
-});
+export const users = defineApi({ basePath: "/users" })
+  .get("/{id}", async ({ req }) => {
+    const userId = req.params.id;
+  });
 ```
 
 ### Can I use secrets (API keys, tokens)?
@@ -281,11 +270,12 @@ import { param } from "effortless-aws";
 
 export const checkout = defineApi({
   basePath: "/checkout",
-  params: { stripeKey: param("stripe/secret-key") },
-  post: async ({ params }) => {
-    // params.stripeKey fetched once at cold start, cached after
-  },
-});
+  config: { stripeKey: param("stripe/secret-key") },
+})
+  .setup(({ config }) => ({ stripeKey: config.stripeKey }))
+  .post("/", async ({ stripeKey }) => {
+    // stripeKey fetched once at cold start, cached after
+  });
 ```
 
 Create the secret with `eff config set stripe/secret-key` or manually via `aws ssm put-parameter --name /my-app/dev/stripe/secret-key --value sk_... --type SecureString`. If you forget, `eff deploy` warns about missing parameters. See [HTTP API — Using secrets](/use-cases/http-api/#using-secrets) and [CLI — config](/cli/#config).
@@ -315,10 +305,10 @@ If you need Secrets Manager for a specific use case (e.g., RDS credentials with 
 export const data = defineApi({
   basePath: "/data",
   permissions: ["secretsmanager:GetSecretValue"],
-  get: async ({ req }) => {
+})
+  .get("/", async ({ req }) => {
     // Call Secrets Manager directly when you need rotation support
-  },
-});
+  });
 ```
 
 ---

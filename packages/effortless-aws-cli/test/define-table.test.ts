@@ -31,14 +31,14 @@ describe("defineTable", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
+        export const orders = defineTable({
           streamView: "NEW_AND_OLD_IMAGES",
           batchSize: 50,
-          lambda: { memory: 512 },
-          onRecord: async ({ record }) => {
+          memory: 512,
+        })
+          .onRecord(async ({ record }) => {
             console.log(record);
-          }
-        });
+          });
       `;
 
       const configs = await extractTableConfigs(source);
@@ -59,9 +59,8 @@ describe("defineTable", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export default defineTable()({
-          onRecord: async ({ record }) => {}
-        });
+        export default defineTable()
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -76,7 +75,7 @@ describe("defineTable", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const users = defineTable()({});
+        export const users = defineTable().build();
       `;
 
       const configs = await extractTableConfigs(source);
@@ -89,13 +88,11 @@ describe("defineTable", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
-          onRecord: async ({ record }) => {}
-        });
+        export const orders = defineTable()
+          .onRecord(async ({ record }) => {});
 
-        export const users = defineTable()({
-          onRecord: async ({ record }) => {}
-        });
+        export const users = defineTable()
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -115,11 +112,10 @@ describe("defineTable", () => {
 
         globalThis.__test_onRecord = [];
 
-        export default defineTable()({
-          onRecord: async ({ record }) => {
+        export default defineTable()
+          .onRecord(async ({ record }) => {
             globalThis.__test_onRecord.push(record.new?.data?.name);
-          }
-        });
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
@@ -141,12 +137,11 @@ describe("defineTable", () => {
 
         globalThis.__test_ctx = [];
 
-        export default defineTable()({
-          setup: ({ table }) => ({ runtime: "mock-runtime" }),
-          onRecord: async ({ record, runtime }) => {
+        export default defineTable()
+          .setup(({ table }) => ({ runtime: "mock-runtime" }))
+          .onRecord(async ({ record, runtime }) => {
             globalThis.__test_ctx.push(runtime);
-          }
-        });
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
@@ -173,12 +168,10 @@ describe("defineTable", () => {
           name: String(input.name).toUpperCase(),
         });
 
-        export default defineTable()({
-          schema: decodeData,
-          onRecord: async ({ record }) => {
+        export default defineTable({ schema: decodeData })
+          .onRecord(async ({ record }) => {
             globalThis.__test_schema.push(record.new?.data);
-          }
-        });
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
@@ -203,12 +196,10 @@ describe("defineTable", () => {
           value: Number(input.value) * 2,
         });
 
-        export default defineTable()({
-          schema: decodeItem,
-          onRecord: async ({ record }) => {
+        export default defineTable({ schema: decodeItem })
+          .onRecord(async ({ record }) => {
             globalThis.__test_recordSchema.push(record.new?.data);
-          }
-        });
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
@@ -236,10 +227,8 @@ describe("defineTable", () => {
           return input;
         };
 
-        export default defineTable()({
-          schema: strictDecode,
-          onRecord: async ({ record }) => {}
-        });
+        export default defineTable({ schema: strictDecode })
+          .onRecord(async ({ record }) => {});
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
@@ -280,16 +269,15 @@ describe("defineTable", () => {
 
         globalThis.__test_setupTable = null;
 
-        export default defineTable()({
-          setup: ({ table }) => {
+        export default defineTable()
+          .setup(({ table }) => {
             globalThis.__test_setupTable = {
               tableName: table.tableName,
               hasPut: typeof table.put === "function",
             };
             return { initialized: true };
-          },
-          onRecord: async ({ record, ctx }) => {}
-        });
+          })
+          .onRecord(async ({ record, ctx }) => {});
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });
@@ -310,15 +298,14 @@ describe("defineTable", () => {
 
         globalThis.__test_table = [];
 
-        export default defineTable()({
-          setup: ({ table }) => ({ table }),
-          onRecord: async ({ record, table }) => {
+        export default defineTable()
+          .setup(({ table }) => ({ table }))
+          .onRecord(async ({ record, table }) => {
             globalThis.__test_table.push({
               tableName: table.tableName,
               hasPut: typeof table.put === "function",
             });
-          }
-        });
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "table" });

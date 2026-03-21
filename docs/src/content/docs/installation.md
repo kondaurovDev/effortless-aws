@@ -67,15 +67,11 @@ export default defineConfig({
 // src/api.ts
 import { defineApi } from "effortless-aws";
 
-export const hello = defineApi({
-  basePath: "/hello",
-  get: {
-    "/": async () => ({
-      status: 200,
-      body: { message: "Hello from Effortless!" },
-    }),
-  },
-});
+export const hello = defineApi({ basePath: "/hello" })
+  .get("/", async () => ({
+    status: 200,
+    body: { message: "Hello from Effortless!" },
+  }));
 ```
 
 ### 3. Deploy

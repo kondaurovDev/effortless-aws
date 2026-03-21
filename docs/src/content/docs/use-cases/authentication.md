@@ -25,13 +25,14 @@ import { defineApi, defineTable, secret } from "effortless-aws";
 type ApiKey = { pk: string; sk: string; role: "admin" | "user" };
 type Session = { userId: string; role: "admin" | "user" };
 
-export const apiKeys = defineTable<ApiKey>({});
+export const apiKeys = defineTable({ schema: unsafeAs<ApiKey>() });
 
 export const api = defineApi({
   basePath: "/api",
   deps: () => ({ apiKeys }),
   config: { sessionSecret: secret() },
-  setup: ({ deps, config, enableAuth }) => ({
+})
+  .setup(({ deps, config, enableAuth }) => ({
     auth: enableAuth<Session>({
       secret: config.sessionSecret,
       expiresIn: "7d",
@@ -46,29 +47,16 @@ export const api = defineApi({
         cacheTtl: "5m",
       },
     }),
-  }),
-  routes: [
-    {
-      path: "GET /me",
-      onRequest: async ({ auth }) => ({
-        status: 200,
-        body: { session: auth.session },
-      }),
-    },
-    {
-      path: "POST /login",
-      public: true,
-      onRequest: async ({ input, auth }) => {
-        const data = parseLogin(input);
-        return auth.createSession({ userId: data.userId, role: data.role });
-      },
-    },
-    {
-      path: "POST /logout",
-      onRequest: async ({ auth }) => auth.clearSession(),
-    },
-  ],
-});
+  }))
+  .get("/me", async ({ auth }) => ({
+    status: 200,
+    body: { session: auth.session },
+  }))
+  .post("/login", async ({ input, auth }) => {
+    const data = parseLogin(input);
+    return auth.createSession({ userId: data.userId, role: data.role });
+  }, { public: true })
+  .post("/logout", async ({ auth }) => auth.clearSession());
 ```
 
 ## enableAuth options
@@ -95,27 +83,18 @@ Every route handler receives the `auth` object returned from `setup`. It has thr
 
 ## Public routes
 
-By default, all routes require a valid session. To make a route accessible without authentication, add `public: true`:
+By default, all routes require a valid session. To make a route accessible without authentication, pass `{ public: true }` as the third argument:
 
 ```typescript
-routes: [
-  {
-    path: "POST /login",
-    public: true,
-    onRequest: async ({ input, auth }) => {
-      // auth.session is undefined here (no cookie yet)
-      return auth.createSession({ userId: "u1", role: "user" });
-    },
-  },
-  {
-    path: "GET /me",
-    // requires valid session --- unauthenticated requests get 401
-    onRequest: async ({ auth }) => ({
-      status: 200,
-      body: auth.session,
-    }),
-  },
-],
+.post("/login", async ({ input, auth }) => {
+  // auth.session is undefined here (no cookie yet)
+  return auth.createSession({ userId: "u1", role: "user" });
+}, { public: true })
+.get("/me", async ({ auth }) => ({
+  // requires valid session --- unauthenticated requests get 401
+  status: 200,
+  body: auth.session,
+}))
 ```
 
 ## API token authentication
@@ -145,19 +124,14 @@ When a request arrives, the auth middleware checks for the API token header firs
 Since `enableAuth` lives inside `setup`, you can return other values alongside `auth`. Everything returned from `setup` is spread into route handler args:
 
 ```typescript
-setup: ({ deps, config, enableAuth }) => ({
+.setup(({ deps, config, enableAuth }) => ({
   appName: config.appName,
   auth: enableAuth<Session>({ secret: config.sessionSecret }),
-}),
-routes: [
-  {
-    path: "GET /me",
-    onRequest: async ({ appName, auth }) => ({
-      status: 200,
-      body: { app: appName, session: auth.session },
-    }),
-  },
-],
+}))
+.get("/me", async ({ appName, auth }) => ({
+  status: 200,
+  body: { app: appName, session: auth.session },
+}))
 ```
 
 Note that `deps` and `config` are only available inside `setup`. Route handlers receive the values returned from `setup`.

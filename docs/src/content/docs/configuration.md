@@ -161,12 +161,10 @@ export const processImage = defineApi({
   memory: 1024,                    // needs more memory for image processing
   timeout: 120,                    // 2 minutes (in seconds)
   permissions: ["s3:GetObject", "s3:PutObject"],
-  post: {
-    "/resize": async ({ req }) => {
-      // ...
-    },
-  },
-});
+})
+  .post("/resize", async ({ req }) => {
+    // ...
+  });
 ```
 
 ### `memory` and `timeout`

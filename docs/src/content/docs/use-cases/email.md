@@ -47,10 +47,12 @@ import { mailer } from "./mailer";
 export const signup = defineApi({
   basePath: "/signup",
   deps: () => ({ mailer }),
-  post: async ({ req, deps }) => {
+})
+  .setup(({ deps }) => ({ mailer: deps.mailer }))
+  .post("/", async ({ req, mailer }) => {
     // ... create user ...
 
-    await deps.mailer.send({
+    await mailer.send({
       from: "hello@myapp.com",
       to: req.body.email,
       subject: "Welcome to MyApp!",
@@ -58,8 +60,7 @@ export const signup = defineApi({
     });
 
     return { status: 201, body: { created: true } };
-  },
-});
+  });
 ```
 
 `deps.mailer` is an `EmailClient` — the Lambda automatically gets `ses:SendEmail` and `ses:SendRawEmail` IAM permissions.
@@ -110,25 +111,24 @@ export const users = defineTable({
 export const invite = defineApi({
   basePath: "/invite",
   deps: () => ({ users, mailer }),
-  post: {
-    "/{userId}": async ({ req, deps }) => {
-      const user = await deps.users.get({
-        pk: `USER#${req.params.userId}`,
-        sk: "PROFILE",
-      });
-      if (!user) return { status: 404, body: { error: "User not found" } };
+})
+  .setup(({ deps }) => ({ users: deps.users, mailer: deps.mailer }))
+  .post("/{userId}", async ({ req, users, mailer }) => {
+    const user = await users.get({
+      pk: `USER#${req.params.userId}`,
+      sk: "PROFILE",
+    });
+    if (!user) return { status: 404, body: { error: "User not found" } };
 
-      await deps.mailer.send({
-        from: "no-reply@myapp.com",
-        to: user.data.email,
-        subject: "You're invited!",
-        html: `<p>Hi ${user.data.name}, you've been invited to join the project.</p>`,
-      });
+    await mailer.send({
+      from: "no-reply@myapp.com",
+      to: user.data.email,
+      subject: "You're invited!",
+      html: `<p>Hi ${user.data.name}, you've been invited to join the project.</p>`,
+    });
 
-      return { status: 200, body: { sent: true } };
-    },
-  },
-});
+    return { status: 200, body: { sent: true } };
+  });
 ```
 
 Each Lambda gets only the permissions it needs — DynamoDB for the table, SES for sending email.
@@ -197,13 +197,17 @@ export const sendInvoice = defineApi({
   basePath: "/send-invoice",
   deps: () => ({ mailer }),
   static: ["src/templates/invoice.html"],
-  post: async ({ req, deps, files }) => {
-    const template = files.read("src/templates/invoice.html");
+})
+  .setup(({ deps, files }) => ({
+    mailer: deps.mailer,
+    template: files.read("src/templates/invoice.html"),
+  }))
+  .post("/", async ({ req, mailer, template }) => {
     const html = template
       .replace("{{name}}", req.body.name)
       .replace("{{amount}}", req.body.amount);
 
-    await deps.mailer.send({
+    await mailer.send({
       from: "billing@myapp.com",
       to: req.body.email,
       subject: "Your invoice",
@@ -211,8 +215,7 @@ export const sendInvoice = defineApi({
     });
 
     return { status: 200, body: { sent: true } };
-  },
-});
+  });
 ```
 
 ## See also

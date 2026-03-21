@@ -10,13 +10,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "database-url" }),
-          }),
-          get: { "/": async ({ req, config }) => ({ status: 200 }) }
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -31,14 +29,12 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "database-url" }),
             apiKey: defineSecret({ key: "stripe-api-key" }),
-          }),
-          get: { "/": async ({ req, config }) => ({ status: 200 }) }
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -55,13 +51,11 @@ describe("params extraction", () => {
         import { defineApi } from "effortless-aws";
         import TOML from "smol-toml";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             appConfig: defineSecret({ key: "app-config" }),
-          }),
-          get: { "/": async ({ req, config }) => ({ status: 200 }) }
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -76,10 +70,8 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const hello = defineApi()({
-          basePath: "/hello",
-          routes: []
-        });
+        export const hello = defineApi({ basePath: "/hello" })
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -92,13 +84,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export default defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "database-url" }),
-          }),
-          routes: []
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -114,13 +104,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "database-url" }),
-          }),
-          routes: []
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -137,14 +125,12 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             authSecret: defineSecret(),
             dbUrl: defineSecret(),
-          }),
-          get: { "/": async ({ req, config }) => ({ status: 200 }) }
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -159,13 +145,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "my-custom-key" }),
-          }),
-          routes: []
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -179,13 +163,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             authSecret: defineSecret({ generate: "hex:32" }),
-          }),
-          routes: []
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -199,13 +181,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             token: defineSecret({ generate: "base64:16" }),
-          }),
-          routes: []
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -219,13 +199,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             instanceId: defineSecret({ generate: "uuid" }),
-          }),
-          routes: []
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -239,13 +217,11 @@ describe("params extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/orders",
-          config: ({ defineSecret }) => ({
+        export const api = defineApi({ basePath: "/orders" })
+          .config(({ defineSecret }) => ({
             hmacKey: defineSecret({ key: "hmac-secret", generate: "hex:64" }),
-          }),
-          routes: []
-        });
+          }))
+          .get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -263,13 +239,11 @@ describe("params extraction", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
-          name: "orders",
-          config: ({ defineSecret }) => ({
+        export const orders = defineTable()
+          .config(({ defineSecret }) => ({
             webhookUrl: defineSecret({ key: "webhook-url" }),
-          }),
-          onRecord: async ({ record, config }) => {}
-        });
+          }))
+          .onRecord(async ({ record, config }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -284,10 +258,8 @@ describe("params extraction", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
-          name: "orders",
-          onRecord: async ({ record }) => {}
-        });
+        export const orders = defineTable()
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -300,12 +272,11 @@ describe("params extraction", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
-          config: ({ defineSecret }) => ({
+        export const orders = defineTable()
+          .config(({ defineSecret }) => ({
             webhookUrl: defineSecret({ key: "webhook-url" }),
-          }),
-          onRecord: async ({ record }) => {}
-        });
+          }))
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);

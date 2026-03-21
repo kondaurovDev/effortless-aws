@@ -168,9 +168,9 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
 
       return { batchItemFailures };
     } finally {
-      if (handler.onAfterInvoke) {
-        try { await handler.onAfterInvoke(ctxProps); }
-        catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
+      if (handler.onCleanup) {
+        try { await handler.onCleanup(ctxProps); }
+        catch (e) { console.error(`[effortless:${rt.handlerName}] onCleanup error`, e); }
       }
       rt.restoreConsole();
     }

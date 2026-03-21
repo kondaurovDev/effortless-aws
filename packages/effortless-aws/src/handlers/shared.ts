@@ -55,18 +55,6 @@ export type HttpResponse = {
   binary?: boolean;
 };
 
-/** Response helpers for defineApi handlers */
-export const result = {
-  /** Return a JSON response */
-  json: (body: unknown, status: number = 200): HttpResponse => ({ status, body }),
-  /** Return a binary response. Accepts a Buffer and converts to base64 automatically. */
-  binary: (body: Buffer, contentType: string, headers?: Record<string, string>): HttpResponse => ({
-    status: 200,
-    body: body.toString("base64"),
-    binary: true,
-    headers: { "content-type": contentType, ...headers },
-  }),
-};
 
 /** Stream helper injected into route args when `stream: true` is set on defineApi */
 export type ResponseStream = {

@@ -263,13 +263,12 @@ export const orders = defineTable({
 export const api = defineApi({
   basePath: "/orders",
   deps: () => ({ orders }),  // ← auto IAM, typed client
-  get: {
-    "/": async ({ deps }) => {
-      const items = await deps.orders.query(/* fully typed */);
-      return { status: 200, body: items };
-    },
-  },
-});
+})
+  .setup(({ deps }) => ({ orders: deps.orders }))
+  .get("/", async ({ orders }) => {
+    const items = await orders.query(/* fully typed */);
+    return { status: 200, body: items };
+  });
 // No resource declarations — Lambda, IAM, Function URL all inferred
 ```
 

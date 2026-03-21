@@ -9,7 +9,12 @@
       "Bash(npx vitest:*)",
       "Bash(pnpm exec:*)",
       "Bash(pnpm --filter effortless-aws run build)",
-      "Bash(pnpm typecheck:*)"
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm build:*)",
+      "Bash(grep -r \"defineTable\\\\|defineBucket\\\\|defineFifoQueue\" /Users/alex/projects/effortless-aws --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=dist -l)",
+      "Bash(pnpm tsup:*)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)"
     ]
   }
 }

@@ -160,17 +160,12 @@ export const items = defineTable({
 export const api = defineApi({
   basePath: "/api/items",
   deps: () => ({ items }),
-  setup: ({ deps }) => ({ items: deps.items }),
-  routes: [
-    {
-      path: "GET /",
-      onRequest: async ({ items }) => ({
-        status: 200,
-        body: await items.query({}),
-      }),
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ items: deps.items }))
+  .get("/", async ({ items }) => ({
+    status: 200,
+    body: await items.query({}),
+  }));
 ```
 
 The SSR app is served from CloudFront, and the API from a Lambda Function URL — each with its own URL. Use the SSR framework's built-in API routes or proxy to the Function URL from the frontend.

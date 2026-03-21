@@ -88,9 +88,9 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
         rt.logExecution(startTime, input, { processedCount: rawRecords.length });
       }
     } finally {
-      if (handler.onAfterInvoke) {
-        try { await handler.onAfterInvoke(ctxProps); }
-        catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
+      if (handler.onCleanup) {
+        try { await handler.onCleanup(ctxProps); }
+        catch (e) { console.error(`[effortless:${rt.handlerName}] onCleanup error`, e); }
       }
       rt.restoreConsole();
     }

@@ -35,10 +35,9 @@ describe("extractFifoQueueConfigs", () => {
   it("extracts config from named export", async () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
-      export const orderQueue = defineFifoQueue()({
-        batchSize: 5,
-        onMessage: async ({ message }) => {}
-      });
+      export const orderQueue = defineFifoQueue({ batchSize: 5 })
+        .onMessage(async ({ message }) => {})
+;
     `;
     const configs = await extractFifoQueueConfigs(source);
     expect(configs).toHaveLength(1);
@@ -50,10 +49,9 @@ describe("extractFifoQueueConfigs", () => {
   it("extracts config from default export", async () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
-      export default defineFifoQueue()({
-        batchSize: 3,
-        onMessageBatch: async ({ messages }) => {}
-      });
+      export default defineFifoQueue({ batchSize: 3 })
+        .onMessageBatch(async ({ messages }) => {})
+;
     `;
     const configs = await extractFifoQueueConfigs(source);
     expect(configs).toHaveLength(1);
@@ -65,13 +63,14 @@ describe("extractFifoQueueConfigs", () => {
   it("strips runtime props from config", async () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
-      export const q = defineFifoQueue()({
+      export const q = defineFifoQueue({
         batchSize: 10,
         maxReceiveCount: 5,
         schema: (input) => input,
-        onMessage: async ({ message }) => {},
-        setup: () => ({ db: "pool" }),
-      });
+      })
+        .setup(() => ({ db: "pool" }))
+        .onMessage(async ({ message }) => {})
+;
     `;
     const configs = await extractFifoQueueConfigs(source);
     expect(configs[0]!.config.batchSize).toBe(10);
@@ -85,10 +84,10 @@ describe("extractFifoQueueConfigs", () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
       const orders = {} as any;
-      export const q = defineFifoQueue()({
-        deps: () => ({ orders }),
-        onMessage: async ({ message, deps }) => {}
-      });
+      export const q = defineFifoQueue()
+        .deps(() => ({ orders }))
+        .onMessage(async ({ message, deps }) => {})
+;
     `;
     const configs = await extractFifoQueueConfigs(source);
     expect(configs[0]!.depsKeys).toEqual(["orders"]);
@@ -97,10 +96,10 @@ describe("extractFifoQueueConfigs", () => {
   it("extracts param entries", async () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
-      export const q = defineFifoQueue()({
-        config: ({ defineSecret }) => ({ apiKey: defineSecret({ key: "api-key" }) }),
-        onMessage: async ({ message, config }) => {}
-      });
+      export const q = defineFifoQueue()
+        .config(({ defineSecret }) => ({ apiKey: defineSecret({ key: "api-key" }) }))
+        .onMessage(async ({ message, config }) => {})
+;
     `;
     const configs = await extractFifoQueueConfigs(source);
     expect(configs[0]!.secretEntries).toEqual([{ propName: "apiKey", ssmKey: "api-key" }]);
@@ -109,10 +108,9 @@ describe("extractFifoQueueConfigs", () => {
   it("extracts static globs", async () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
-      export const q = defineFifoQueue()({
-        static: ["src/templates/*.ejs"],
-        onMessage: async ({ message }) => {}
-      });
+      export const q = defineFifoQueue({ static: ["src/templates/*.ejs"] })
+        .onMessage(async ({ message }) => {})
+;
     `;
     const configs = await extractFifoQueueConfigs(source);
     expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs"]);
@@ -128,11 +126,11 @@ describe("wrapFifoQueue", () => {
 
       globalThis.__test_messages = [];
 
-      export default defineFifoQueue()({
-        onMessage: async ({ message }) => {
+      export default defineFifoQueue()
+        .onMessage(async ({ message }) => {
           globalThis.__test_messages.push(message.body);
-        }
-      });
+        })
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
@@ -151,11 +149,11 @@ describe("wrapFifoQueue", () => {
 
       globalThis.__test_batch = null;
 
-      export default defineFifoQueue()({
-        onMessageBatch: async ({ messages }) => {
+      export default defineFifoQueue()
+        .onMessageBatch(async ({ messages }) => {
           globalThis.__test_batch = messages.map(m => m.body);
-        }
-      });
+        })
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
@@ -172,11 +170,11 @@ describe("wrapFifoQueue", () => {
     const handlerCode = `
       import { defineFifoQueue } from "effortless-aws";
 
-      export default defineFifoQueue()({
-        onMessage: async ({ message }) => {
+      export default defineFifoQueue()
+        .onMessage(async ({ message }) => {
           if (message.body.fail) throw new Error("boom");
-        }
-      });
+        })
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
@@ -193,11 +191,11 @@ describe("wrapFifoQueue", () => {
     const handlerCode = `
       import { defineFifoQueue } from "effortless-aws";
 
-      export default defineFifoQueue()({
-        onMessageBatch: async ({ messages }) => {
+      export default defineFifoQueue()
+        .onMessageBatch(async ({ messages }) => {
           throw new Error("batch failed");
-        }
-      });
+        })
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
@@ -216,15 +214,16 @@ describe("wrapFifoQueue", () => {
 
       globalThis.__test_decoded = [];
 
-      export default defineFifoQueue()({
+      export default defineFifoQueue({
         schema: (input) => {
           const obj = input;
           return { orderId: String(obj.orderId).toUpperCase() };
         },
-        onMessage: async ({ message }) => {
+      })
+        .onMessage(async ({ message }) => {
           globalThis.__test_decoded.push(message.body);
-        }
-      });
+        })
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
@@ -242,16 +241,16 @@ describe("wrapFifoQueue", () => {
 
       globalThis.__test_meta = null;
 
-      export default defineFifoQueue()({
-        onMessage: async ({ message }) => {
+      export default defineFifoQueue()
+        .onMessage(async ({ message }) => {
           globalThis.__test_meta = {
             messageId: message.messageId,
             messageGroupId: message.messageGroupId,
             messageDeduplicationId: message.messageDeduplicationId,
             rawBody: message.rawBody,
           };
-        }
-      });
+        })
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
@@ -280,9 +279,9 @@ describe("wrapFifoQueue", () => {
     const handlerCode = `
       import { defineFifoQueue } from "effortless-aws";
 
-      export default defineFifoQueue()({
-        onMessage: async ({ message }) => {}
-      });
+      export default defineFifoQueue()
+        .onMessage(async ({ message }) => {})
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
@@ -297,11 +296,11 @@ describe("wrapFifoQueue", () => {
 
       globalThis.__test_raw = null;
 
-      export default defineFifoQueue()({
-        onMessage: async ({ message }) => {
+      export default defineFifoQueue()
+        .onMessage(async ({ message }) => {
           globalThis.__test_raw = message.body;
-        }
-      });
+        })
+;
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });

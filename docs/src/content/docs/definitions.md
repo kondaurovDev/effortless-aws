@@ -11,7 +11,7 @@ Some definitions include a Lambda handler (a callback like `onRecord`, `onMessag
 
 | Definition | Creates | Handler required? |
 |---|---|---|
-| [defineApi](#defineapi) | Lambda Function URL (single Lambda, multiple routes) | Optional (`routes`) |
+| [defineApi](#defineapi) | Lambda Function URL (single Lambda, multiple routes) | Optional (`get`/`post`/etc.) |
 | [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onRecordBatch` |
 | [defineApp](#defineapp) | CloudFront + Lambda Function URL serving SSR | No (built-in file server) |
 | [defineStaticSite](#definestaticsite) | S3 + CloudFront + optional Lambda@Edge | No (optional `middleware`) |
@@ -36,21 +36,16 @@ export const uploads = defineBucket({});
 export const api = defineApi({
   basePath: "/users",
   deps: () => ({ users, uploads }),
-  setup: ({ deps }) => ({ users: deps.users, uploads: deps.uploads }),
-  routes: [
-    {
-      path: "POST /upload",
-      onRequest: async ({ users, uploads }) => {
-        await users.put({
-          pk: "USER#1", sk: "PROFILE",
-          data: { tag: "user", name: "Alice", email: "alice@example.com" },
-        });
-        await uploads.put("avatars/user-1.png", avatarBuffer);
-        return { status: 201, body: { ok: true } };
-      },
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ users: deps.users, uploads: deps.uploads }))
+  .post("/upload", async ({ users, uploads }) => {
+    await users.put({
+      pk: "USER#1", sk: "PROFILE",
+      data: { tag: "user", name: "Alice", email: "alice@example.com" },
+    });
+    await uploads.put("avatars/user-1.png", avatarBuffer);
+    return { status: 201, body: { ok: true } };
+  });
 ```
 
 ---
@@ -220,37 +215,32 @@ onError: ({ error, pool }) => {
 },
 ```
 
-### `onAfterInvoke`
+### `onCleanup`
 
 Called after each Lambda invocation completes, right before the process freezes. This is the only reliable place to run code between invocations — `setInterval` and background tasks don't execute while Lambda is frozen.
 
-Receives the setup return properties spread as arguments. Supports async. If `onAfterInvoke` throws, the error is logged but does **not** affect the handler's response.
+Receives the setup context as arguments. Supports async. If `onCleanup` throws, the error is logged but does **not** affect the handler's response.
 
 ```typescript
 const buffer: LogEntry[] = [];
 
 export default defineApi({
   basePath: "/api",
-  onAfterInvoke: async () => {
+  onCleanup: async ({ ctx }) => {
     // Flush batched logs when buffer is large or stale
     if (buffer.length >= 100 || timeSinceLastFlush() > 30_000) {
       await flush(buffer);
     }
   },
-  routes: [
-    {
-      path: "GET /users",
-      onRequest: async ({ req }) => {
-        buffer.push({ path: req.path, time: Date.now() });
-        return { status: 200, body: users };
-      },
-    },
-  ],
-});
+})
+  .get("/users", async ({ req }) => {
+    buffer.push({ path: req.path, time: Date.now() });
+    return { status: 200, body: users };
+  });
 ```
 
 :::tip[Lambda lifecycle]
-Understanding how Lambda manages your process helps explain why `onAfterInvoke` exists:
+Understanding how Lambda manages your process helps explain why `onCleanup` exists:
 
 1. **Cold start** — Lambda creates a new execution environment. Your module loads, `setup` runs once.
 2. **Invoke** — Lambda thaws the process, runs your handler, returns the response.
@@ -258,7 +248,7 @@ Understanding how Lambda manages your process helps explain why `onAfterInvoke` 
 4. **Repeat** — on the next request, Lambda thaws the same process from step 2. Variables, connections, and caches survive across invocations.
 5. **Shutdown** — after ~5–15 minutes of inactivity, Lambda sends `SIGTERM` and destroys the environment.
 
-The freeze between steps 2 and 3 is the key insight: `onAfterInvoke` runs at the end of step 2, giving you CPU time before the process is suspended. Without it, you'd have no way to run cleanup logic between invocations.
+The freeze between steps 2 and 3 is the key insight: `onCleanup` runs at the end of step 2, giving you CPU time before the process is suspended. Without it, you'd have no way to run cleanup logic between invocations.
 :::
 
 ---
@@ -269,9 +259,9 @@ Creates: Lambda + Function URL with built-in routing
 
 `defineApi` is the primary way to build HTTP APIs. It deploys **one Lambda** with a Function URL that handles all routing internally — no API Gateway needed.
 
-- **Route array** — typed route definitions with `"METHOD /path"` format
-- Shared `setup`, `deps`, `config`, `static`, `onError`, `onAfterInvoke` across all routes
-- `deps` and `config` are available in `setup` only — wire them into the setup return
+- **Chained methods** — routes defined via `.get()`, `.post()`, `.put()`, `.delete()`, `.patch()` with path patterns as the first argument
+- Shared `deps`, `config`, `static`, `onError`, `onCleanup` in the options object; `.setup()` is chained
+- `deps` and `config` are available in `.setup()` only — wire them into the setup return
 - Setup return properties are spread into route handler args
 - Unmatched routes return 404 automatically
 
@@ -285,36 +275,25 @@ export default defineApi({
   stream?: boolean,        // enable response streaming (SSE)
 
   // Optional — wiring
-  setup?: ({ deps, config, files, enableAuth }) => C,
   deps?: () => { [key]: Handler },
   config?: { [key]: secret() | param(...) },
   static?: string[],
   onError?: ({ error, req, ...ctx }) => HttpResponse,
-  onAfterInvoke?: (ctx) => void | Promise<void>,
+  onCleanup?: ({ ...ctx }) => void | Promise<void>,
+})
+  // Chained setup — runs once on cold start
+  .setup(({ deps, config, files, enableAuth }) => C)
 
-  // Route definitions
-  routes?: [
-    {
-      path: "GET /users",
-      onRequest: async ({ req, input, ...ctx }) => {
-        return { status: 200, body: [...] };
-      },
-    },
-    {
-      path: "POST /users",
-      onRequest: async ({ req, input, ...ctx }) => {
-        return { status: 201, body: { ... } };
-      },
-    },
-    {
-      path: "POST /login",
-      public: true,  // accessible without auth
-      onRequest: async ({ input, auth }) => {
-        return auth.createSession({ userId: "..." });
-      },
-    },
-  ],
-});
+  // Chained route definitions — method(path, handler, options?)
+  .get("/users", async ({ req, input, ...ctx }) => {
+    return { status: 200, body: [...] };
+  })
+  .post("/users", async ({ req, input, ...ctx }) => {
+    return { status: 201, body: { ... } };
+  })
+  .post("/login", async ({ input, auth }) => {
+    return auth.createSession({ userId: "..." });
+  }, { public: true });  // accessible without auth
 ```
 
 ### Route handler arguments
@@ -336,13 +315,14 @@ Auth is configured via the `enableAuth` helper injected into `setup` args. The H
 ```typescript
 import { defineApi, defineTable, secret } from "effortless-aws";
 
-export const apiKeys = defineTable<ApiKey>({});
+export const apiKeys = defineTable({ schema: unsafeAs<ApiKey>() });
 
 export const api = defineApi({
   basePath: "/api",
   deps: () => ({ apiKeys }),
   config: { sessionSecret: secret() },
-  setup: ({ deps, config, enableAuth }) => ({
+})
+  .setup(({ deps, config, enableAuth }) => ({
     auth: enableAuth<Session>({
       secret: config.sessionSecret,
       expiresIn: "7d",
@@ -357,35 +337,22 @@ export const api = defineApi({
         cacheTtl: "5m",
       },
     }),
-  }),
-  routes: [
-    {
-      path: "GET /me",
-      onRequest: async ({ auth }) => ({
-        status: 200,
-        body: { session: auth.session },
-      }),
-    },
-    {
-      path: "POST /login",
-      public: true,
-      onRequest: async ({ input, auth }) => {
-        return auth.createSession({ userId: input.userId, role: input.role });
-      },
-    },
-    {
-      path: "POST /logout",
-      onRequest: async ({ auth }) => auth.clearSession(),
-    },
-  ],
-});
+  }))
+  .get("/me", async ({ auth }) => ({
+    status: 200,
+    body: { session: auth.session },
+  }))
+  .post("/login", async ({ input, auth }) => {
+    return auth.createSession({ userId: input.userId, role: input.role });
+  }, { public: true })
+  .post("/logout", async ({ auth }) => auth.clearSession());
 ```
 
 Auth helpers in route args:
 - `auth.createSession(data)` — create signed session cookie
 - `auth.clearSession()` — clear session cookie
 - `auth.session` — current session data (`A | undefined`)
-- Routes without `public: true` require a valid session (401 if missing)
+- Routes without `{ public: true }` third argument require a valid session (401 if missing)
 - API token takes priority over cookie when both are present
 
 ### Dependencies via setup
@@ -396,23 +363,18 @@ import { orders } from "./orders.js";
 export const api = defineApi({
   basePath: "/orders",
   deps: () => ({ orders }),
-  setup: ({ deps }) => ({ orders: deps.orders }),
-  routes: [
-    {
-      path: "POST /create",
-      onRequest: async ({ orders, input }) => {
-        await orders.put({
-          pk: "USER#123", sk: "ORDER#456",
-          data: { tag: "order", ...input },
-        });
-        return { status: 201, body: { ok: true } };
-      },
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ orders: deps.orders }))
+  .post("/create", async ({ orders, input }) => {
+    await orders.put({
+      pk: "USER#123", sk: "ORDER#456",
+      data: { tag: "order", ...input },
+    });
+    return { status: 201, body: { ok: true } };
+  });
 ```
 
-Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. Deps are available in `setup` only — spread them into callbacks via the setup return.
+Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime. Deps are available in `.setup()` only — spread them into callbacks via the setup return.
 
 **Built-in best practices**:
 - **Lambda Function URL** — no API Gateway overhead, lower latency, zero cost for the URL itself.
@@ -459,7 +421,7 @@ export const orders = defineTable({
   setup?: ({ table, deps, config, files }) => C,   // deps/config only in setup
   deps?: () => { [key]: Handler },
   config?: { [key]: secret() | param(...) },
-  onAfterInvoke?: (ctx) => void | Promise<void>,
+  onCleanup?: ({ ctx }) => void | Promise<void>,
 
   // Stream handler — choose one mode:
 
@@ -978,7 +940,7 @@ export const orderQueue = defineFifoQueue({
   setup?: ({ deps, config }) => C,      // deps/config only in setup
   deps?: () => { [key]: Handler },
   config?: { [key]: secret() | param(...) },
-  onAfterInvoke?: (ctx) => void | Promise<void>,
+  onCleanup?: ({ ctx }) => void | Promise<void>,
 
   // Handler — choose one mode:
 
@@ -1168,7 +1130,7 @@ export const uploads = defineBucket({
   setup?: ({ bucket, deps, config }) => C,  // deps/config only in setup
   deps?: () => { [key]: Handler },
   config?: { [key]: secret() | param(...) },
-  onAfterInvoke?: (ctx) => void | Promise<void>,
+  onCleanup?: ({ ctx }) => void | Promise<void>,
 
   // Event handlers — both optional
   onObjectCreated?: async ({ event, bucket, ...ctx }) => { ... },
@@ -1295,18 +1257,13 @@ import { assets } from "./assets.js";
 export const api = defineApi({
   basePath: "/uploads",
   deps: () => ({ assets }),
-  setup: ({ deps }) => ({ assets: deps.assets }),
-  routes: [
-    {
-      path: "POST /upload",
-      onRequest: async ({ req, assets }) => {
-        // assets is BucketClient
-        await assets.put("uploads/file.txt", req.body);
-        return { status: 201, body: { ok: true } };
-      },
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ assets: deps.assets }))
+  .post("/upload", async ({ req, assets }) => {
+    // assets is BucketClient
+    await assets.put("uploads/file.txt", req.body);
+    return { status: 201, body: { ok: true } };
+  });
 ```
 
 **Built-in best practices**:
@@ -1345,22 +1302,17 @@ import { mailer } from "./mailer.js";
 export const api = defineApi({
   basePath: "/welcome",
   deps: () => ({ mailer }),
-  setup: ({ deps }) => ({ mailer: deps.mailer }),
-  routes: [
-    {
-      path: "POST /send",
-      onRequest: async ({ req, mailer }) => {
-        await mailer.send({
-          from: "hello@myapp.com",
-          to: req.body.email,
-          subject: "Welcome!",
-          html: "<h1>Welcome aboard!</h1>",
-        });
-        return { status: 200, body: { sent: true } };
-      },
-    },
-  ],
-});
+})
+  .setup(({ deps }) => ({ mailer: deps.mailer }))
+  .post("/send", async ({ req, mailer }) => {
+    await mailer.send({
+      from: "hello@myapp.com",
+      to: req.body.email,
+      subject: "Welcome!",
+      html: "<h1>Welcome aboard!</h1>",
+    });
+    return { status: 200, body: { sent: true } };
+  });
 ```
 
 ### EmailClient

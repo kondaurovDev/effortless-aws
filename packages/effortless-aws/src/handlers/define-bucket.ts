@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, ConfigFactory } from "./handler-options";
+import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
@@ -9,7 +9,7 @@ import type { BucketClient } from "../runtime/bucket-client";
  */
 export type BucketConfig = {
   /** Lambda function settings (memory, timeout, permissions, etc.) */
-  lambda?: LambdaWithPermissions;
+  lambda?: { memory?: number; timeout?: Duration; logLevel?: LogLevel; permissions?: Permission[] };
   /** S3 key prefix filter for event notifications (e.g., "uploads/") */
   prefix?: string;
   /** S3 key suffix filter for event notifications (e.g., ".jpg") */
@@ -34,8 +34,17 @@ export type BucketEvent = {
   bucketName: string;
 };
 
+// ============ Setup args ============
+
 /** Spread ctx into callback args (empty when no setup) */
 type SpreadCtx<C> = [C] extends [undefined] ? {} : C & {};
+
+/** Setup factory — receives bucket/deps/config/files based on what was declared */
+type SetupArgs<D, P, HasFiles extends boolean> =
+  & { bucket: BucketClient }
+  & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+  & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
+  & (HasFiles extends true ? { files: StaticFiles } : {});
 
 /**
  * Callback function type for S3 ObjectCreated events
@@ -53,72 +62,7 @@ export type BucketObjectRemovedFn<C = undefined> =
     & SpreadCtx<C>
   ) => Promise<void>;
 
-/**
- * Setup factory type for bucket handlers.
- * Always receives `bucket: BucketClient` (self-client for the handler's own bucket).
- * Also receives `deps` and/or `config` when declared.
- */
-type SetupFactory<C, D, P, S extends string[] | undefined = undefined> = (args:
-    & { bucket: BucketClient }
-    & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
-    & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
-    & ([S] extends [undefined] ? {} : { files: StaticFiles })
-  ) => C | Promise<C>;
-
-/** Base options shared by all defineBucket variants */
-type DefineBucketBase<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = BucketConfig & {
-  /**
-   * Error handler called when onObjectCreated or onObjectRemoved throws.
-   * If not provided, defaults to `console.error`.
-   */
-  onError?: (args: { error: unknown } & SpreadCtx<C>) => void;
-  /** Called after each invocation completes, right before Lambda freezes the process */
-  onAfterInvoke?: (args: SpreadCtx<C>) => void | Promise<void>;
-  /**
-   * Factory function to initialize shared state for callbacks.
-   * Called once on cold start, result is cached and reused across invocations.
-   * Always receives `bucket: BucketClient` (self-client). When deps/config
-   * are declared, receives them as well.
-   */
-  setup?: SetupFactory<C, NoInfer<D>, NoInfer<P>, NoInfer<S>>;
-  /**
-   * Dependencies on other handlers (tables, buckets, etc.).
-   * Typed clients are injected into the handler via the `deps` argument.
-   * Pass a function returning the deps object: `deps: () => ({ uploads })`.
-   */
-  deps?: () => D & {};
-  /**
-   * SSM Parameter Store parameters.
-   * Declare with `defineSecret()` helper. Values are fetched and cached at cold start.
-   */
-  config?: ConfigFactory<P>;
-  /**
-   * Static file glob patterns to bundle into the Lambda ZIP.
-   * Files are accessible at runtime via the `files` callback argument.
-   */
-  static?: S;
-};
-
-/** With event handlers (at least one callback) */
-type DefineBucketWithHandlers<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineBucketBase<C, D, P, S> & {
-  onObjectCreated?: BucketObjectCreatedFn<C>;
-  onObjectRemoved?: BucketObjectRemovedFn<C>;
-};
-
-/** Resource-only: no Lambda, just creates the bucket */
-type DefineBucketResourceOnly<C = undefined, D = undefined, P = undefined, S extends string[] | undefined = undefined> = DefineBucketBase<C, D, P, S> & {
-  onObjectCreated?: never;
-  onObjectRemoved?: never;
-};
-
-export type DefineBucketOptions<
-  C = undefined,
-  D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnySecretRef> | undefined = undefined,
-  S extends string[] | undefined = undefined
-> =
-  | DefineBucketWithHandlers<C, D, P, S>
-  | DefineBucketResourceOnly<C, D, P, S>;
+// ============ Internal handler object ============
 
 /**
  * Internal handler object created by defineBucket
@@ -128,7 +72,7 @@ export type BucketHandler<C = any> = {
   readonly __brand: "effortless-bucket";
   readonly __spec: BucketConfig;
   readonly onError?: (...args: any[]) => any;
-  readonly onAfterInvoke?: (...args: any[]) => any;
+  readonly onCleanup?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
@@ -137,61 +81,175 @@ export type BucketHandler<C = any> = {
   readonly onObjectRemoved?: (...args: any[]) => any;
 };
 
+// ============ Builder options ============
+
+/** Options passed to `defineBucket()` — static config */
+type BucketOptions = {
+  /** Lambda memory in MB (default: 256) */
+  memory?: number;
+  /** Lambda timeout (default: 30s) */
+  timeout?: Duration;
+  /** Additional IAM permissions for the Lambda */
+  permissions?: Permission[];
+  /** Logging verbosity */
+  logLevel?: LogLevel;
+  /** S3 key prefix filter for event notifications (e.g., "uploads/") */
+  prefix?: string;
+  /** S3 key suffix filter for event notifications (e.g., ".jpg") */
+  suffix?: string;
+  /** Static file glob patterns to bundle into the Lambda ZIP */
+  static?: string[];
+};
+
+// ============ Builder ============
+
+interface BucketBuilder<
+  D = undefined,
+  P = undefined,
+  C = undefined,
+  HasFiles extends boolean = false,
+> {
+  /** Declare handler dependencies */
+  deps<D2 extends Record<string, AnyDepHandler>>(
+    fn: () => D2
+  ): BucketBuilder<D2, P, C, HasFiles>;
+
+  /** Declare SSM secrets */
+  config<P2 extends Record<string, AnySecretRef>>(
+    fn: ConfigFactory<P2>
+  ): BucketBuilder<D, P2, C, HasFiles>;
+
+  /** Initialize shared state on cold start. Receives bucket (self-client), deps, config, files. */
+  setup<C2>(
+    fn: (args: SetupArgs<D, P, HasFiles>) => C2 | Promise<C2>
+  ): BucketBuilder<D, P, C2, HasFiles>;
+
+  /** Handle errors thrown by callbacks */
+  onError(
+    fn: (args: { error: unknown } & SpreadCtx<C>) => void
+  ): BucketBuilder<D, P, C, HasFiles>;
+
+  /** Cleanup callback — runs after each invocation, before Lambda freezes */
+  onCleanup(
+    fn: (args: SpreadCtx<C>) => void | Promise<void>
+  ): BucketBuilder<D, P, C, HasFiles>;
+
+  /** Handle S3 ObjectCreated events (terminal — returns finalized handler) */
+  onObjectCreated(
+    fn: BucketObjectCreatedFn<C>
+  ): BucketHandler<C>;
+
+  /** Handle S3 ObjectRemoved events (terminal — returns finalized handler) */
+  onObjectRemoved(
+    fn: BucketObjectRemovedFn<C>
+  ): BucketHandler<C>;
+
+  /** Finalize as resource-only bucket (no Lambda) */
+  build(): BucketHandler<C>;
+}
+
+// ============ Implementation ============
+
 /**
  * Define an S3 bucket with optional event handlers.
  *
- * Creates an S3 bucket. When event handlers are provided, also creates a Lambda
- * function triggered by S3 event notifications.
- *
  * @example Bucket with event handler
  * ```typescript
- * export const uploads = defineBucket({
- *   prefix: "images/",
- *   suffix: ".jpg",
- *   onObjectCreated: async ({ event, bucket }) => {
- *     const file = await bucket.get(event.key);
- *     console.log("New upload:", event.key, file?.body.length);
- *   }
- * });
+ * export const uploads = defineBucket({ prefix: "images/", suffix: ".jpg" })
+ *   .onObjectCreated(async ({ event, bucket }) => {
+ *     console.log("New upload:", event.key);
+ *   })
+ *
  * ```
  *
  * @example Resource-only bucket (no Lambda)
  * ```typescript
- * export const assets = defineBucket({});
- * ```
- *
- * @example As a dependency
- * ```typescript
- * export const api = defineApi({
- *   basePath: "/process",
- *   deps: { uploads },
- *   post: async ({ req, deps }) => {
- *     await deps.uploads.put("output.jpg", buffer);
- *     return { status: 200, body: "OK" };
- *   },
- * });
+ * export const assets = defineBucket().build()
  * ```
  */
-export const defineBucket = () => <
-  C = undefined,
-  D extends Record<string, AnyDepHandler> | undefined = undefined,
-  P extends Record<string, AnySecretRef> | undefined = undefined,
-  S extends string[] | undefined = undefined
->(
-  options: DefineBucketOptions<C, D, P, S>
-): BucketHandler<C> => {
-  const { onObjectCreated, onObjectRemoved, onError, onAfterInvoke, setup, deps, config: configFactory, static: staticFiles, ...__spec } = options;
-  const config = configFactory ? resolveConfigFactory(configFactory) : undefined;
-  return {
-    __brand: "effortless-bucket",
-    __spec,
-    ...(onError ? { onError } : {}),
-    ...(onAfterInvoke ? { onAfterInvoke } : {}),
-    ...(setup ? { setup } : {}),
-    ...(deps ? { deps } : {}),
-    ...(config ? { config } : {}),
+export function defineBucket(): BucketBuilder;
+export function defineBucket(
+  options: BucketOptions & { static: string[] },
+): BucketBuilder<undefined, undefined, undefined, true>;
+export function defineBucket(
+  options: BucketOptions,
+): BucketBuilder;
+export function defineBucket(
+  options?: BucketOptions,
+): BucketBuilder {
+  const {
+    memory, timeout, permissions, logLevel,
+    static: staticFiles,
+    ...bucketConfig
+  } = options ?? {} as BucketOptions;
+
+  const hasLambda = memory != null || timeout != null || permissions != null || logLevel != null;
+  const spec: BucketConfig = {
+    ...bucketConfig,
+    ...(hasLambda ? { lambda: { ...(memory != null ? { memory } : {}), ...(timeout != null ? { timeout } : {}), ...(permissions ? { permissions } : {}), ...(logLevel ? { logLevel } : {}) } } : {}),
+  };
+
+  const state: {
+    spec: BucketConfig;
+    deps?: () => Record<string, unknown>;
+    config?: Record<string, unknown>;
+    static?: string[];
+    setup?: (...args: any[]) => any;
+    onError?: (...args: any[]) => any;
+    onCleanup?: (...args: any[]) => any;
+    onObjectCreated?: (...args: any[]) => any;
+    onObjectRemoved?: (...args: any[]) => any;
+  } = {
+    spec,
     ...(staticFiles ? { static: staticFiles } : {}),
-    ...(onObjectCreated ? { onObjectCreated } : {}),
-    ...(onObjectRemoved ? { onObjectRemoved } : {}),
-  } as BucketHandler<C>;
-};
+  };
+
+  const finalize = (): BucketHandler => ({
+    __brand: "effortless-bucket",
+    __spec: state.spec,
+    ...(state.onError ? { onError: state.onError } : {}),
+    ...(state.onCleanup ? { onCleanup: state.onCleanup } : {}),
+    ...(state.setup ? { setup: state.setup } : {}),
+    ...(state.deps ? { deps: state.deps } : {}),
+    ...(state.config ? { config: state.config } : {}),
+    ...(state.static ? { static: state.static } : {}),
+    ...(state.onObjectCreated ? { onObjectCreated: state.onObjectCreated } : {}),
+    ...(state.onObjectRemoved ? { onObjectRemoved: state.onObjectRemoved } : {}),
+  }) as BucketHandler;
+
+  const builder: BucketBuilder = {
+    deps(fn) {
+      state.deps = fn as any;
+      return builder as any;
+    },
+    config(fn) {
+      state.config = resolveConfigFactory(fn) as any;
+      return builder as any;
+    },
+    setup(fn) {
+      state.setup = fn as any;
+      return builder as any;
+    },
+    onObjectCreated(fn) {
+      state.onObjectCreated = fn as any;
+      return finalize() as any;
+    },
+    onObjectRemoved(fn) {
+      state.onObjectRemoved = fn as any;
+      return finalize() as any;
+    },
+    onError(fn) {
+      state.onError = fn as any;
+      return builder as any;
+    },
+    onCleanup(fn) {
+      state.onCleanup = fn as any;
+      return builder as any;
+    },
+    build() {
+      return finalize() as any;
+    },
+  };
+
+  return builder;
+}

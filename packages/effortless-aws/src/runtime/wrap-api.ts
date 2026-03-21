@@ -1,5 +1,5 @@
-import type { ApiHandler, RouteEntry } from "../handlers/define-api";
-import type { ContentType, ResponseStream } from "../handlers/shared";
+import type { ApiHandler, RouteEntry, OkHelper, FailHelper } from "../handlers/define-api";
+import type { ContentType, HttpResponse, ResponseStream } from "../handlers/shared";
 import { AUTH_COOKIE_NAME } from "../handlers/auth";
 import { createHandlerRuntime } from "./handler-utils";
 
@@ -76,10 +76,14 @@ const findRoute = (routes: RouteEntry[], method: string, relativePath: string): 
 // ============ Wrapper ============
 
 export const wrapApi = <C>(handler: ApiHandler<C>) => {
-  const rt = createHandlerRuntime(handler, "api", handler.__spec.lambda?.logLevel ?? "info");
+  const rt = createHandlerRuntime(handler, "api", handler.__spec.lambda?.logLevel ?? "info", () => ({ ok, fail }));
   const basePath = handler.__spec.basePath;
   const isStream = handler.__spec.stream === true;
   const routes = handler.routes ?? [];
+
+  // Response helpers injected into route args and setup
+  const ok: OkHelper = (body?: unknown, status: number = 200): HttpResponse => ({ status, body });
+  const fail: FailHelper = (message: string, status: number = 400): HttpResponse => ({ status, body: { error: message } });
 
   const defaultError = (error: unknown, status: number) => {
     console.error(`[effortless:${rt.handlerName}]`, error);
@@ -168,7 +172,7 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
       const { ctx, auth, ...rest } = sharedArgs;
       ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
       delete ctxProps.auth;
-      const args: Record<string, unknown> = { ...ctxProps, req, input: merged, ...rest };
+      const args: Record<string, unknown> = { ...ctxProps, req, input: merged, ok, fail, ...rest };
       if (auth) args.auth = auth;
       if (streamCtx) args.stream = streamCtx.stream;
 
@@ -183,13 +187,13 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
       } catch (error) {
         rt.logError(startTime, logInput, error);
         return handler.onError
-          ? toResult(handler.onError({ error, req, ...ctxProps }))
+          ? toResult(handler.onError({ error, req, ok, fail, ...ctxProps }))
           : defaultError(error, 500);
       }
     } finally {
-      if (handler.onAfterInvoke && sharedArgs) {
-        try { await handler.onAfterInvoke(ctxProps); }
-        catch (e) { console.error(`[effortless:${rt.handlerName}] onAfterInvoke error`, e); }
+      if (handler.onCleanup && sharedArgs) {
+        try { await handler.onCleanup(ctxProps); }
+        catch (e) { console.error(`[effortless:${rt.handlerName}] onCleanup error`, e); }
       }
       rt.restoreConsole();
     }

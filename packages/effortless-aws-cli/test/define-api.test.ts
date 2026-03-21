@@ -23,12 +23,8 @@ describe("defineApi", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            { path: "GET /users", onRequest: async ({ req }) => ({ status: 200, body: [] }) },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .get("/users", async ({ req }) => ({ status: 200, body: [] }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -42,16 +38,9 @@ describe("defineApi", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const api = defineApi()({
-          basePath: "/api",
-          routes: [
-            { path: "GET /users", onRequest: async ({ req }) => ({ status: 200, body: [] }) },
-            {
-              path: "POST /users",
-              onRequest: async ({ input }) => ({ status: 201, body: input }),
-            },
-          ],
-        });
+        export const api = defineApi({ basePath: "/api" })
+          .get("/users", async ({ req }) => ({ status: 200, body: [] }))
+          .post("/users", async ({ input }) => ({ status: 201, body: input }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -66,9 +55,7 @@ describe("defineApi", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const api = defineTable()({
-          schema: (input) => input,
-        });
+        export const api = defineTable({ schema: (input) => input }).build();
       `;
 
       const configs = await extractApiConfigs(source);
@@ -80,14 +67,10 @@ describe("defineApi", () => {
         import { defineApi } from "effortless-aws";
         const users = {} as any;
 
-        export default defineApi()({
-          basePath: "/api",
-          deps: () => ({ users }),
-          config: ({ defineSecret }) => ({ dbUrl: defineSecret({ key: "database-url" }) }),
-          routes: [
-            { path: "GET /users", onRequest: async ({ req }) => ({ status: 200, body: [] }) },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .deps(() => ({ users }))
+          .config(({ defineSecret }) => ({ dbUrl: defineSecret({ key: "database-url" }) }))
+          .get("/users", async ({ req }) => ({ status: 200, body: [] }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -104,19 +87,9 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            {
-              path: "GET /users",
-              onRequest: async ({ req }) => ({ status: 200, body: { route: "list-users" } }),
-            },
-            {
-              path: "GET /health",
-              onRequest: async ({ req }) => ({ status: 200, body: { route: "health" } }),
-            },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .get("/users", async ({ req }) => ({ status: 200, body: { route: "list-users" } }))
+          .get("/health", async ({ req }) => ({ status: 200, body: { route: "health" } }));
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -134,15 +107,8 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            {
-              path: "GET /user",
-              onRequest: async ({ req }) => ({ status: 200, body: { userId: req.query.id } }),
-            },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .get("/user", async ({ req }) => ({ status: 200, body: { userId: req.query.id } }));
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -158,19 +124,12 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            {
-              path: "GET /user",
-              onRequest: async ({ input }) => {
-                if (!input || !input.id) throw new Error("id is required");
-                const data = { id: input.id };
-                return { status: 200, body: { userId: data.id } };
-              },
-            },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .get("/user", async ({ input }) => {
+            if (!input || !input.id) throw new Error("id is required");
+            const data = { id: input.id };
+            return { status: 200, body: { userId: data.id } };
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -189,12 +148,8 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            { path: "GET /users", onRequest: async () => ({ status: 200, body: [] }) },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .get("/users", async () => ({ status: 200, body: [] }));
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -212,20 +167,13 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            {
-              path: "POST /users",
-              onRequest: async ({ input }) => {
-                if (!input || typeof input !== "object" || !("name" in input)) {
-                  throw new Error("name is required");
-                }
-                return { status: 201, body: { created: input.name } };
-              },
-            },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .post("/users", async ({ input }) => {
+            if (!input || typeof input !== "object" || !("name" in input)) {
+              throw new Error("name is required");
+            }
+            return { status: 201, body: { created: input.name } };
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -242,20 +190,13 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            {
-              path: "POST /users",
-              onRequest: async ({ input }) => {
-                if (!input || typeof input !== "object" || !("name" in input)) {
-                  throw new Error("name is required");
-                }
-                return { status: 201, body: input };
-              },
-            },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .post("/users", async ({ input }) => {
+            if (!input || typeof input !== "object" || !("name" in input)) {
+              throw new Error("name is required");
+            }
+            return { status: 201, body: input };
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -271,12 +212,8 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            { path: "GET /users", onRequest: async () => ({ status: 200, body: [] }) },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .get("/users", async () => ({ status: 200, body: [] }));
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -296,22 +233,12 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          setup: () => ({ db: "mock-client" }),
-          routes: [
-            {
-              path: "GET /data",
-              onRequest: async ({ db }) => ({ status: 200, body: { client: db } }),
-            },
-            {
-              path: "POST /data",
-              onRequest: async ({ input, db }) => {
-                return { status: 200, body: { client: db, data: input } };
-              },
-            },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .setup(() => ({ db: "mock-client" }))
+          .get("/data", async ({ db }) => ({ status: 200, body: { client: db } }))
+          .post("/data", async ({ input, db }) => {
+            return { status: 200, body: { client: db, data: input } };
+          });
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
@@ -335,12 +262,8 @@ describe("defineApi", () => {
       const handlerCode = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/api",
-          routes: [
-            { path: "GET /users", onRequest: async () => ({ status: 200, body: [] }) },
-          ],
-        });
+        export default defineApi({ basePath: "/api" })
+          .get("/users", async () => ({ status: 200, body: [] }));
       `;
 
       const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });

@@ -78,7 +78,7 @@ const extractDepsKeysFromHandler = (deps: unknown): string[] => {
 const extractRoutePatternsFromRoutes = (routes: unknown): string[] => {
   if (!Array.isArray(routes)) return [];
   return routes
-    .map((r: any) => r.path as string | undefined)
+    .map((r: any) => r.method && r.path ? `${r.method} ${r.path}` : r.path as string | undefined)
     .filter((p): p is string => !!p);
 };
 
@@ -107,7 +107,9 @@ const extractFromHandler = (exportName: string, handler: any, type: HandlerType)
   return {
     exportName,
     config,
-    hasHandler: HANDLER_PROPS[type].some(p => checkTarget[p] != null),
+    hasHandler: type === "api"
+      ? Array.isArray(checkTarget.routes) && checkTarget.routes.length > 0
+      : HANDLER_PROPS[type].some(p => checkTarget[p] != null),
     depsKeys: extractDepsKeysFromHandler(handler.deps),
     secretEntries: extractSecretEntriesFromConfig(handler.config),
     staticGlobs: Array.isArray(handler.static) ? handler.static : [],
@@ -151,13 +153,17 @@ const importHandlerModule = async (file: string, projectDir: string): Promise<Re
       format: "esm",
       external: ["@aws-sdk/*", "@smithy/*", ...builtinModules.flatMap(m => [m, `node:${m}`])],
       absWorkingDir: projectDir,
+      banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
     });
     const output = result.outputFiles?.[0];
     if (!output) throw new Error(`esbuild produced no output for ${file}`);
     fsSync.writeFileSync(tmpFile, output.text);
-    return await import(tmpFile);
-  } finally {
-    try { fsSync.unlinkSync(tmpFile); } catch {}
+    const mod = await import(tmpFile);
+    fsSync.unlinkSync(tmpFile);
+    return mod;
+  } catch (err) {
+    console.error(`Discovery bundle left at: ${tmpFile}`);
+    throw err;
   }
 };
 
@@ -435,7 +441,22 @@ export const discoverHandlers = async (files: string[], projectDir: string): Pro
     };
 
     for (const [exportName, value] of Object.entries(mod)) {
-      if (!value || typeof value !== "object" || !("__brand" in value)) continue;
+      if (!value || typeof value !== "object") continue;
+
+      // Detect unfinalized builders (have .build() method but no __brand)
+      if (!("__brand" in value) && typeof (value as any).build === "function") {
+        const shortFile = path.relative(projectDir, file);
+        const v = value as Record<string, unknown>;
+        const hint = typeof v.get === "function" && typeof v.post === "function" ? ".get() or .post()"
+          : typeof v.onRecord === "function" ? ".onRecord() or .onRecordBatch()"
+          : typeof v.onMessage === "function" ? ".onMessage() or .onMessageBatch()"
+          : typeof v.onObjectCreated === "function" ? ".onObjectCreated() or .onObjectRemoved()"
+          : ".build()";
+        console.warn(`⚠ ${shortFile}: "${exportName}" is missing a handler — did you forget ${hint}?`);
+        continue;
+      }
+
+      if (!("__brand" in value)) continue;
       const type = BRAND_TO_TYPE[(value as any).__brand as string];
       if (!type) continue;
       byType[type].push(extractFromHandler(exportName, value, type));

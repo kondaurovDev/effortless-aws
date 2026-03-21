@@ -19,11 +19,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi()({
-          basePath: "/widget",
-          static: ["src/templates/*.ejs"],
-          queries: { index: async ({ input, files }) => ({ status: 200 }) }
-        });
+        export const widget = defineApi({ basePath: "/widget", static: ["src/templates/*.ejs"] }).get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -36,11 +32,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi()({
-          basePath: "/widget",
-          static: ["src/templates/*.ejs", "src/assets/*.css"],
-          queries: { index: async ({ input }) => ({ status: 200 }) }
-        });
+        export const widget = defineApi({ basePath: "/widget", static: ["src/templates/*.ejs", "src/assets/*.css"] }).get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -53,10 +45,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const hello = defineApi()({
-          basePath: "/hello",
-          queries: { index: async ({ input }) => ({ status: 200 }) }
-        });
+        export const hello = defineApi({ basePath: "/hello" }).get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -69,11 +58,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi()({
-          basePath: "/widget",
-          static: ["templates/*.ejs"],
-          queries: { index: async ({ input }) => ({ status: 200 }) }
-        });
+        export default defineApi({ basePath: "/widget", static: ["templates/*.ejs"] }).get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -87,11 +72,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi()({
-          basePath: "/widget",
-          static: ["src/templates/*.ejs"],
-          routes: []
-        });
+        export const widget = defineApi({ basePath: "/widget", static: ["src/templates/*.ejs"] }).get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -108,11 +89,8 @@ describe("static extraction", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
-          name: "orders",
-          static: ["src/templates/report.ejs"],
-          onRecord: async ({ record }) => {}
-        });
+        export const orders = defineTable({ static: ["src/templates/report.ejs"] })
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -125,10 +103,8 @@ describe("static extraction", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable()({
-          name: "orders",
-          onRecord: async ({ record }) => {}
-        });
+        export const orders = defineTable()
+          .onRecord(async ({ record }) => {});
       `;
 
       const configs = await extractTableConfigs(source);
@@ -234,19 +210,11 @@ describe("static files runtime", () => {
     const handlerCode = `
       import { defineApi } from "effortless-aws";
 
-      export default defineApi()({
-        basePath: "/widget",
-        static: ["test/fixtures/hello.txt"],
-        routes: [
-          {
-            path: "GET /index",
-            onRequest: async ({ files }) => ({
-              status: 200,
-              body: { content: files.read("test/fixtures/hello.txt") }
-            }),
-          },
-        ],
-      });
+      export default defineApi({ basePath: "/widget", static: ["test/fixtures/hello.txt"] })
+          .get("/index", async ({ files }) => ({
+            status: 200,
+            body: { content: files.read("test/fixtures/hello.txt") }
+          }));
     `;
 
     const mod = await importBundle({ code: handlerCode, projectDir });

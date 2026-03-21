@@ -6,26 +6,19 @@ import * as S from "effect/Schema";
 
 type Session = { sid: string; userId: string; expiresAt: number };
 
-export const sessions = defineTable<Session>()({});
+export const sessions = defineTable<Session>().build();
 
 // ── GET /hello (with params via setup) ───────────────────────
 
-export const hello = defineApi()({
-  basePath: "/hello",
-  config: ({ defineSecret }) => ({
+export const hello = defineApi({ basePath: "/hello" })
+  .config(({ defineSecret }) => ({
     greeting: defineSecret({ key: "greeting-text" }),
-  }),
-  setup: ({ config }) => ({ greeting: config.greeting }),
-  routes: [
-    {
-      path: "GET /",
-      onRequest: async ({ req, greeting }) => ({
-        status: 200,
-        body: { message: greeting, path: req.path },
-      }),
-    },
-  ],
-});
+  }))
+  .setup(({ config }) => ({ greeting: config.greeting }))
+  .get("/", async ({ req, greeting }) => ({
+    status: 200,
+    body: { message: greeting, path: req.path },
+  }));
 
 // ── POST /user (with schema + deps + params + context) ───────
 
@@ -48,30 +41,23 @@ const decodeUser = (input: unknown) =>
     Effect.runSync
   );
 
-export const user = defineApi()({
-  basePath: "/user",
-  deps: () => ({ sessions }),
-  config: ({ defineSecret }) => ({
+export const user = defineApi({ basePath: "/user" })
+  .deps(() => ({ sessions }))
+  .config(({ defineSecret }) => ({
     maxAge: defineSecret<number>({ key: "session-max-age", transform: Number }),
-  }),
-  setup: ({ deps, config }) => ({
+  }))
+  .setup(({ deps, config }) => ({
     sessions: deps.sessions,
     maxAge: config.maxAge,
     sessionTtl: config.maxAge * 60,
-  }),
-  routes: [
-    {
-      path: "POST /create",
-      onRequest: async ({ input, sessions, maxAge, sessionTtl }) => {
-        const data = decodeUser(input);
-        void sessions;
-        void maxAge;
-        void sessionTtl;
-        return {
-          status: 200,
-          body: data,
-        };
-      },
-    },
-  ],
-});
+  }))
+  .post("/create", async ({ input, sessions, maxAge, sessionTtl }) => {
+    const data = decodeUser(input);
+    void sessions;
+    void maxAge;
+    void sessionTtl;
+    return {
+      status: 200,
+      body: data,
+    };
+  });

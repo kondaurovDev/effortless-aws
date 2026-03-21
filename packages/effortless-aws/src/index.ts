@@ -13,7 +13,6 @@ export { defineApi } from "./handlers/define-api"
 export { defineSecret, secret, param, generateHex, generateBase64, generateUuid } from "./handlers/handler-options"
 export { unsafeAs } from "./handlers/handler-options"
 export { toSeconds } from "./handlers/handler-options"
-export { result } from "./handlers/shared"
 
 // Types
 export type { HttpRequest, HttpResponse, HttpMethod, ContentType } from "./handlers/shared"
@@ -23,7 +22,7 @@ export type { StaticSiteConfig, StaticSiteSeo, StaticSiteHandler, MiddlewareRequ
 export type { FifoQueueConfig, FifoQueueMessage, FifoQueueHandler } from "./handlers/define-fifo-queue"
 export type { BucketConfig, BucketEvent, BucketHandler } from "./handlers/define-bucket"
 export type { MailerConfig, MailerHandler } from "./handlers/define-mailer"
-export type { ApiAuthConfig, ApiConfig, ApiHandler } from "./handlers/define-api"
+export type { ApiAuthConfig, ApiConfig, ApiHandler, ApiRoutes } from "./handlers/define-api"
 export type { TableClient, QueryParams, QueryByTagParams, SkCondition, UpdateActions, PutOptions } from "./runtime/table-client"
 export type { BucketClient } from "./runtime/bucket-client"
 export type { QueueClient, SendMessageInput } from "./runtime/queue-client"

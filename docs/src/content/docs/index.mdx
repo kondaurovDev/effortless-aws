@@ -61,7 +61,7 @@ Each tab adds a layer — every export creates real AWS infrastructure.
     ```
   </TabItem>
   <TabItem label="HTTP API">
-    One export — one API. `get` routes handle queries, `schema` + `post` handle commands.
+    One export — one API. Chained `.get()` routes handle queries, `.post()` handles commands.
 
     ```typescript
     // src/api.ts
@@ -71,35 +71,34 @@ Each tab adds a layer — every export creates real AWS infrastructure.
 
     export const todoApi = defineApi({
       basePath: "/todos",
-      deps: { todos },
-      get: {
-        "/": async ({ deps }) => ({
-          status: 200,
-          body: await deps.todos.query({ pk: "TODO" }),
-        }),
-        "/{id}": async ({ req, deps }) => {
-          const todo = await deps.todos.get({ pk: "TODO", sk: req.params.id });
-          if (!todo) return { status: 404, body: { error: "Not found" } };
-          return { status: 200, body: todo.data };
-        },
-      },
-      schema: Command.parse,
-      post: async ({ data, deps }) => {
+      deps: () => ({ todos }),
+    })
+      .setup(({ deps }) => ({ todos: deps.todos }))
+      .get("/", async ({ todos }) => ({
+        status: 200,
+        body: await todos.query({ pk: "TODO" }),
+      }))
+      .get("/{id}", async ({ req, todos }) => {
+        const todo = await todos.get({ pk: "TODO", sk: req.params.id });
+        if (!todo) return { status: 404, body: { error: "Not found" } };
+        return { status: 200, body: todo.data };
+      })
+      .post("/", async ({ input, todos }) => {
+        const data = Command.parse(input);
         if (data.action === "create") {
           const id = crypto.randomUUID();
-          await deps.todos.put({
+          await todos.put({
             pk: "TODO", sk: id,
             data: { id, title: data.title, done: false },
           });
           return { status: 201, body: { id } };
         }
-        await deps.todos.update(
+        await todos.update(
           { pk: "TODO", sk: data.id },
           { set: { done: data.done } },
         );
         return { status: 200, body: { id: data.id, done: data.done } };
-      },
-    });
+      });
     ```
   </TabItem>
   <TabItem label="Database + stream">
