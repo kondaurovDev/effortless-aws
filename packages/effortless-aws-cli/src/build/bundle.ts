@@ -7,7 +7,7 @@ import { createRequire } from "module";
 import archiver from "archiver";
 import { globSync } from "glob";
 import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry } from "./handler-registry";
-import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig } from "effortless-aws";
+import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig } from "effortless-aws";
 import * as os from "os";
 
 export type BundleInput = {
@@ -26,6 +26,7 @@ export type ExtractedBucketFunction = ExtractedConfig<BucketConfig>;
 export type ExtractedMailerFunction = ExtractedConfig<MailerConfig>;
 export type ExtractedApiFunction = ExtractedConfig<ApiConfig>;
 export type ExtractedCronFunction = ExtractedConfig<CronConfig>;
+export type ExtractedWorkerFunction = ExtractedConfig<WorkerConfig>;
 
 /** Convert camelCase to kebab-case for SSM key derivation. */
 const toKebabCase = (str: string): string =>
@@ -41,6 +42,7 @@ const BRAND_TO_TYPE: Record<string, HandlerType> = {
   "effortless-mailer": "mailer",
   "effortless-api": "api",
   "effortless-cron": "cron",
+  "effortless-worker": "worker",
 };
 
 /** Properties that indicate a handler has an active Lambda function */
@@ -53,6 +55,7 @@ const HANDLER_PROPS: Record<HandlerType, readonly string[]> = {
   mailer: [],
   cron: ["onTick"],
   api: ["routes"],
+  worker: ["onMessage"],
 };
 
 /** Extract SecretEntry[] from a handler's resolved config object */
@@ -424,6 +427,7 @@ export type DiscoveredHandlers = {
   mailerHandlers: { file: string; exports: ExtractedMailerFunction[] }[];
   apiHandlers: { file: string; exports: ExtractedApiFunction[] }[];
   cronHandlers: { file: string; exports: ExtractedCronFunction[] }[];
+  workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[];
 };
 
 export const discoverHandlers = async (files: string[], projectDir: string): Promise<DiscoveredHandlers> => {
@@ -435,6 +439,7 @@ export const discoverHandlers = async (files: string[], projectDir: string): Pro
   const mailerHandlers: { file: string; exports: ExtractedMailerFunction[] }[] = [];
   const apiHandlers: { file: string; exports: ExtractedApiFunction[] }[] = [];
   const cronHandlers: { file: string; exports: ExtractedCronFunction[] }[] = [];
+  const workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[] = [];
 
   for (const file of files) {
     if (!fsSync.statSync(file).isFile()) continue;
@@ -442,7 +447,7 @@ export const discoverHandlers = async (files: string[], projectDir: string): Pro
     const mod = await importHandlerModule(file, projectDir);
 
     const byType: Record<HandlerType, ExtractedConfig<any>[]> = {
-      table: [], app: [], staticSite: [], fifoQueue: [], bucket: [], mailer: [], cron: [], api: [],
+      table: [], app: [], staticSite: [], fifoQueue: [], bucket: [], mailer: [], cron: [], api: [], worker: [],
     };
 
     for (const [exportName, value] of Object.entries(mod)) {
@@ -457,6 +462,7 @@ export const discoverHandlers = async (files: string[], projectDir: string): Pro
           : typeof v.onMessage === "function" ? ".onMessage() or .onMessageBatch()"
           : typeof v.onObjectCreated === "function" ? ".onObjectCreated() or .onObjectRemoved()"
           : typeof v.onTick === "function" ? ".onTick()"
+          : typeof v.handler === "function" ? ".onMessage()"
           : ".build()";
         console.warn(`⚠ ${shortFile}: "${exportName}" is missing a handler — did you forget ${hint}?`);
         continue;
@@ -476,9 +482,10 @@ export const discoverHandlers = async (files: string[], projectDir: string): Pro
     if (byType.mailer.length > 0) mailerHandlers.push({ file, exports: byType.mailer });
     if (byType.api.length > 0) apiHandlers.push({ file, exports: byType.api });
     if (byType.cron.length > 0) cronHandlers.push({ file, exports: byType.cron });
+    if (byType.worker.length > 0) workerHandlers.push({ file, exports: byType.worker });
   }
 
-  return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers };
+  return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers };
 };
 
 /** Flatten all discovered handlers into a list of { exportName, file, type } */
@@ -497,5 +504,6 @@ export const flattenHandlers = (discovered: DiscoveredHandlers) => {
     ...entries("mailer", discovered.mailerHandlers),
     ...entries("api", discovered.apiHandlers),
     ...entries("cron", discovered.cronHandlers),
+    ...entries("worker", discovered.workerHandlers),
   ];
 };

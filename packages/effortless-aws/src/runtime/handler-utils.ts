@@ -8,6 +8,7 @@ import { createTableClient } from "./table-client";
 import { createBucketClient } from "./bucket-client";
 import { createEmailClient } from "./email-client";
 import { createQueueClient } from "./queue-client";
+import { createWorkerClient } from "./worker-client";
 import { getParameters } from "./ssm-client";
 
 export type { LogLevel };
@@ -36,6 +37,7 @@ const DEP_FACTORIES: Record<string, (name: string, depHandler: unknown) => unkno
   bucket: (name) => createBucketClient(name),
   mailer: () => createEmailClient(),
   queue: (name) => createQueueClient(name),
+  worker: (name) => createWorkerClient(name),
 };
 
 /**

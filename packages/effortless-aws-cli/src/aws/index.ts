@@ -3,7 +3,7 @@ export { ensureLambda, deleteLambda, publishVersion, ensureEdgePermission, ensur
 export type { LambdaConfig, LambdaStatus } from "./lambda";
 
 // IAM
-export { ensureRole, ensureEdgeRole, ensureSchedulerRole, deleteRole, listEffortlessRoles } from "./iam";
+export { ensureRole, ensureEdgeRole, ensureSchedulerRole, ensureEcsTaskRole, ensureEcsExecutionRole, deleteRole, listEffortlessRoles } from "./iam";
 export type { EffortlessRole } from "./iam";
 
 // DynamoDB
@@ -29,6 +29,13 @@ export type { FindCertificateResult } from "./acm";
 // CloudFront
 export { ensureOAC, ensureUrlRewriteFunction, ensureViewerRequestFunction, ensureDistribution, ensureSsrDistribution, invalidateDistribution, disableAndDeleteDistribution, deleteOAC, cleanupOrphanedFunctions } from "./cloudfront";
 export type { EnsureOACInput, EnsureDistributionInput, EnsureSsrDistributionInput, DistributionResult, ViewerRequestFunctionConfig } from "./cloudfront";
+
+// VPC
+export { getDefaultVpcSubnets } from "./vpc";
+
+// ECS
+export { ensureCluster, ensureTaskDefinition, ensureService, ensureLogGroup } from "./ecs";
+export type { EnsureTaskDefinitionInput, EnsureServiceInput } from "./ecs";
 
 // SQS
 export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue } from "./sqs";

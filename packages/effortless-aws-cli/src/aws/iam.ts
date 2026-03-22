@@ -28,6 +28,19 @@ const EDGE_LAMBDA_ASSUME_ROLE_POLICY = JSON.stringify({
   ]
 });
 
+const ECS_TASK_ASSUME_ROLE_POLICY = JSON.stringify({
+  Version: "2012-10-17",
+  Statement: [
+    {
+      Effect: "Allow",
+      Principal: {
+        Service: "ecs-tasks.amazonaws.com"
+      },
+      Action: "sts:AssumeRole"
+    }
+  ]
+});
+
 const BASIC_EXECUTION_POLICY_ARN = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole";
 
 export const ensureRole = (
@@ -222,6 +235,98 @@ const ensureInlinePolicy = (roleName: string, functionName: string, actions: str
       PolicyName: policyName,
       PolicyDocument: policyDocument
     });
+  });
+
+/**
+ * Create or update an ECS task role (used by the running container).
+ * Trusted by ecs-tasks.amazonaws.com.
+ */
+export const ensureEcsTaskRole = (
+  project: string,
+  stage: string,
+  name: string,
+  additionalActions?: string[],
+  tags?: Record<string, string>
+) =>
+  Effect.gen(function* () {
+    const roleName = `${project}-${stage}-${name}-task-role`;
+
+    const existingRole = yield* iam.make("get_role", { RoleName: roleName }).pipe(
+      Effect.map(r => r.Role),
+      Effect.catchIf(
+        e => e._tag === "IAMError" && e.is("NoSuchEntityException"),
+        () => Effect.succeed(undefined)
+      )
+    );
+
+    if (existingRole) {
+      yield* Effect.logDebug(`Using existing ECS task role: ${roleName}`);
+      if (additionalActions && additionalActions.length > 0) {
+        yield* ensureInlinePolicy(roleName, name, additionalActions);
+      }
+      if (tags) {
+        yield* iam.make("tag_role", { RoleName: roleName, Tags: toAwsTagList(tags) });
+      }
+      return existingRole.Arn!;
+    }
+
+    yield* Effect.logDebug(`Creating ECS task role: ${roleName}`);
+    const createResult = yield* iam.make("create_role", {
+      RoleName: roleName,
+      AssumeRolePolicyDocument: ECS_TASK_ASSUME_ROLE_POLICY,
+      Description: `ECS task role for worker ${name}`,
+      Tags: tags ? toAwsTagList(tags) : undefined,
+    });
+
+    if (additionalActions && additionalActions.length > 0) {
+      yield* ensureInlinePolicy(roleName, name, additionalActions);
+    }
+
+    yield* Effect.sleep("10 seconds");
+    return createResult.Role!.Arn!;
+  });
+
+/**
+ * Create or update an ECS execution role (used by Fargate to pull images and write logs).
+ * Trusted by ecs-tasks.amazonaws.com.
+ */
+export const ensureEcsExecutionRole = (
+  project: string,
+  stage: string,
+  tags?: Record<string, string>
+) =>
+  Effect.gen(function* () {
+    const roleName = `${project}-${stage}-ecs-execution-role`;
+
+    const existingRole = yield* iam.make("get_role", { RoleName: roleName }).pipe(
+      Effect.map(r => r.Role),
+      Effect.catchIf(
+        e => e._tag === "IAMError" && e.is("NoSuchEntityException"),
+        () => Effect.succeed(undefined)
+      )
+    );
+
+    if (existingRole) {
+      yield* Effect.logDebug(`Using existing ECS execution role: ${roleName}`);
+      return existingRole.Arn!;
+    }
+
+    yield* Effect.logDebug(`Creating ECS execution role: ${roleName}`);
+    const createResult = yield* iam.make("create_role", {
+      RoleName: roleName,
+      AssumeRolePolicyDocument: ECS_TASK_ASSUME_ROLE_POLICY,
+      Description: `ECS execution role for project ${project}`,
+      Tags: tags ? toAwsTagList(tags) : undefined,
+    });
+
+    // Attach managed policy for pulling images and writing logs
+    yield* iam.make("attach_role_policy", {
+      RoleName: roleName,
+      PolicyArn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+    });
+
+    yield* Effect.sleep("10 seconds");
+    return createResult.Role!.Arn!;
   });
 
 export const deleteRole = (roleName: string) =>

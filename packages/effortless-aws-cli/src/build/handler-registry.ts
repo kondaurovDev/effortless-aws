@@ -63,6 +63,12 @@ export const handlerRegistry = {
     wrapperFn: "wrapApi",
     wrapperPath: "~/runtime/wrap-api",
   },
+  worker: {
+    defineFn: "defineWorker",
+    handlerProps: ["onMessage"],
+    wrapperFn: "wrapWorker",
+    wrapperPath: "~/runtime/wrap-worker",
+  },
 } as const;
 
 export type HandlerType = keyof typeof handlerRegistry;

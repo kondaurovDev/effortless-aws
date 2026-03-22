@@ -1,0 +1,10 @@
+{
+  "name": "effortless-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generic Fargate runner image for effortless-aws workers",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0"
+  }
+}

@@ -13,6 +13,7 @@ import {
   addFunctionUrlPublicAccess,
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
+import { toSeconds } from "effortless-aws";
 import type { SecretEntry } from "~/build/handler-registry";
 import * as crypto from "crypto";
 import { ssm } from "~/aws/clients";
@@ -41,6 +42,7 @@ import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fi
 import { deployBucketFunction, type DeployBucketResult } from "./deploy-bucket";
 import { deployMailer, type DeployMailerResult } from "./deploy-mailer";
 import { deployCronFunction, type DeployCronResult } from "./deploy-cron";
+import { deployWorkerFunction, type DeployWorkerResult } from "./deploy-worker";
 import { deployApiFunction } from "./deploy-api";
 
 // ============ Progress tracking ============
@@ -203,6 +205,12 @@ const QUEUE_CLIENT_PERMISSIONS = [
   "sqs:GetQueueUrl",
 ] as const;
 
+const WORKER_CLIENT_PERMISSIONS = [
+  "sqs:SendMessage",
+  "ecs:DescribeServices",
+  "ecs:UpdateService",
+] as const;
+
 /**
  * Build a map of all mailer handler export names to their domains.
  */
@@ -275,7 +283,26 @@ const buildQueueNameMap = (
 };
 
 /**
- * Validate that all handler deps reference a discovered table, bucket, or mailer.
+ * Build a map of all worker handler export names to their resolved worker names.
+ * Worker names are deterministic: ${project}-${stage}-${handlerName}
+ */
+const buildWorkerNameMap = (
+  workerHandlers: DiscoveredHandlers["workerHandlers"],
+  project: string,
+  stage: string,
+): Map<string, string> => {
+  const map = new Map<string, string>();
+  for (const { exports } of workerHandlers) {
+    for (const fn of exports) {
+      const idleTimeoutSec = fn.config.idleTimeout ? toSeconds(fn.config.idleTimeout) : 300;
+      map.set(fn.exportName, `${project}-${stage}-${fn.exportName}:${idleTimeoutSec}`);
+    }
+  }
+  return map;
+};
+
+/**
+ * Validate that all handler deps reference a discovered table, bucket, mailer, queue, or worker.
  * Returns a list of human-readable error strings (empty = all valid).
  */
 const validateDeps = (
@@ -284,6 +311,7 @@ const validateDeps = (
   bucketNameMap: Map<string, string>,
   mailerDomainMap: Map<string, string>,
   queueNameMap: Map<string, string>,
+  workerNameMap: Map<string, string>,
 ): string[] => {
   const errors: string[] = [];
   const allGroups = [
@@ -295,13 +323,14 @@ const validateDeps = (
     ...discovered.appHandlers,
     ...discovered.mailerHandlers,
     ...discovered.cronHandlers,
+    ...discovered.workerHandlers,
   ];
   for (const { exports } of allGroups) {
     for (const fn of exports) {
       for (const key of fn.depsKeys) {
-        if (!tableNameMap.has(key) && !bucketNameMap.has(key) && !mailerDomainMap.has(key) && !queueNameMap.has(key)) {
+        if (!tableNameMap.has(key) && !bucketNameMap.has(key) && !mailerDomainMap.has(key) && !queueNameMap.has(key) && !workerNameMap.has(key)) {
           errors.push(
-            `Handler "${fn.exportName}" depends on "${key}", but no matching table, bucket, mailer, or queue handler was found. Make sure it is exported.`
+            `Handler "${fn.exportName}" depends on "${key}", but no matching table, bucket, mailer, queue, or worker handler was found. Make sure it is exported.`
           );
         }
       }
@@ -320,6 +349,7 @@ const resolveDeps = (
   bucketNameMap: Map<string, string>,
   mailerDomainMap: Map<string, string>,
   queueNameMap: Map<string, string>,
+  workerNameMap: Map<string, string>,
 ): { depsEnv: Record<string, string>; depsPermissions: readonly string[] } | undefined => {
   if (depsKeys.length === 0) return undefined;
 
@@ -328,6 +358,7 @@ const resolveDeps = (
   let hasBucket = false;
   let hasMailer = false;
   let hasQueue = false;
+  let hasWorker = false;
 
   for (const key of depsKeys) {
     const tableName = tableNameMap.get(key);
@@ -352,6 +383,13 @@ const resolveDeps = (
     if (queueName) {
       depsEnv[`EFF_DEP_${key}`] = `queue:${queueName}`;
       hasQueue = true;
+      continue;
+    }
+    const workerName = workerNameMap.get(key);
+    if (workerName) {
+      // Worker dep value will be resolved at deploy time when queue URL and service details are known
+      depsEnv[`EFF_DEP_${key}`] = `worker:${workerName}`;
+      hasWorker = true;
     }
   }
 
@@ -362,6 +400,7 @@ const resolveDeps = (
   if (hasBucket) permissions.push(...BUCKET_CLIENT_PERMISSIONS);
   if (hasMailer) permissions.push(...SES_PERMISSIONS);
   if (hasQueue) permissions.push(...QUEUE_CLIENT_PERMISSIONS);
+  if (hasWorker) permissions.push(...WORKER_CLIENT_PERMISSIONS);
 
   return { depsEnv, depsPermissions: permissions };
 };
@@ -430,6 +469,7 @@ type DeployTaskCtx = {
   bucketNameMap: Map<string, string>;
   mailerDomainMap: Map<string, string>;
   queueNameMap: Map<string, string>;
+  workerNameMap: Map<string, string>;
   logComplete: (name: string, type: string, status: StepStatus, bundleSize?: number) => Effect.Effect<void>;
 };
 
@@ -447,7 +487,7 @@ const resolveHandlerEnv = (
   ctx: DeployTaskCtx,
 ) => {
   const resolved = mergeResolved(
-    resolveDeps(depsKeys, ctx.tableNameMap, ctx.bucketNameMap, ctx.mailerDomainMap, ctx.queueNameMap),
+    resolveDeps(depsKeys, ctx.tableNameMap, ctx.bucketNameMap, ctx.mailerDomainMap, ctx.queueNameMap, ctx.workerNameMap),
     resolveSecrets(secretEntries, ctx.input.project, ctx.stage)
   );
   return {
@@ -695,6 +735,35 @@ const buildCronTasks = (
   return tasks;
 };
 
+const buildWorkerTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["workerHandlers"],
+  results: DeployWorkerResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
+          const result = yield* deployWorkerFunction({
+            input: makeDeployInput(ctx, file), fn,
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({
+            ecs: { region }, iam: { region }, sqs: { region },
+            s3: { region }, cloudwatch_logs: { region },
+          })));
+          results.push(result);
+          yield* ctx.logComplete(fn.exportName, "worker", result.status, result.bundleSize);
+        })
+      );
+    }
+  }
+  return tasks;
+};
+
 // ============ Project deployment ============
 
 export type DeployProjectInput = {
@@ -734,7 +803,7 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers } = yield* Effect.promise(() => discoverHandlers(files, input.projectDir));
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = yield* Effect.promise(() => discoverHandlers(files, input.projectDir));
 
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
@@ -744,7 +813,8 @@ export const deployProject = (input: DeployProjectInput) =>
     const totalMailerHandlers = mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalApiHandlers = apiHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalCronHandlers = cronHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers + totalCronHandlers;
+    const totalWorkerHandlers = workerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAllHandlers = totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers + totalCronHandlers + totalWorkerHandlers;
 
     if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
@@ -759,10 +829,11 @@ export const deployProject = (input: DeployProjectInput) =>
     if (totalMailerHandlers > 0) parts.push(`${totalMailerHandlers} mailer`);
     if (totalApiHandlers > 0) parts.push(`${totalApiHandlers} api`);
     if (totalCronHandlers > 0) parts.push(`${totalCronHandlers} cron`);
+    if (totalWorkerHandlers > 0) parts.push(`${totalWorkerHandlers} worker`);
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
     // Check for missing SSM parameters
-    const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers };
+    const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers };
     const requiredSecrets = collectRequiredSecrets(discovered, input.project, stage);
     if (requiredSecrets.length > 0) {
       const { missing } = yield* checkMissingSecrets(requiredSecrets).pipe(
@@ -800,9 +871,10 @@ export const deployProject = (input: DeployProjectInput) =>
     const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
     const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
     const queueNameMap = buildQueueNameMap(fifoQueueHandlers, input.project, stage);
+    const workerNameMap = buildWorkerNameMap(workerHandlers, input.project, stage);
 
     // Validate deps references before deploying anything
-    const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap);
+    const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap);
     if (depsErrors.length > 0) {
       yield* Console.log("");
       for (const err of depsErrors) {
@@ -850,11 +922,13 @@ export const deployProject = (input: DeployProjectInput) =>
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "api" });
     for (const { exports } of cronHandlers)
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "cron" });
+    for (const { exports } of workerHandlers)
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "worker" });
 
     manifest.sort((a, b) => a.name.localeCompare(b.name));
     const logComplete = createLiveProgress(manifest);
     const ctx: DeployTaskCtx = {
-      input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, logComplete,
+      input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap, logComplete,
     };
 
     const tableResults: DeployTableResult[] = [];
@@ -864,6 +938,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const bucketResults: DeployBucketResult[] = [];
     const mailerResults: DeployMailerResult[] = [];
     const cronResults: DeployCronResult[] = [];
+    const workerResults: DeployWorkerResult[] = [];
     const apiResults: DeployResult[] = [];
 
     // Check if app/site handlers need API origin (for CloudFront proxying)
@@ -884,6 +959,7 @@ export const deployProject = (input: DeployProjectInput) =>
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
         ...buildCronTasks(ctx, cronHandlers, cronResults),
+        ...buildWorkerTasks(ctx, workerHandlers, workerResults),
       ];
 
       yield* Effect.all(phase1Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -914,6 +990,7 @@ export const deployProject = (input: DeployProjectInput) =>
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
         ...buildCronTasks(ctx, cronHandlers, cronResults),
+        ...buildWorkerTasks(ctx, workerHandlers, workerResults),
       ];
 
       yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
