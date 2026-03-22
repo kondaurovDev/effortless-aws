@@ -50,7 +50,7 @@ type DeployWorkerFunctionInput = {
   staticGlobs?: string[];
 };
 
-const WORKER_IMAGE = "effortless/runner:latest";
+const WORKER_IMAGE = "kondaurov/effortless-aws-runner:latest";
 
 /** @internal */
 export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, staticGlobs }: DeployWorkerFunctionInput) =>

@@ -23,5 +23,5 @@ jobs:
           context: packages/effortless-runner
           push: true
           tags: |
-            effortless/runner:latest
-            effortless/runner:${{ github.sha }}
+            kondaurov/effortless-aws-runner:latest
+            kondaurov/effortless-aws-runner:${{ github.sha }}

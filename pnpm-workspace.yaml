@@ -1,11 +1,14 @@
 packages:
   - packages/*
+  - '!packages/effortless-runner'
 
 catalog:
   '@aws-sdk/client-acm': ^3.993.0
   '@aws-sdk/client-apigatewayv2': ^3.975.0
   '@aws-sdk/client-cloudfront': ^3.989.0
   '@aws-sdk/client-cloudwatch-logs': ^3.990.0
+  '@aws-sdk/client-ec2': ^3.1014.0
+  '@aws-sdk/client-ecs': ^3.1014.0
   '@aws-sdk/client-dynamodb': ^3.975.0
   '@aws-sdk/client-iam': ^3.975.0
   '@aws-sdk/client-lambda': ^3.975.0

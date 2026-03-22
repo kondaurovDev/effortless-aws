@@ -154,7 +154,7 @@ const importHandlerModule = async (file: string, projectDir: string): Promise<Re
       entryPoints: [file],
       bundle: true,
       platform: "node",
-      target: "node22",
+      target: "node24",
       write: false,
       format: "esm",
       external: ["@aws-sdk/*", "@smithy/*", ...builtinModules.flatMap(m => [m, `node:${m}`])],
@@ -195,8 +195,9 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
 
     const entryPoint = generateEntryPoint(sourcePath, exportName, type, runtimeDir);
 
-    // AWS SDK v3 + Node.js built-ins are available in the Lambda runtime — never bundle them
-    const awsExternals = ["@aws-sdk/*", "@smithy/*"];
+    // AWS SDK v3 is provided by the Lambda runtime — mark external for Lambda handlers.
+    // Workers run in a plain Node.js container (ECS Fargate), so SDK must be bundled in.
+    const awsExternals = type === "worker" ? [] : ["@aws-sdk/*", "@smithy/*"];
     const nodeExternals = builtinModules.flatMap(m => [m, `node:${m}`]);
     const allExternals = [...new Set([...awsExternals, ...nodeExternals, ...externals])];
 
@@ -211,7 +212,7 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
         },
         bundle: true,
         platform: "node",
-        target: "node22",
+        target: "node24",
         write: false,
         minify: false,
         sourcemap: false,
@@ -295,7 +296,7 @@ export const bundleMiddleware = (input: { projectDir: string; file: string }) =>
         },
         bundle: true,
         platform: "node",
-        target: "node22",
+        target: "node24",
         write: false,
         minify: false,
         sourcemap: false,

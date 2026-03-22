@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "catalog:",
-    "@aws-sdk/client-ecs": "^3.1014.0",
+    "@aws-sdk/client-ecs": "catalog:",
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/client-sesv2": "catalog:",
     "@aws-sdk/client-sqs": "catalog:",
