@@ -1,5 +1,18 @@
 # @effortless-aws/cli
 
+## 0.15.0
+
+### Minor Changes
+
+- [`c1d14c8`](https://github.com/kondaurovDev/effortless-aws/commit/c1d14c8b63c3bb748b68749c9d8f1756db5802fa) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add `defineWorker` handler for long-running ECS Fargate tasks with typed `FargateSize` presets
+
+### Patch Changes
+
+- [`b2d85a7`](https://github.com/kondaurovDev/effortless-aws/commit/b2d85a7735a10ac93ac4b7b0d25dedced06e831e) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Support async onError handlers across all handler types and fix worker logs to use ECS log group path
+
+- Updated dependencies [[`c1d14c8`](https://github.com/kondaurovDev/effortless-aws/commit/c1d14c8b63c3bb748b68749c9d8f1756db5802fa), [`b2d85a7`](https://github.com/kondaurovDev/effortless-aws/commit/b2d85a7735a10ac93ac4b7b0d25dedced06e831e)]:
+  - effortless-aws@0.32.0
+
 ## 0.14.0
 
 ### Minor Changes
