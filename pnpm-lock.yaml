@@ -232,6 +232,12 @@ importers:
         specifier: 'catalog:'
         version: 4.0.18(@types/node@22.19.9)(yaml@2.8.2)
 
+  packages/effortless-runner:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.0.0
+        version: 3.989.0
+
 packages:
 
   '@aws-crypto/crc32@5.2.0':
