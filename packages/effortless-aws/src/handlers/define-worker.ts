@@ -110,7 +110,7 @@ interface WorkerBuilder<
 
   /** Handle errors thrown by onMessage. Return "delete" to discard, "retry" to reprocess (default). */
   onError(
-    fn: (args: { error: unknown; msg: T; retryCount: number } & SpreadCtx<C>) => "retry" | "delete" | void
+    fn: (args: { error: unknown; msg: T; retryCount: number } & SpreadCtx<C>) => "retry" | "delete" | void | Promise<"retry" | "delete" | void>
   ): WorkerBuilder<T, D, P, C, HasFiles>;
 
   /** Cleanup callback — runs when the worker shuts down */

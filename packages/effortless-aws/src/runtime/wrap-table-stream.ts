@@ -106,7 +106,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
       try {
         ({ records, sequenceNumbers } = parseRecords<T>(rawRecords, handler.schema));
       } catch (error) {
-        handleError({ error, ...shared });
+        await handleError({ error, ...shared });
         rt.logError(startTime, input, error);
         return { batchItemFailures: rawRecords.map(r => r.dynamodb?.SequenceNumber).filter((s): s is string => !!s).map(seq => ({ itemIdentifier: seq })) };
       }
@@ -123,7 +123,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
             }
           }
         } catch (error) {
-          handleError({ error, ...shared });
+          await handleError({ error, ...shared });
           for (const record of records) {
             const seq = sequenceNumbers.get(record);
             if (seq) batchItemFailures.push({ itemIdentifier: seq });
@@ -136,7 +136,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
             try {
               await onRecord({ record, batch: frozenBatch, ...shared });
             } catch (error) {
-              handleError({ error, ...shared });
+              await handleError({ error, ...shared });
               const seq = sequenceNumbers.get(record);
               if (seq) batchItemFailures.push({ itemIdentifier: seq });
             }
@@ -151,7 +151,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
               const result = results[j]!;
               const record = chunk[j]!;
               if (result.status === "rejected") {
-                handleError({ error: (result as PromiseRejectedResult).reason, ...shared });
+                await handleError({ error: (result as PromiseRejectedResult).reason, ...shared });
                 const seq = sequenceNumbers.get(record);
                 if (seq) batchItemFailures.push({ itemIdentifier: seq });
               }

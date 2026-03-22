@@ -187,7 +187,7 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
       } catch (error) {
         rt.logError(startTime, logInput, error);
         return handler.onError
-          ? toResult(handler.onError({ error, req, ok, fail, ...ctxProps }))
+          ? toResult(await handler.onError({ error, req, ok, fail, ...ctxProps }))
           : defaultError(error, 500);
       }
     } finally {

@@ -77,7 +77,7 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
             await (handler.onObjectRemoved as any)({ event: bucketEvent, ...shared });
           }
         } catch (error) {
-          handleError({ error, ...shared });
+          await handleError({ error, ...shared });
           errorCount++;
         }
       }

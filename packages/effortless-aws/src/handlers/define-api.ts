@@ -106,7 +106,7 @@ export type ApiConfig = {
 export type ApiHandler<C = undefined> = {
   readonly __brand: "effortless-api";
   readonly __spec: ApiConfig;
-  readonly onError?: (...args: any[]) => any;
+  readonly onError?: (...args: any[]) => any | Promise<any>;
   readonly onCleanup?: (...args: any[]) => any;
   readonly setup?: (...args: any[]) => C | Promise<C>;
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
@@ -181,7 +181,7 @@ interface ApiBuilder<
 
   /** Handle errors thrown by routes */
   onError(
-    fn: (args: { error: unknown; req: HttpRequest; ok: OkHelper; fail: FailHelper } & SpreadCtx<C>) => HttpResponse
+    fn: (args: { error: unknown; req: HttpRequest; ok: OkHelper; fail: FailHelper } & SpreadCtx<C>) => HttpResponse | Promise<HttpResponse>
   ): ApiBuilder<D, P, C, ST, HasFiles>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */

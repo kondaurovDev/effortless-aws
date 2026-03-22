@@ -84,7 +84,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
       try {
         messages = parseMessages<T>(rawRecords, handler.schema);
       } catch (error) {
-        handleError({ error, ...shared });
+        await handleError({ error, ...shared });
         rt.logError(startTime, input, error);
         return {
           batchItemFailures: rawRecords.map(r => ({ itemIdentifier: r.messageId })),
@@ -102,7 +102,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
             }
           }
         } catch (error) {
-          handleError({ error, ...shared });
+          await handleError({ error, ...shared });
           for (const message of messages) {
             batchItemFailures.push({ itemIdentifier: message.messageId });
           }
@@ -113,7 +113,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
           try {
             await onMessage({ message, ...shared });
           } catch (error) {
-            handleError({ error, ...shared });
+            await handleError({ error, ...shared });
             batchItemFailures.push({ itemIdentifier: message.messageId });
           }
         }

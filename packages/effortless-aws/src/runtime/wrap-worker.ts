@@ -98,7 +98,7 @@ export const wrapWorker = <T, C>(handler: WorkerHandler<T, C>) => {
             let action: "retry" | "delete" | void = "retry";
             if (onError) {
               try {
-                action = onError({ error: result.reason, msg: parsed, retryCount, ...ctx });
+                action = await onError({ error: result.reason, msg: parsed, retryCount, ...ctx });
               } catch (e) {
                 console.error("[effortless:worker] onError threw", e);
               }

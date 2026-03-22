@@ -103,28 +103,34 @@ export const logsCommand = Command.make(
         return;
       }
 
-      // Validate handler exists in code
+      // Validate handler exists in code and resolve type
+      let handlerType: string | undefined;
       const patterns = getPatternsFromConfig(config);
       if (patterns) {
         const files = findHandlerFiles(patterns, projectDir);
         const discovered = yield* Effect.promise(() => discoverHandlers(files, projectDir));
 
-        const allHandlerNames = flattenHandlers(discovered).map(h => h.exportName);
+        const allHandlers = flattenHandlers(discovered);
+        const matched = allHandlers.find(h => h.exportName === handlerName);
 
-        if (!allHandlerNames.includes(handlerName)) {
+        if (!matched) {
           yield* Console.error(`Handler "${handlerName}" not found in code.`);
-          if (allHandlerNames.length > 0) {
+          if (allHandlers.length > 0) {
             yield* Console.log("\nAvailable handlers:");
-            for (const name of allHandlerNames) {
-              yield* Console.log(`  ${name}`);
+            for (const h of allHandlers) {
+              yield* Console.log(`  ${h.exportName}`);
             }
           }
           return;
         }
+
+        handlerType = matched.type;
       }
 
-      const functionName = `${project}-${finalStage}-${handlerName}`;
-      const logGroupName = `/aws/lambda/${functionName}`;
+      const resourceName = `${project}-${finalStage}-${handlerName}`;
+      const logGroupName = handlerType === "worker"
+        ? `/ecs/${resourceName}`
+        : `/aws/lambda/${resourceName}`;
 
       const clientsLayer = Aws.makeClients({
         cloudwatch_logs: { region: finalRegion },

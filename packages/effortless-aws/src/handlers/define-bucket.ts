@@ -126,7 +126,7 @@ interface BucketBuilder<
 
   /** Handle errors thrown by callbacks */
   onError(
-    fn: (args: { error: unknown } & SpreadCtx<C>) => void
+    fn: (args: { error: unknown } & SpreadCtx<C>) => void | Promise<void>
   ): BucketBuilder<D, P, C, HasFiles>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */

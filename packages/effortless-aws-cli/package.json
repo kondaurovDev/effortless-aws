@@ -52,7 +52,9 @@
     "ts-morph": "^27.0.2"
   },
   "devDependencies": {
+    "@aws-sdk/client-cloudwatch": "catalog:",
     "@aws-sdk/client-scheduler": "^3.1014.0",
+    "@aws-sdk/client-sns": "catalog:",
     "@effect-ak/aws-sdk": "1.0.0-rc.3",
     "@types/adm-zip": "^0.5.7",
     "@types/archiver": "^7.0.0",

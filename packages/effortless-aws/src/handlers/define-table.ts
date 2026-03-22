@@ -191,7 +191,7 @@ interface TableBuilder<
 
   /** Handle errors thrown by onRecord/onRecordBatch */
   onError(
-    fn: (args: { error: unknown } & SpreadCtx<C>) => void
+    fn: (args: { error: unknown } & SpreadCtx<C>) => void | Promise<void>
   ): TableBuilder<T, D, P, C, HasFiles>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */

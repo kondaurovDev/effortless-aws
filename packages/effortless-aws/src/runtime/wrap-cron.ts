@@ -23,7 +23,7 @@ export const wrapCron = <C>(handler: CronHandler<C>) => {
 
       rt.logExecution(startTime, { trigger: "schedule" }, {});
     } catch (error) {
-      handleError({ error, ...ctxProps });
+      await handleError({ error, ...ctxProps });
       rt.logError(startTime, { trigger: "schedule" }, error);
       throw error;
     } finally {

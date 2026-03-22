@@ -165,7 +165,7 @@ interface FifoQueueBuilder<
 
   /** Handle errors thrown by message handlers */
   onError(
-    fn: (args: { error: unknown } & SpreadCtx<C>) => void
+    fn: (args: { error: unknown } & SpreadCtx<C>) => void | Promise<void>
   ): FifoQueueBuilder<T, D, P, C, HasFiles>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */

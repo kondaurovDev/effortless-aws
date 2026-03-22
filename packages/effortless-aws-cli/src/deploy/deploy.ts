@@ -207,6 +207,7 @@ const QUEUE_CLIENT_PERMISSIONS = [
 
 const WORKER_CLIENT_PERMISSIONS = [
   "sqs:SendMessage",
+  "sqs:GetQueueUrl",
   "ecs:DescribeServices",
   "ecs:UpdateService",
 ] as const;

@@ -132,7 +132,7 @@ interface CronBuilder<
 
   /** Handle errors thrown by onTick */
   onError(
-    fn: (args: { error: unknown } & SpreadCtx<C>) => void
+    fn: (args: { error: unknown } & SpreadCtx<C>) => void | Promise<void>
   ): CronBuilder<D, P, C, HasFiles>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */
