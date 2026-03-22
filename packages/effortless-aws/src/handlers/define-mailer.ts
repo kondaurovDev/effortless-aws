@@ -24,6 +24,8 @@ export type MailerHandler = {
  * On first deploy, DKIM DNS records are printed to the console.
  * Add them to your DNS provider to verify the domain.
  *
+ * @see {@link https://effortless-aws.website/use-cases/email | Email guide}
+ *
  * @param options - Mailer configuration with the domain to send from
  * @returns Handler object used by the deployment system and as a `deps` value
  *

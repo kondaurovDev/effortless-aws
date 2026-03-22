@@ -1,4 +1,4 @@
-import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission } from "./handler-options";
+import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, Duration, ConfigFactory, LambdaOptions } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles, ResponseStream } from "./shared";
@@ -121,18 +121,8 @@ export type ApiHandler<C = undefined> = {
 type ApiOptions = {
   /** Base path prefix for all routes (e.g., "/api") */
   basePath: `/${string}`;
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout (default: 30s). Accepts seconds or duration string: `"30s"`, `"5m"` */
-  timeout?: Duration;
-  /** Additional IAM permissions for the Lambda */
-  permissions?: Permission[];
-  /** Logging verbosity: "error" (errors only), "info" (+ execution summary), "debug" (+ input/output). Default: "info" */
-  logLevel?: LogLevel;
   /** Enable response streaming. When true, routes receive a `stream` arg for SSE. */
   stream?: boolean;
-  /** Static file glob patterns to bundle into the Lambda ZIP */
-  static?: string[];
 };
 
 // ============ ApiRoutes — returned after first route method ============
@@ -174,9 +164,19 @@ interface ApiBuilder<
     fn: ConfigFactory<P2>
   ): ApiBuilder<D, P2, C, ST, HasFiles>;
 
+  /** Include static files by glob pattern */
+  include(glob: string): ApiBuilder<D, P, C, ST, true>;
+
+  /** Configure Lambda settings only (no init function) */
+  setup(lambda: LambdaOptions): ApiBuilder<D, P, C, ST, HasFiles>;
   /** Initialize shared state on cold start. Receives deps/config/files based on what was declared. */
   setup<C2>(
     fn: (args: SetupArgs<D, P, HasFiles>) => ValidateSetupReturn<C2> | Promise<ValidateSetupReturn<C2>>
+  ): ApiBuilder<D, P, C2, ST, HasFiles>;
+  /** Initialize shared state on cold start with Lambda config. */
+  setup<C2>(
+    fn: (args: SetupArgs<D, P, HasFiles>) => ValidateSetupReturn<C2> | Promise<ValidateSetupReturn<C2>>,
+    lambda: LambdaOptions,
   ): ApiBuilder<D, P, C2, ST, HasFiles>;
 
   /** Handle errors thrown by routes */
@@ -206,13 +206,10 @@ interface ApiBuilder<
 /**
  * Define an API with typed routes using a builder pattern.
  *
+ * @see {@link https://effortless-aws.website/use-cases/http-api | HTTP API guide}
+ *
  * @example
  * ```typescript
- * // Minimal
- * export default defineApi({ basePath: "/hello" })
- *   .get("/", async ({ req, ok }) => ok({ message: "Hello!" }))
- *
- * // Full
  * export const api = defineApi({ basePath: "/api", timeout: "30s" })
  *   .deps(() => ({ users }))
  *   .config(({ defineSecret }) => ({ dbUrl: defineSecret() }))
@@ -225,15 +222,13 @@ interface ApiBuilder<
  *   .post("/login", async ({ auth, ok }) => ok(await auth.createSession()), { public: true })
  * ```
  */
-export function defineApi(options: ApiOptions & { static: string[] }): ApiBuilder<undefined, undefined, undefined, false, true>;
 export function defineApi<const O extends ApiOptions>(
   options: O,
-): ApiBuilder<undefined, undefined, undefined, O["stream"] extends true ? true : false, O["static"] extends string[] ? true : false>;
+): ApiBuilder<undefined, undefined, undefined, O["stream"] extends true ? true : false, false>;
 export function defineApi(
   options: ApiOptions,
 ): ApiBuilder {
-  const { basePath, stream, static: staticFiles, ...lambdaConfig } = options;
-  const hasLambda = Object.keys(lambdaConfig).length > 0;
+  const { basePath, stream } = options;
 
   const state: {
     spec: ApiConfig;
@@ -247,10 +242,8 @@ export function defineApi(
   } = {
     spec: {
       basePath,
-      ...(hasLambda ? { lambda: lambdaConfig } : {}),
       ...(stream ? { stream } : {}),
     },
-    ...(staticFiles ? { static: staticFiles } : {}),
     routes: [],
   };
 
@@ -261,6 +254,12 @@ export function defineApi(
       onRequest: handler as any,
       ...(opts?.public ? { public: true } : {}),
     });
+  };
+
+  const applyLambdaOptions = (lambda: LambdaOptions) => {
+    if (Object.keys(lambda).length > 0) {
+      state.spec = { ...state.spec, lambda: { ...state.spec.lambda, ...lambda } };
+    }
   };
 
   const finalize = (): ApiRoutes => {
@@ -297,8 +296,17 @@ export function defineApi(
       state.config = resolveConfigFactory(fn) as any;
       return builder as any;
     },
-    setup(fn) {
-      state.setup = fn as any;
+    include(glob: string) {
+      state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {
+      if (typeof fnOrLambda === "function") {
+        state.setup = fnOrLambda;
+        if (maybeLambda) applyLambdaOptions(maybeLambda);
+      } else {
+        applyLambdaOptions(fnOrLambda);
+      }
       return builder as any;
     },
     onError(fn) {

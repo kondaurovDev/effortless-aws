@@ -42,18 +42,10 @@ export type AppHandler = {
  *
  * For static-only sites (no SSR), use {@link defineStaticSite} instead.
  *
+ * @see {@link https://effortless-aws.website/use-cases/web-app | Web app guide}
+ *
  * @param options - App configuration: server directory, assets directory, optional build command
  * @returns Handler object used by the deployment system
- *
- * @example Nuxt SSR
- * ```typescript
- * export const app = defineApp({
- *   build: "nuxt build",
- *   server: ".output/server",
- *   assets: ".output/public",
- *   lambda: { memory: 1024 },
- * });
- * ```
  */
 export const defineApp = () => (options: AppConfig): AppHandler => ({
   __brand: "effortless-app",

@@ -132,7 +132,7 @@ const staticFiles = {
 
 export const createHandlerRuntime = (
   handler: { setup?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[] },
-  handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket" | "api",
+  handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket" | "api" | "cron",
   logLevel: LogLevel = "info",
   extraSetupArgs?: () => Record<string, unknown>
 ): HandlerRuntime => {

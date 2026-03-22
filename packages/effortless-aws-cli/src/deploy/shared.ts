@@ -14,6 +14,21 @@ import {
 } from "../aws";
 import { bundle, zip, resolveStaticFiles, type BundleInput } from "~/build/bundle";
 
+// ============ Deferred warnings ============
+
+let _deferredWarnings: string[] = [];
+
+/** Collect a warning to be shown after the progress spinner finishes. */
+export const deferWarning = (message: string) =>
+  Effect.sync(() => { _deferredWarnings.push(message); });
+
+/** Flush and return all deferred warnings, resetting the buffer. */
+export const flushDeferredWarnings = (): string[] => {
+  const warnings = _deferredWarnings;
+  _deferredWarnings = [];
+  return warnings;
+};
+
 // ============ Common types ============
 
 export type DeployResult = {
@@ -98,7 +113,7 @@ export const ensureLayerAndExternal = (input: {
       : { packages: [] as string[], warnings: [] as string[] };
 
     for (const warning of layerWarnings) {
-      yield* Effect.logWarning(`[layer] ${warning}`);
+      yield* deferWarning(`[layer] ${warning}`);
     }
 
     return {
@@ -117,7 +132,7 @@ export type DeployCoreLambdaInput = {
   defaultPermissions?: readonly string[];
   memory?: number;
   timeout?: number;
-  bundleType?: "table" | "app" | "fifoQueue" | "bucket" | "api";
+  bundleType?: "table" | "app" | "fifoQueue" | "bucket" | "api" | "cron";
   layerArn?: string;
   external?: string[];
   /** Environment variables to set on the Lambda (e.g., for deps) */
@@ -180,7 +195,7 @@ export const deployCoreLambda = ({
     if (staticGlobs && staticGlobs.length > 0) {
       const resolved = resolveStaticFiles(staticGlobs, input.projectDir);
       if (resolved.missing.length > 0) {
-        yield* Effect.logWarning(`Static files not found for "${handlerName}": ${resolved.missing.join(", ")}`);
+        yield* deferWarning(`Static files not found for "${handlerName}": ${resolved.missing.join(", ")}`);
       }
       staticFiles = resolved.files.length > 0 ? resolved.files : undefined;
     }
@@ -190,7 +205,7 @@ export const deployCoreLambda = ({
     if (bundleResult.topModules && bundleSize > 500 * 1024) {
       const top = bundleResult.topModules.slice(0, 10);
       const lines = top.map(m => `  ${formatBytes(m.bytes).padStart(8)}  ${m.path}`).join("\n");
-      yield* Effect.logWarning(`Bundle "${handlerName}" is ${formatBytes(bundleSize)} — top modules:\n${lines}`);
+      yield* deferWarning(`Bundle "${handlerName}" is ${formatBytes(bundleSize)} — top modules:\n${lines}`);
     }
 
     const code = yield* zip({ content: bundleResult.code, staticFiles });

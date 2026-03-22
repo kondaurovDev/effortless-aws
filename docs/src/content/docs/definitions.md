@@ -1,6 +1,6 @@
 ---
 title: Definitions
-description: All definition types — defineApi, defineTable, defineApp, defineStaticSite, defineFifoQueue, defineBucket, defineSchedule, defineEvent.
+description: All handler definition types available in Effortless.
 ---
 
 ## Overview
@@ -9,17 +9,16 @@ Every resource in Effortless is created with a `define*` function. Each call dec
 
 Some definitions include a Lambda handler (a callback like `onRecord`, `onMessage`, or route handlers). Others are **resource-only** — they create AWS resources without any code attached:
 
-| Definition | Creates | Handler required? |
-|---|---|---|
-| [defineApi](#defineapi) | Lambda Function URL (single Lambda, multiple routes) | Optional (`get`/`post`/etc.) |
-| [defineTable](#definetable) | DynamoDB table + optional stream Lambda | No — table-only when no `onRecord`/`onRecordBatch` |
-| [defineApp](#defineapp) | CloudFront + Lambda Function URL serving SSR | No (built-in file server) |
-| [defineStaticSite](#definestaticsite) | S3 + CloudFront + optional Lambda@Edge | No (optional `middleware`) |
-| [defineFifoQueue](#definefifoqueue) | SQS FIFO + Lambda | Yes (`onMessage`/`onMessageBatch`) |
-| [defineSchedule](#defineschedule) | EventBridge + Lambda | Yes — Planned |
-| [defineEvent](#defineevent) | EventBridge + Lambda | Yes — Planned |
-| [defineBucket](#definebucket) | S3 bucket + optional event Lambda | No — resource-only when no `onObjectCreated`/`onObjectRemoved` |
-| [defineMailer](#definemailer) | SES email identity | No — resource-only, used via `deps` |
+| Definition | Description |
+|---|---|
+| [defineApi](#defineapi) | HTTP API with routes |
+| [defineTable](#definetable) | DynamoDB table with optional stream processing |
+| [defineApp](#defineapp) | SSR app with CloudFront |
+| [defineStaticSite](#definestaticsite) | Static site with CloudFront |
+| [defineFifoQueue](#definefifoqueue) | SQS FIFO queue with message processing |
+| [defineCron](#definecron) | Scheduled Lambda (cron / rate) |
+| [defineBucket](#definebucket) | S3 bucket with optional event handlers |
+| [defineMailer](#definemailer) | SES email identity for sending emails |
 
 Resource-only definitions are useful when you need the infrastructure but handle it from elsewhere. For example, a `defineTable` without stream callbacks creates a DynamoDB table, a `defineBucket` without event callbacks creates an S3 bucket, and a `defineMailer` creates an SES email identity — all referenceable via `deps`:
 
@@ -1055,59 +1054,97 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 
 ---
 
-## defineSchedule
+## defineCron
 
-> **Status: Planned** — not yet implemented.
-
-Creates: EventBridge Rule + Lambda + IAM permissions
+Creates: EventBridge Scheduler + Lambda + IAM permissions
 
 ```typescript
-export const daily = defineSchedule({
-  // Required
-  schedule: string,  // "rate(1 hour)" or "cron(0 12 * * ? *)"
-
-  // Optional
-  memory?: number,
-  timeout?: DurationInput,
-  enabled?: boolean,  // default true
-
-  handler: async (ctx: ScheduleContext) => {
-    // ctx.scheduledTime, ctx.ruleName available
-  }
-});
+export const cleanup = defineCron({ schedule: "rate(2 hours)" })
+  .onTick(async () => {
+    console.log("running cleanup");
+  });
 ```
 
-**Planned best practices**:
-- **Auto-infrastructure** — EventBridge rule, Lambda, and IAM permissions are created on deploy. Toggle `enabled` to pause the schedule without deleting resources.
+### Options
 
----
+| Option | Type | Description |
+|--------|------|-------------|
+| `schedule` | `ScheduleExpression` | **Required.** `"rate(5 minutes)"`, `"rate(1 hour)"`, `"cron(0 9 * * ? *)"` |
+| `timezone` | `Timezone` | IANA timezone (default: UTC). Full autocomplete for 418 zones. |
 
-## defineEvent
+### Builder chain
 
-> **Status: Planned** — not yet implemented.
+| Method | Description |
+|--------|-------------|
+| `.deps(() => ({ ... }))` | Declare dependencies (tables, queues, buckets, mailers) |
+| `.config(({ defineSecret }) => ({ ... }))` | Declare SSM secrets |
+| `.include("glob")` | Include static files in Lambda bundle. Chainable. |
+| `.setup({ memory, timeout, ... })` | Configure Lambda settings only |
+| `.setup(async ({ deps, config, files }) => ({ ... }))` | Cold-start init |
+| `.setup(fn, { memory, timeout, ... })` | Cold-start init + Lambda settings |
+| `.onError(({ error }) => { ... })` | Error handler for onTick failures |
+| `.onCleanup(async () => { ... })` | Runs after each invocation |
+| `.onTick(async (ctx) => { ... })` | **Terminal.** Called on each scheduled invocation |
 
-Creates: EventBridge Rule + Lambda for custom events
+### Full example
 
 ```typescript
-export const orderCreated = defineEvent({
-  // Required
-  eventPattern: {
-    source: ["my.app"],
-    "detail-type": ["OrderCreated"],
-  },
+import { defineCron } from "effortless-aws";
+import { orders } from "./orders.js";
 
-  // Optional
-  eventSchema?: (input: unknown) => T,
-
-  handler: async (event: T, ctx: EventContext) => {
-    // typed event
-  }
-});
+export const sync = defineCron({
+  schedule: "cron(0 18 ? * MON-FRI *)",
+  timezone: "Europe/Moscow",
+})
+  .deps(() => ({ orders }))
+  .config(({ defineSecret }) => ({ apiKey: defineSecret() }))
+  .include("templates/*.html")
+  .setup(async ({ deps, config, files }) => ({
+    db: deps.orders,
+    key: config.apiKey,
+    tpl: files,
+  }), { memory: 512, timeout: "5m" })
+  .onError(({ error }) => console.error("sync failed", error))
+  .onTick(async ({ db, key, tpl }) => {
+    const html = tpl.read("templates/report.html");
+    const expired = await db.scan();
+    // process expired orders...
+  });
 ```
 
-**Planned best practices**:
-- **Typed events** — when `eventSchema` is set, the event detail is parsed and validated before your handler runs.
-- **Auto-infrastructure** — EventBridge rule with pattern matching, Lambda, and IAM permissions are created on deploy.
+### Schedule expressions
+
+**Rate** — run at fixed intervals (strictly typed units):
+```
+"rate(5 minutes)"
+"rate(1 hour)"
+"rate(1 day)"
+```
+
+**Cron** — run at specific times (6 fields: min hour dom month dow year):
+```
+"cron(0 9 * * ? *)"          // daily at 9:00 UTC
+"cron(0 9 ? * MON-FRI *)"    // weekdays at 9:00
+"cron(0/15 * * * ? *)"       // every 15 minutes
+```
+
+### Timezone
+
+Pass any IANA timezone — EventBridge Scheduler handles DST transitions automatically:
+
+```typescript
+defineCron({
+  schedule: "cron(0 9 * * ? *)",
+  timezone: "America/New_York",  // 9:00 EST in winter, 9:00 EDT in summer
+})
+```
+
+**Built-in best practices**:
+- **Auto-infrastructure** — EventBridge Scheduler, Lambda, and IAM permissions are all created on deploy from this single definition.
+- **Typed rate expressions** — `rate()` units (`minute`, `hours`, `day`, etc.) are validated at compile time.
+- **418 IANA timezones** — full autocomplete, DST-aware. Generated from `Intl.supportedValuesOf("timeZone")`.
+- **Cold start optimization** — `setup` runs once and is cached across invocations.
+- **Same builder pattern** — `.deps()`, `.config()`, `.include()`, `.setup()` work identically across all handler types.
 
 ---
 

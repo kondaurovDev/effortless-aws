@@ -1,4 +1,4 @@
-import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission } from "./handler-options";
+import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission, LambdaOptions } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { TableClient } from "../runtime/table-client";
@@ -131,16 +131,8 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
 
 // ============ Builder options ============
 
-/** Options passed to `defineTable()` — static config, no generics needed for inference */
+/** Options passed to `defineTable()` — resource config only, no Lambda settings */
 type TableOptions<T> = {
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout (default: 30s). Accepts seconds or duration string: `"30s"`, `"5m"` */
-  timeout?: Duration;
-  /** Additional IAM permissions for the Lambda */
-  permissions?: Permission[];
-  /** Logging verbosity */
-  logLevel?: LogLevel;
   /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
   /** Stream view type (default: "NEW_AND_OLD_IMAGES") */
@@ -157,8 +149,6 @@ type TableOptions<T> = {
   tagField?: Extract<keyof T, string>;
   /** Decode/validate function for the `data` portion of stream records */
   schema?: (input: unknown) => T;
-  /** Static file glob patterns to bundle into the Lambda ZIP */
-  static?: string[];
 };
 
 // ============ Builder ============
@@ -180,9 +170,23 @@ interface TableBuilder<
     fn: ConfigFactory<P2>
   ): TableBuilder<T, D, P2, C, HasFiles>;
 
+  /** Include static files in the Lambda bundle. Chainable — call multiple times. */
+  include(glob: string): TableBuilder<T, D, P, C, true>;
+
+  /** Configure Lambda settings only (memory, timeout, permissions, etc.) */
+  setup(
+    lambda: LambdaOptions
+  ): TableBuilder<T, D, P, C, HasFiles>;
+
   /** Initialize shared state on cold start. Receives table (self-client), deps, config, files. */
   setup<C2>(
     fn: (args: SetupArgs<T, D, P, HasFiles>) => C2 | Promise<C2>
+  ): TableBuilder<T, D, P, C2, HasFiles>;
+
+  /** Initialize shared state on cold start + configure Lambda settings. */
+  setup<C2>(
+    fn: (args: SetupArgs<T, D, P, HasFiles>) => C2 | Promise<C2>,
+    lambda: LambdaOptions
   ): TableBuilder<T, D, P, C2, HasFiles>;
 
   /** Handle errors thrown by onRecord/onRecordBatch */
@@ -217,7 +221,9 @@ interface TableBuilder<
  * Creates a table with fixed key schema: `pk (S)` + `sk (S)`, plus `tag (S)`,
  * `data (M)`, and `ttl (N)` attributes. TTL is always enabled.
  *
- * @example Table with stream handler
+ * @see {@link https://effortless-aws.website/use-cases/database | Database guide}
+ *
+ * @example
  * ```typescript
  * export const orders = defineTable<OrderData>({ batchSize: 10, concurrency: 5 })
  *   .setup(({ table }) => ({ table }))
@@ -227,21 +233,8 @@ interface TableBuilder<
  *     }
  *   })
  * ```
- *
- * @example Table only (no Lambda)
- * ```typescript
- * export const users = defineTable<User>().build()
- * ```
- *
- * @example Table as dependency (resource-only, no Lambda)
- * ```typescript
- * export const sessions = defineTable<Session>().build()
- * ```
  */
 export function defineTable<T = Record<string, unknown>>(): TableBuilder<T>;
-export function defineTable<T = Record<string, unknown>>(
-  options: TableOptions<T> & { static: string[] },
-): TableBuilder<T, undefined, undefined, undefined, true>;
 export function defineTable<T = Record<string, unknown>>(
   options: TableOptions<T>,
 ): TableBuilder<T>;
@@ -249,16 +242,11 @@ export function defineTable<T = Record<string, unknown>>(
   options?: TableOptions<T>,
 ): TableBuilder<T> {
   const {
-    memory, timeout, permissions, logLevel,
-    schema, static: staticFiles,
+    schema,
     ...tableConfig
   } = options ?? {} as TableOptions<T>;
 
-  const hasLambda = memory != null || timeout != null || permissions != null || logLevel != null;
-  const spec: TableConfig = {
-    ...tableConfig,
-    ...(hasLambda ? { lambda: { ...(memory != null ? { memory } : {}), ...(timeout != null ? { timeout } : {}), ...(permissions ? { permissions } : {}), ...(logLevel ? { logLevel } : {}) } } : {}),
-  };
+  const spec: TableConfig = { ...tableConfig };
 
   const state: {
     spec: TableConfig;
@@ -274,7 +262,12 @@ export function defineTable<T = Record<string, unknown>>(
   } = {
     spec,
     ...(schema ? { schema } : {}),
-    ...(staticFiles ? { static: staticFiles } : {}),
+  };
+
+  const applyLambdaOptions = (lambda: LambdaOptions) => {
+    if (Object.keys(lambda).length > 0) {
+      state.spec = { ...state.spec, lambda: { ...state.spec.lambda, ...lambda } };
+    }
   };
 
   const finalize = (): TableHandler<T> => ({
@@ -300,8 +293,17 @@ export function defineTable<T = Record<string, unknown>>(
       state.config = resolveConfigFactory(fn) as any;
       return builder as any;
     },
-    setup(fn) {
-      state.setup = fn as any;
+    include(glob) {
+      state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {
+      if (typeof fnOrLambda === "function") {
+        state.setup = fnOrLambda;
+        if (maybeLambda) applyLambdaOptions(maybeLambda);
+      } else {
+        applyLambdaOptions(fnOrLambda);
+      }
       return builder as any;
     },
     onRecord(fn) {

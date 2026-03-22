@@ -67,7 +67,7 @@ export const deployCommand = Command.make(
               extraNodeModules: projectDir !== cwd ? [path.join(projectDir, "node_modules")] : undefined,
             });
 
-            const total = results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length;
+            const total = results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length + results.cronResults.length;
             yield* Console.log(`\n${c.green(`Deployed ${total} handler(s):`)}`);
 
             const summaryLines: { name: string; line: string }[] = [];
@@ -79,6 +79,10 @@ export const deployCommand = Command.make(
             }
             for (const r of results.apiResults) {
               summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[api]")}   ${c.bold(r.exportName)}  ${c.dim(r.url)}` });
+            }
+            for (const r of results.cronResults) {
+              const tz = r.timezone ? ` ${c.dim(r.timezone)}` : "";
+              summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[cron]")}  ${c.bold(r.exportName)}  ${c.dim(r.schedule)}${tz}` });
             }
             for (const r of results.staticSiteResults) {
               let line = `  ${c.cyan("[site]")}  ${c.bold(r.exportName)}: ${c.cyan(r.url)}`;

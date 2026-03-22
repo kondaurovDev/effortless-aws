@@ -1,4 +1,4 @@
-import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission } from "./handler-options";
+import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission, LambdaOptions } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
@@ -107,14 +107,6 @@ export type FifoQueueHandler<T = unknown, C = any> = {
 
 /** Options passed to `defineFifoQueue()` — static config */
 type FifoQueueOptions<T> = {
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout (default: 30s) */
-  timeout?: Duration;
-  /** Additional IAM permissions for the Lambda */
-  permissions?: Permission[];
-  /** Logging verbosity */
-  logLevel?: LogLevel;
   /** Number of messages per Lambda invocation (1-10 for FIFO, default: 10) */
   batchSize?: number;
   /** Maximum time to gather messages before invoking (default: 0) */
@@ -131,8 +123,6 @@ type FifoQueueOptions<T> = {
   maxReceiveCount?: number;
   /** Decode/validate function for the message body */
   schema?: (input: unknown) => T;
-  /** Static file glob patterns to bundle into the Lambda ZIP */
-  static?: string[];
 };
 
 // ============ Builder ============
@@ -154,9 +144,23 @@ interface FifoQueueBuilder<
     fn: ConfigFactory<P2>
   ): FifoQueueBuilder<T, D, P2, C, HasFiles>;
 
+  /** Include static files in the Lambda bundle. Chainable — call multiple times. */
+  include(glob: string): FifoQueueBuilder<T, D, P, C, true>;
+
+  /** Configure Lambda settings only (memory, timeout, permissions, etc.) */
+  setup(
+    lambda: LambdaOptions
+  ): FifoQueueBuilder<T, D, P, C, HasFiles>;
+
   /** Initialize shared state on cold start. Receives deps, config, files. */
   setup<C2>(
     fn: (args: SetupArgs<D, P, HasFiles>) => C2 | Promise<C2>
+  ): FifoQueueBuilder<T, D, P, C2, HasFiles>;
+
+  /** Initialize shared state on cold start + configure Lambda settings. */
+  setup<C2>(
+    fn: (args: SetupArgs<D, P, HasFiles>) => C2 | Promise<C2>,
+    lambda: LambdaOptions
   ): FifoQueueBuilder<T, D, P, C2, HasFiles>;
 
   /** Handle errors thrown by message handlers */
@@ -185,28 +189,17 @@ interface FifoQueueBuilder<
 /**
  * Define a FIFO SQS queue with a Lambda message handler.
  *
- * @example Per-message processing
- * ```typescript
- * export const orderQueue = defineFifoQueue<OrderEvent>()
- *   .onMessage(async ({ message }) => {
- *     console.log("Processing order:", message.body.orderId);
- *   })
+ * @see {@link https://effortless-aws.website/use-cases/queue | Queue guide}
  *
- * ```
- *
- * @example Batch processing with schema
+ * @example
  * ```typescript
  * export const notifications = defineFifoQueue({ batchSize: 5, schema: (i) => NotifSchema.parse(i) })
  *   .onMessageBatch(async ({ messages }) => {
  *     await sendAll(messages.map(m => m.body));
  *   })
- *
  * ```
  */
 export function defineFifoQueue<T = unknown>(): FifoQueueBuilder<T>;
-export function defineFifoQueue<T = unknown>(
-  options: FifoQueueOptions<T> & { static: string[] },
-): FifoQueueBuilder<T, undefined, undefined, undefined, true>;
 export function defineFifoQueue<T = unknown>(
   options: FifoQueueOptions<T>,
 ): FifoQueueBuilder<T>;
@@ -214,16 +207,11 @@ export function defineFifoQueue<T = unknown>(
   options?: FifoQueueOptions<T>,
 ): FifoQueueBuilder<T> {
   const {
-    memory, timeout, permissions, logLevel,
-    schema, static: staticFiles,
+    schema,
     ...queueConfig
   } = options ?? {} as FifoQueueOptions<T>;
 
-  const hasLambda = memory != null || timeout != null || permissions != null || logLevel != null;
-  const spec: FifoQueueConfig = {
-    ...queueConfig,
-    ...(hasLambda ? { lambda: { ...(memory != null ? { memory } : {}), ...(timeout != null ? { timeout } : {}), ...(permissions ? { permissions } : {}), ...(logLevel ? { logLevel } : {}) } } : {}),
-  };
+  const spec: FifoQueueConfig = { ...queueConfig };
 
   const state: {
     spec: FifoQueueConfig;
@@ -239,7 +227,12 @@ export function defineFifoQueue<T = unknown>(
   } = {
     spec,
     ...(schema ? { schema } : {}),
-    ...(staticFiles ? { static: staticFiles } : {}),
+  };
+
+  const applyLambdaOptions = (lambda: LambdaOptions) => {
+    if (Object.keys(lambda).length > 0) {
+      state.spec = { ...state.spec, lambda: { ...state.spec.lambda, ...lambda } };
+    }
   };
 
   const finalize = (): FifoQueueHandler<T> => ({
@@ -265,8 +258,17 @@ export function defineFifoQueue<T = unknown>(
       state.config = resolveConfigFactory(fn) as any;
       return builder as any;
     },
-    setup(fn) {
-      state.setup = fn as any;
+    include(glob: string) {
+      state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {
+      if (typeof fnOrLambda === "function") {
+        state.setup = fnOrLambda;
+        if (maybeLambda) applyLambdaOptions(maybeLambda);
+      } else {
+        applyLambdaOptions(fnOrLambda);
+      }
       return builder as any;
     },
     onMessage(fn) {

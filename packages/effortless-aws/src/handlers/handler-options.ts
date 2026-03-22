@@ -1,5 +1,5 @@
 // Public helpers — this file must have ZERO heavy imports (no effect, no AWS SDK, no deploy code).
-// It is the source of truth for param(), unsafeAs(), and related types used by the public API.
+// It is the source of truth for param() and related types used by the public API.
 
 // ============ Generate spec ============
 
@@ -77,6 +77,23 @@ export type LambdaConfig = {
 export type LambdaWithPermissions = LambdaConfig & {
   /** Additional IAM permissions for the Lambda */
   permissions?: Permission[];
+};
+
+// ============ Lambda options (for .setup()) ============
+
+/**
+ * Lambda configuration passed as argument to `.setup()`.
+ * Common across all handler types that create a Lambda function.
+ */
+export type LambdaOptions = {
+  /** Lambda memory in MB (default: 256) */
+  memory?: number;
+  /** Lambda timeout (default: 30s). Accepts seconds or duration string: `"30s"`, `"5m"` */
+  timeout?: Duration;
+  /** Additional IAM permissions for the Lambda */
+  permissions?: Permission[];
+  /** Logging verbosity: "error" (errors only), "info" (+ execution summary), "debug" (+ input/output). Default: "info" */
+  logLevel?: LogLevel;
 };
 
 // ============ Secrets (SSM Parameters) ============
@@ -218,21 +235,3 @@ export type PutInput<T> = {
   ttl?: number;
 };
 
-/**
- * Create a schema function that casts input to T without runtime validation.
- * Use when you need T inference alongside other generics (deps, config).
- * For handlers without deps/config, prefer `defineTable<Order>({...})`.
- * For untrusted input, prefer a real parser (Zod, Effect Schema).
- *
- * @example
- * ```typescript
- * export const orders = defineTable({
- *   schema: unsafeAs<Order>(),
- *   deps: () => ({ notifications }),
- *   onRecord: async ({ record, deps }) => { ... }
- * });
- * ```
- */
-export function unsafeAs<T>(): (input: unknown) => T {
-  return (input: unknown) => input as T;
-}

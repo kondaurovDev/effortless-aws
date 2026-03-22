@@ -1,17 +1,7 @@
 /**
  * Configuration for an Effortless project.
  *
- * @example
- * ```typescript
- * // effortless.config.ts
- * import { defineConfig } from "effortless-aws";
- *
- * export default defineConfig({
- *   name: "my-service",
- *   region: "eu-central-1",
- *   handlers: "src",
- * });
- * ```
+ * @see {@link https://effortless-aws.website/configuration | Configuration guide}
  */
 export type EffortlessConfig = {
   /**
@@ -87,19 +77,5 @@ export type EffortlessConfig = {
 
 };
 
-/**
- * Helper function for type-safe configuration.
- * Returns the config object as-is, but provides TypeScript autocompletion.
- *
- * @example
- * ```typescript
- * import { defineConfig } from "effortless-aws";
- *
- * export default defineConfig({
- *   name: "my-service",
- *   region: "eu-central-1",
- *   handlers: "src",
- * });
- * ```
- */
+/** Helper function for type-safe configuration with TypeScript autocompletion. */
 export const defineConfig = (config: EffortlessConfig): EffortlessConfig => config;

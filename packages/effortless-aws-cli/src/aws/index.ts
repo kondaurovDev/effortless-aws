@@ -3,7 +3,7 @@ export { ensureLambda, deleteLambda, publishVersion, ensureEdgePermission, ensur
 export type { LambdaConfig, LambdaStatus } from "./lambda";
 
 // IAM
-export { ensureRole, ensureEdgeRole, deleteRole, listEffortlessRoles } from "./iam";
+export { ensureRole, ensureEdgeRole, ensureSchedulerRole, deleteRole, listEffortlessRoles } from "./iam";
 export type { EffortlessRole } from "./iam";
 
 // DynamoDB
@@ -33,6 +33,10 @@ export type { EnsureOACInput, EnsureDistributionInput, EnsureSsrDistributionInpu
 // SQS
 export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue } from "./sqs";
 export type { EnsureFifoQueueInput, EnsureFifoQueueResult, EnsureSqsEventSourceMappingInput } from "./sqs";
+
+// Scheduler
+export { ensureSchedule } from "./scheduler";
+export type { EnsureScheduleInput, EnsureScheduleResult } from "./scheduler";
 
 // SES
 export { ensureSesIdentity, deleteSesIdentity } from "./ses";

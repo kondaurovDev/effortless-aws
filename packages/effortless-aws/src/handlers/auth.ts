@@ -35,6 +35,8 @@ export type AuthOptions<_T = unknown> = {
  * Create typed auth options for `defineApi`.
  * The generic `T` types `createSession(data)` and `auth.session` in handler args.
  *
+ * @see {@link https://effortless-aws.website/use-cases/authentication | Authentication guide}
+ *
  * @example
  * ```typescript
  * type Session = { userId: string; role: string };

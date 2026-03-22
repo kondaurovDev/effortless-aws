@@ -34,8 +34,8 @@ describe("defineTable", () => {
         export const orders = defineTable({
           streamView: "NEW_AND_OLD_IMAGES",
           batchSize: 50,
-          memory: 512,
         })
+          .setup({ memory: 512 })
           .onRecord(async ({ record }) => {
             console.log(record);
           });

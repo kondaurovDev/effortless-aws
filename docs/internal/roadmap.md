@@ -35,26 +35,43 @@ Why this is low priority:
 
 ## Cron Jobs (`defineCron`)
 
-**Priority: high**
-**Inspiration: Encore `new CronJob()`**
+**Status: ✅ Implemented**
+**Inspiration: Encore `new CronJob()`, Firebase `onSchedule`, SST `new Cron`**
 
-Scheduled Lambda invocations via EventBridge Scheduler.
+Scheduled Lambda invocations via EventBridge Scheduler. Builder pattern consistent with `defineTable` / `defineApi`.
 
 ```typescript
-export const cleanup = defineCron({
-  schedule: "rate(2 hours)",   // or cron expression
-  handler: async ({ deps }) => {
-    await deps.orders.scan()   // cleanup expired orders
-  },
-  deps: () => ({ orders }),
-})
+// Minimal
+export const cleanup = defineCron({ schedule: "rate(2 hours)" })
+  .onTick(async () => {
+    console.log("running cleanup")
+  })
+
+// Full — deps, config, setup
+export const sync = defineCron({ schedule: "cron(0 9 * * ? *)" })
+  .deps(() => ({ orders }))
+  .config(({ defineSecret }) => ({ apiKey: defineSecret() }))
+  .setup(async ({ deps, config }) => ({ db: deps.orders, key: config.apiKey }))
+  .onError(({ error }) => console.error("sync failed", error))
+  .onCleanup(async () => { /* release resources */ })
+  .onTick(async ({ db, key }) => {
+    await db.scan()   // cleanup expired orders
+  })
 ```
 
+AWS resources:
+- EventBridge Scheduler rule (schedule expression)
+- Lambda function (target)
+- IAM role for Scheduler → Lambda invoke
+- Standard Lambda execution role with permissions for deps
+
 Implementation:
-- EventBridge Scheduler rule → Lambda invoke
+- Builder: `deps` → `config` → `setup` → `onError` → `onCleanup` → `onTick` (terminal)
+- AST extraction for `schedule` expression (static string)
+- Deploy: create/update EventBridge Scheduler + Lambda target
 - Same deps/config/setup/files injection as other handlers
-- AST extraction for schedule expression
-- Deploy: create/update EventBridge rule + Lambda target
+- `onTick` is the terminal method (like `onRecord` for tables)
+- No `build()` — cron without a handler is meaningless
 
 Minimal effort, high value — nearly every app needs scheduled tasks.
 

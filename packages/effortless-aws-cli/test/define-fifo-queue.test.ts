@@ -108,7 +108,8 @@ describe("extractFifoQueueConfigs", () => {
   it("extracts static globs", async () => {
     const source = `
       import { defineFifoQueue } from "effortless-aws";
-      export const q = defineFifoQueue({ static: ["src/templates/*.ejs"] })
+      export const q = defineFifoQueue()
+        .include("src/templates/*.ejs")
         .onMessage(async ({ message }) => {})
 ;
     `;

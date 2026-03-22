@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { Architecture, Runtime } from "@aws-sdk/client-lambda";
+import { deferWarning } from "~/deploy/shared";
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as fsSync from "fs";
@@ -653,7 +654,7 @@ export const ensureLayer = (config: LayerConfig) =>
       Effect.catchAll(() => Effect.succeed([] as string[]))
     );
     for (const w of depWarnings) {
-      yield* Effect.logWarning(`[layer] ${w}`);
+      yield* deferWarning(`[layer] ${w}`);
     }
 
     const dependencies = yield* readProductionDependencies(config.projectDir).pipe(
@@ -668,7 +669,7 @@ export const ensureLayer = (config: LayerConfig) =>
     const hash = yield* computeLockfileHash(config.projectDir, config.extraNodeModules).pipe(
       Effect.catchAll((e) => {
         const message = e instanceof Error ? e.message : String(e);
-        return Effect.logWarning(`Cannot compute lockfile hash: ${message}, skipping layer`).pipe(
+        return deferWarning(`Cannot compute lockfile hash: ${message}, skipping layer`).pipe(
           Effect.andThen(Effect.succeed(null))
         );
       })
@@ -692,7 +693,7 @@ export const ensureLayer = (config: LayerConfig) =>
 
     // Surface all warnings so issues are visible, not silently swallowed
     for (const warning of layerWarnings) {
-      yield* Effect.logWarning(`[layer] ${warning}`);
+      yield* deferWarning(`[layer] ${warning}`);
     }
 
     yield* Effect.logDebug(`Creating layer ${layerName} with ${allPackages.length} packages (hash: ${hash})`);
@@ -702,7 +703,7 @@ export const ensureLayer = (config: LayerConfig) =>
     const { buffer: layerZip, includedPackages, skippedPackages } = yield* createLayerZip(config.projectDir, allPackages, resolvedPaths);
 
     if (skippedPackages.length > 0) {
-      yield* Effect.logWarning(`Skipped ${skippedPackages.length} packages (not found): ${skippedPackages.slice(0, 10).join(", ")}${skippedPackages.length > 10 ? "..." : ""}`);
+      yield* deferWarning(`Skipped ${skippedPackages.length} packages (not found): ${skippedPackages.slice(0, 10).join(", ")}${skippedPackages.length > 10 ? "..." : ""}`);
     }
     const zipSizeMB = layerZip.length / 1024 / 1024;
     yield* Effect.logDebug(`Layer zip size: ${zipSizeMB.toFixed(2)} MB (${includedPackages.length} packages)`);

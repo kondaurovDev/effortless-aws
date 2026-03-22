@@ -31,7 +31,6 @@ const notificationService = {
 export const orders = defineTable<Order>({
   streamView: "NEW_AND_OLD_IMAGES",
   batchSize: 10,
-  memory: 256,
 })
   .deps(() => ({ customers }))
   .config(({ defineSecret }) => ({

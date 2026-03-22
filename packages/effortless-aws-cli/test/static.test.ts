@@ -15,11 +15,11 @@ describe("static extraction", () => {
 
   describe("extractApiConfigs", () => {
 
-    it("should extract static globs", async () => {
+    it("should extract static globs via .include()", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({ basePath: "/widget", static: ["src/templates/*.ejs"] }).get("/", () => ({}));
+        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -28,11 +28,11 @@ describe("static extraction", () => {
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs"]);
     });
 
-    it("should extract multiple static globs", async () => {
+    it("should extract multiple static globs via chained .include()", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({ basePath: "/widget", static: ["src/templates/*.ejs", "src/assets/*.css"] }).get("/", () => ({}));
+        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").include("src/assets/*.css").get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -41,7 +41,7 @@ describe("static extraction", () => {
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs", "src/assets/*.css"]);
     });
 
-    it("should return empty staticGlobs when no static property", async () => {
+    it("should return empty staticGlobs when no include", async () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
@@ -58,7 +58,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({ basePath: "/widget", static: ["templates/*.ejs"] }).get("/", () => ({}));
+        export default defineApi({ basePath: "/widget" }).include("templates/*.ejs").get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -72,7 +72,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({ basePath: "/widget", static: ["src/templates/*.ejs"] }).get("/", () => ({}));
+        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").get("/", () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -85,11 +85,12 @@ describe("static extraction", () => {
 
   describe("extractTableConfigs", () => {
 
-    it("should extract static globs from table handler", async () => {
+    it("should extract static globs from table handler via .include()", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable({ static: ["src/templates/report.ejs"] })
+        export const orders = defineTable()
+          .include("src/templates/report.ejs")
           .onRecord(async ({ record }) => {});
       `;
 
@@ -99,7 +100,7 @@ describe("static extraction", () => {
       expect(configs[0]!.staticGlobs).toEqual(["src/templates/report.ejs"]);
     });
 
-    it("should return empty staticGlobs for table without static", async () => {
+    it("should return empty staticGlobs for table without include", async () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
@@ -210,7 +211,9 @@ describe("static files runtime", () => {
     const handlerCode = `
       import { defineApi } from "effortless-aws";
 
-      export default defineApi({ basePath: "/widget", static: ["test/fixtures/hello.txt"] })
+      export default defineApi({ basePath: "/widget" })
+          .include("test/fixtures/hello.txt")
+          .setup(({ files }) => ({ files }))
           .get("/index", async ({ files }) => ({
             status: 200,
             body: { content: files.read("test/fixtures/hello.txt") }

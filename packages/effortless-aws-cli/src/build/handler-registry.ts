@@ -51,6 +51,12 @@ export const handlerRegistry = {
     wrapperFn: "",
     wrapperPath: "",
   },
+  cron: {
+    defineFn: "defineCron",
+    handlerProps: ["onTick"],
+    wrapperFn: "wrapCron",
+    wrapperPath: "~/runtime/wrap-cron",
+  },
   api: {
     defineFn: "defineApi",
     handlerProps: ["routes"],

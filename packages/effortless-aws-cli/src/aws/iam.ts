@@ -138,7 +138,72 @@ export const ensureEdgeRole = (
     return createResult.Role!.Arn!;
   });
 
-const ensureInlinePolicy = (roleName: string, functionName: string, actions: string[]) =>
+const SCHEDULER_ASSUME_ROLE_POLICY = JSON.stringify({
+  Version: "2012-10-17",
+  Statement: [
+    {
+      Effect: "Allow",
+      Principal: {
+        Service: "scheduler.amazonaws.com"
+      },
+      Action: "sts:AssumeRole"
+    }
+  ]
+});
+
+/**
+ * Ensure an IAM role exists for EventBridge Scheduler to invoke a Lambda function.
+ */
+export const ensureSchedulerRole = (
+  project: string,
+  stage: string,
+  name: string,
+  lambdaArn: string,
+  tags?: Record<string, string>
+) =>
+  Effect.gen(function* () {
+    const roleName = `${project}-${stage}-${name}-scheduler-role`;
+
+    const existingRole = yield* iam.make("get_role", { RoleName: roleName }).pipe(
+      Effect.map(r => r.Role),
+      Effect.catchIf(
+        e => e._tag === "IAMError" && e.is("NoSuchEntityException"),
+        () => Effect.succeed(undefined)
+      )
+    );
+
+    if (existingRole) {
+      yield* Effect.logDebug(`Using existing scheduler role: ${roleName}`);
+      // Update inline policy to ensure Lambda ARN is current
+      yield* ensureInlinePolicy(roleName, `${name}-scheduler`, ["lambda:InvokeFunction"], lambdaArn);
+
+      if (tags) {
+        yield* iam.make("tag_role", {
+          RoleName: roleName,
+          Tags: toAwsTagList(tags)
+        });
+      }
+
+      return existingRole.Arn!;
+    }
+
+    yield* Effect.logDebug(`Creating scheduler role: ${roleName}`);
+
+    const createResult = yield* iam.make("create_role", {
+      RoleName: roleName,
+      AssumeRolePolicyDocument: SCHEDULER_ASSUME_ROLE_POLICY,
+      Description: `EventBridge Scheduler role for ${name}`,
+      Tags: tags ? toAwsTagList(tags) : undefined
+    });
+
+    yield* ensureInlinePolicy(roleName, `${name}-scheduler`, ["lambda:InvokeFunction"], lambdaArn);
+
+    yield* Effect.sleep("10 seconds");
+
+    return createResult.Role!.Arn!;
+  });
+
+const ensureInlinePolicy = (roleName: string, functionName: string, actions: string[], resource?: string) =>
   Effect.gen(function* () {
     const policyName = `${functionName}-inline-policy`;
     const policyDocument = JSON.stringify({
@@ -147,7 +212,7 @@ const ensureInlinePolicy = (roleName: string, functionName: string, actions: str
         {
           Effect: "Allow",
           Action: actions,
-          Resource: "*"
+          Resource: resource ?? "*"
         }
       ]
     });

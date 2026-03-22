@@ -80,26 +80,10 @@ export type StaticSiteHandler = {
 /**
  * Deploy a static site via S3 + CloudFront CDN.
  *
+ * @see {@link https://effortless-aws.website/use-cases/web-app | Web app guide}
+ *
  * @param options - Static site configuration: directory, optional SPA mode, build command
  * @returns Handler object used by the deployment system
- *
- * @example Documentation site
- * ```typescript
- * export const docs = defineStaticSite({
- *   dir: "dist",
- *   build: "npx astro build",
- * });
- * ```
- *
- * @example SPA with client-side routing
- * ```typescript
- * export const app = defineStaticSite({
- *   dir: "dist",
- *   spa: true,
- *   build: "npm run build",
- * });
- * ```
- *
  */
 export const defineStaticSite = () => (options: StaticSiteConfig): StaticSiteHandler => ({
   __brand: "effortless-static-site",

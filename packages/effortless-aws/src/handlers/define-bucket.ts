@@ -1,4 +1,4 @@
-import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LogLevel, Permission } from "./handler-options";
+import type { AnySecretRef, ResolveConfig, ConfigFactory, LambdaOptions } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
@@ -9,7 +9,7 @@ import type { BucketClient } from "../runtime/bucket-client";
  */
 export type BucketConfig = {
   /** Lambda function settings (memory, timeout, permissions, etc.) */
-  lambda?: { memory?: number; timeout?: Duration; logLevel?: LogLevel; permissions?: Permission[] };
+  lambda?: { memory?: number; timeout?: import("./handler-options").Duration; logLevel?: import("./handler-options").LogLevel; permissions?: import("./handler-options").Permission[] };
   /** S3 key prefix filter for event notifications (e.g., "uploads/") */
   prefix?: string;
   /** S3 key suffix filter for event notifications (e.g., ".jpg") */
@@ -85,20 +85,10 @@ export type BucketHandler<C = any> = {
 
 /** Options passed to `defineBucket()` — static config */
 type BucketOptions = {
-  /** Lambda memory in MB (default: 256) */
-  memory?: number;
-  /** Lambda timeout (default: 30s) */
-  timeout?: Duration;
-  /** Additional IAM permissions for the Lambda */
-  permissions?: Permission[];
-  /** Logging verbosity */
-  logLevel?: LogLevel;
   /** S3 key prefix filter for event notifications (e.g., "uploads/") */
   prefix?: string;
   /** S3 key suffix filter for event notifications (e.g., ".jpg") */
   suffix?: string;
-  /** Static file glob patterns to bundle into the Lambda ZIP */
-  static?: string[];
 };
 
 // ============ Builder ============
@@ -119,9 +109,19 @@ interface BucketBuilder<
     fn: ConfigFactory<P2>
   ): BucketBuilder<D, P2, C, HasFiles>;
 
+  /** Include static files in the Lambda ZIP */
+  include(glob: string): BucketBuilder<D, P, C, true>;
+
+  /** Initialize shared state on cold start with lambda options */
+  setup(lambda: LambdaOptions): BucketBuilder<D, P, C, HasFiles>;
   /** Initialize shared state on cold start. Receives bucket (self-client), deps, config, files. */
   setup<C2>(
     fn: (args: SetupArgs<D, P, HasFiles>) => C2 | Promise<C2>
+  ): BucketBuilder<D, P, C2, HasFiles>;
+  /** Initialize shared state on cold start with lambda options. Receives bucket (self-client), deps, config, files. */
+  setup<C2>(
+    fn: (args: SetupArgs<D, P, HasFiles>) => C2 | Promise<C2>,
+    lambda: LambdaOptions,
   ): BucketBuilder<D, P, C2, HasFiles>;
 
   /** Handle errors thrown by callbacks */
@@ -153,40 +153,27 @@ interface BucketBuilder<
 /**
  * Define an S3 bucket with optional event handlers.
  *
- * @example Bucket with event handler
+ * @see {@link https://effortless-aws.website/use-cases/storage | Storage guide}
+ *
+ * @example
  * ```typescript
  * export const uploads = defineBucket({ prefix: "images/", suffix: ".jpg" })
  *   .onObjectCreated(async ({ event, bucket }) => {
  *     console.log("New upload:", event.key);
  *   })
- *
- * ```
- *
- * @example Resource-only bucket (no Lambda)
- * ```typescript
- * export const assets = defineBucket().build()
  * ```
  */
 export function defineBucket(): BucketBuilder;
-export function defineBucket(
-  options: BucketOptions & { static: string[] },
-): BucketBuilder<undefined, undefined, undefined, true>;
 export function defineBucket(
   options: BucketOptions,
 ): BucketBuilder;
 export function defineBucket(
   options?: BucketOptions,
 ): BucketBuilder {
-  const {
-    memory, timeout, permissions, logLevel,
-    static: staticFiles,
-    ...bucketConfig
-  } = options ?? {} as BucketOptions;
+  const bucketConfig = options ?? {} as BucketOptions;
 
-  const hasLambda = memory != null || timeout != null || permissions != null || logLevel != null;
   const spec: BucketConfig = {
     ...bucketConfig,
-    ...(hasLambda ? { lambda: { ...(memory != null ? { memory } : {}), ...(timeout != null ? { timeout } : {}), ...(permissions ? { permissions } : {}), ...(logLevel ? { logLevel } : {}) } } : {}),
   };
 
   const state: {
@@ -201,7 +188,12 @@ export function defineBucket(
     onObjectRemoved?: (...args: any[]) => any;
   } = {
     spec,
-    ...(staticFiles ? { static: staticFiles } : {}),
+  };
+
+  const applyLambdaOptions = (lambda: LambdaOptions) => {
+    if (Object.keys(lambda).length > 0) {
+      state.spec = { ...state.spec, lambda: { ...state.spec.lambda, ...lambda } };
+    }
   };
 
   const finalize = (): BucketHandler => ({
@@ -226,8 +218,17 @@ export function defineBucket(
       state.config = resolveConfigFactory(fn) as any;
       return builder as any;
     },
-    setup(fn) {
-      state.setup = fn as any;
+    include(glob: string) {
+      state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {
+      if (typeof fnOrLambda === "function") {
+        state.setup = fnOrLambda;
+        if (maybeLambda) applyLambdaOptions(maybeLambda);
+      } else {
+        applyLambdaOptions(fnOrLambda);
+      }
       return builder as any;
     },
     onObjectCreated(fn) {

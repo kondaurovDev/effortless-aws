@@ -33,13 +33,14 @@ export { deployTable, deployAllTables } from "./deploy-table";
 export { deploy } from "./deploy-api";
 
 // Import for internal use
-import { type DeployInput, type DeployResult, type DeployTableResult } from "./shared";
+import { type DeployInput, type DeployResult, type DeployTableResult, flushDeferredWarnings } from "./shared";
 import { deployTableFunction } from "./deploy-table";
 import { deployApp, type DeployAppResult } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
 import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fifo-queue";
 import { deployBucketFunction, type DeployBucketResult } from "./deploy-bucket";
 import { deployMailer, type DeployMailerResult } from "./deploy-mailer";
+import { deployCronFunction, type DeployCronResult } from "./deploy-cron";
 import { deployApiFunction } from "./deploy-api";
 
 // ============ Progress tracking ============
@@ -154,13 +155,9 @@ const prepareLayer = (input: PrepareLayerInput) =>
     const prodDeps = layerResult
       ? yield* readProductionDependencies(input.packageDir)
       : [];
-    const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
+    const { packages: external } = prodDeps.length > 0
       ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps, input.extraNodeModules))
-      : { packages: [] as string[], warnings: [] as string[] };
-
-    for (const warning of layerWarnings) {
-      yield* Effect.logWarning(`[layer] ${warning}`);
-    }
+      : { packages: [] as string[] };
 
     yield* Effect.logDebug(`Layer result: ${layerResult ? "exists" : "null"}, external packages: ${external.length}`);
     if (external.length > 0) {
@@ -171,7 +168,7 @@ const prepareLayer = (input: PrepareLayerInput) =>
       layerArn: layerResult?.layerVersionArn,
       layerVersion: layerResult?.version,
       layerStatus: layerResult?.status,
-      external
+      external,
     };
   });
 
@@ -297,6 +294,7 @@ const validateDeps = (
     ...discovered.staticSiteHandlers,
     ...discovered.appHandlers,
     ...discovered.mailerHandlers,
+    ...discovered.cronHandlers,
   ];
   for (const { exports } of allGroups) {
     for (const fn of exports) {
@@ -669,6 +667,34 @@ const buildApiTasks = (
   return tasks;
 };
 
+const buildCronTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["cronHandlers"],
+  results: DeployCronResult[],
+): Effect.Effect<void, unknown>[] => {
+  const tasks: Effect.Effect<void, unknown>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
+          const result = yield* deployCronFunction({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, scheduler: { region } })));
+          results.push(result);
+          yield* ctx.logComplete(fn.exportName, "cron", result.status, result.bundleSize);
+        })
+      );
+    }
+  }
+  return tasks;
+};
+
 // ============ Project deployment ============
 
 export type DeployProjectInput = {
@@ -691,6 +717,7 @@ export type DeployProjectResult = {
   fifoQueueResults: DeployFifoQueueResult[];
   bucketResults: DeployBucketResult[];
   mailerResults: DeployMailerResult[];
+  cronResults: DeployCronResult[];
   apiResults: DeployResult[];
 };
 
@@ -707,7 +734,7 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers } = yield* Effect.promise(() => discoverHandlers(files, input.projectDir));
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers } = yield* Effect.promise(() => discoverHandlers(files, input.projectDir));
 
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
@@ -716,7 +743,8 @@ export const deployProject = (input: DeployProjectInput) =>
     const totalBucketHandlers = bucketHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalMailerHandlers = mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalApiHandlers = apiHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers;
+    const totalCronHandlers = cronHandlers.reduce((acc, h) => acc + h.exports.length, 0);
+    const totalAllHandlers = totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers + totalCronHandlers;
 
     if (totalAllHandlers === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
@@ -730,10 +758,11 @@ export const deployProject = (input: DeployProjectInput) =>
     if (totalBucketHandlers > 0) parts.push(`${totalBucketHandlers} bucket`);
     if (totalMailerHandlers > 0) parts.push(`${totalMailerHandlers} mailer`);
     if (totalApiHandlers > 0) parts.push(`${totalApiHandlers} api`);
+    if (totalCronHandlers > 0) parts.push(`${totalCronHandlers} cron`);
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
     // Check for missing SSM parameters
-    const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers };
+    const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers };
     const requiredSecrets = collectRequiredSecrets(discovered, input.project, stage);
     if (requiredSecrets.length > 0) {
       const { missing } = yield* checkMissingSecrets(requiredSecrets).pipe(
@@ -783,7 +812,7 @@ export const deployProject = (input: DeployProjectInput) =>
     }
 
     // Prepare layer only when Lambda-based handlers exist
-    const needsLambda = totalTableHandlers + totalAppHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers > 0;
+    const needsLambda = totalTableHandlers + totalAppHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers + totalCronHandlers > 0;
     const { layerArn, layerVersion, layerStatus, external } = needsLambda
       ? yield* prepareLayer({
           project: input.project,
@@ -819,6 +848,8 @@ export const deployProject = (input: DeployProjectInput) =>
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "mailer" });
     for (const { exports } of apiHandlers)
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "api" });
+    for (const { exports } of cronHandlers)
+      for (const fn of exports) manifest.push({ name: fn.exportName, type: "cron" });
 
     manifest.sort((a, b) => a.name.localeCompare(b.name));
     const logComplete = createLiveProgress(manifest);
@@ -832,6 +863,7 @@ export const deployProject = (input: DeployProjectInput) =>
     const fifoQueueResults: DeployFifoQueueResult[] = [];
     const bucketResults: DeployBucketResult[] = [];
     const mailerResults: DeployMailerResult[] = [];
+    const cronResults: DeployCronResult[] = [];
     const apiResults: DeployResult[] = [];
 
     // Check if app/site handlers need API origin (for CloudFront proxying)
@@ -851,6 +883,7 @@ export const deployProject = (input: DeployProjectInput) =>
         ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
+        ...buildCronTasks(ctx, cronHandlers, cronResults),
       ];
 
       yield* Effect.all(phase1Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -880,6 +913,7 @@ export const deployProject = (input: DeployProjectInput) =>
         ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
+        ...buildCronTasks(ctx, cronHandlers, cronResults),
       ];
 
       yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -898,5 +932,10 @@ export const deployProject = (input: DeployProjectInput) =>
       );
     }
 
-    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, apiResults };
+    // Show deferred warnings after progress spinner is done
+    for (const warning of flushDeferredWarnings()) {
+      yield* Effect.logWarning(warning);
+    }
+
+    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, cronResults, apiResults };
   });

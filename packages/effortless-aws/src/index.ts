@@ -10,8 +10,8 @@ export { defineFifoQueue } from "./handlers/define-fifo-queue"
 export { defineBucket } from "./handlers/define-bucket"
 export { defineMailer } from "./handlers/define-mailer"
 export { defineApi } from "./handlers/define-api"
+export { defineCron } from "./handlers/define-cron"
 export { defineSecret, secret, param, generateHex, generateBase64, generateUuid } from "./handlers/handler-options"
-export { unsafeAs } from "./handlers/handler-options"
 export { toSeconds } from "./handlers/handler-options"
 
 // Types
@@ -23,6 +23,8 @@ export type { FifoQueueConfig, FifoQueueMessage, FifoQueueHandler } from "./hand
 export type { BucketConfig, BucketEvent, BucketHandler } from "./handlers/define-bucket"
 export type { MailerConfig, MailerHandler } from "./handlers/define-mailer"
 export type { ApiAuthConfig, ApiConfig, ApiHandler, ApiRoutes } from "./handlers/define-api"
+export type { CronConfig, CronHandler } from "./handlers/define-cron"
+export type { Timezone } from "./handlers/timezone"
 export type { TableClient, QueryParams, QueryByTagParams, SkCondition, UpdateActions, PutOptions } from "./runtime/table-client"
 export type { BucketClient } from "./runtime/bucket-client"
 export type { QueueClient, SendMessageInput } from "./runtime/queue-client"

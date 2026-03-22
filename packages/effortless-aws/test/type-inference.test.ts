@@ -81,8 +81,9 @@ describe("defineApi type inference", () => {
       });
   });
 
-  it("static → files available in setup, spread into route", () => {
-    defineApi({ basePath: "/page", static: ["src/templates/*.ejs"] })
+  it("include → files available in setup, spread into route", () => {
+    defineApi({ basePath: "/page" })
+      .include("src/templates/*.ejs")
       .setup(({ files }) => {
         type _files = Expect<Equal<typeof files, StaticFiles>>;
         return { tpl: files };
@@ -155,8 +156,9 @@ describe("defineTable type inference", () => {
       });
   });
 
-  it("static → files available in setup, spread into onRecord", () => {
-    defineTable<User>({ static: ["templates/*.html"] })
+  it("include → files available in setup, spread into onRecord", () => {
+    defineTable<User>()
+      .include("templates/*.html")
       .setup(({ files }) => {
         type _files = Expect<Equal<typeof files, StaticFiles>>;
         return { tpl: files };

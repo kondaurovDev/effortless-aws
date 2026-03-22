@@ -19,6 +19,7 @@ export default defineConfig([
       "runtime/wrap-bucket": "src/runtime/wrap-bucket.ts",
       "runtime/wrap-middleware": "src/runtime/wrap-middleware.ts",
       "runtime/wrap-api": "src/runtime/wrap-api.ts",
+      "runtime/wrap-cron": "src/runtime/wrap-cron.ts",
     },
     format: ["esm"],
     dts: false,
