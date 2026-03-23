@@ -59,7 +59,7 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       delay: config.delay ? toSeconds(config.delay) : undefined,
       contentBasedDeduplication: config.contentBasedDeduplication ?? true,
       maxReceiveCount: config.maxReceiveCount,
-      tags: makeTags(tagCtx, "sqs"),
+      tags: makeTags(tagCtx),
     });
 
     // Inject queue URL/ARN into Lambda env vars

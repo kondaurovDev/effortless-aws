@@ -71,7 +71,7 @@ export const deployCronFunction = ({ input, fn, layerArn, external, depsEnv, dep
       tagCtx.stage,
       handlerName,
       functionArn,
-      makeTags(tagCtx, "iam-role"),
+      makeTags(tagCtx),
     );
 
     // Create/update EventBridge Scheduler schedule
@@ -83,7 +83,7 @@ export const deployCronFunction = ({ input, fn, layerArn, external, depsEnv, dep
       ...(config.timezone ? { timezone: config.timezone } : {}),
       targetArn: functionArn,
       roleArn: schedulerRoleArn,
-      tags: makeTags(tagCtx, "scheduler"),
+      tags: makeTags(tagCtx),
     });
 
     yield* Effect.logDebug(`Cron deployment complete! Schedule: ${scheduleName}`);

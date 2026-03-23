@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { Effect } from "effect"
+import { NodeContext } from "@effect/platform-node"
 import * as path from "path"
 import * as AdmZip from "adm-zip"
 
@@ -8,6 +9,9 @@ import { zip, resolveStaticFiles } from "~cli/build/bundle"
 import { importBundle, bundleCode } from "./helpers/bundle-code"
 
 const projectDir = path.resolve(__dirname, "..")
+
+const run = <A>(effect: Effect.Effect<A, any, any>) =>
+  Effect.runPromise(Effect.provide(effect, NodeContext.layer) as Effect.Effect<A>)
 
 // ============ AST extraction ============
 
@@ -122,8 +126,8 @@ describe("static extraction", () => {
 
 describe("resolveStaticFiles", () => {
 
-  it("should resolve a file path", () => {
-    const { files, missing } = resolveStaticFiles(["test/fixtures/hello.txt"], projectDir);
+  it("should resolve a file path", async () => {
+    const { files, missing } = await run(resolveStaticFiles(["test/fixtures/hello.txt"], projectDir));
 
     expect(files).toHaveLength(1);
     expect(files[0]!.zipPath).toBe("test/fixtures/hello.txt");
@@ -131,14 +135,14 @@ describe("resolveStaticFiles", () => {
     expect(missing).toHaveLength(0);
   });
 
-  it("should report missing paths", () => {
-    const { files, missing } = resolveStaticFiles(["test/fixtures/nope.xyz"], projectDir);
+  it("should report missing paths", async () => {
+    const { files, missing } = await run(resolveStaticFiles(["test/fixtures/nope.xyz"], projectDir));
     expect(files).toHaveLength(0);
     expect(missing).toEqual(["test/fixtures/nope.xyz"]);
   });
 
-  it("should resolve directory recursively, skipping subdirectory entries", () => {
-    const { files, missing } = resolveStaticFiles(["test/fixtures/site"], projectDir);
+  it("should resolve directory recursively, skipping subdirectory entries", async () => {
+    const { files, missing } = await run(resolveStaticFiles(["test/fixtures/site"], projectDir));
 
     const paths = files.map(f => f.zipPath).sort();
 
@@ -160,8 +164,8 @@ describe("resolveStaticFiles", () => {
     expect(missing).toHaveLength(0);
   });
 
-  it("should strip leading slash from paths", () => {
-    const { files } = resolveStaticFiles(["/test/fixtures/hello.txt"], projectDir);
+  it("should strip leading slash from paths", async () => {
+    const { files } = await run(resolveStaticFiles(["/test/fixtures/hello.txt"], projectDir));
     expect(files).toHaveLength(1);
     expect(files[0]!.zipPath).toBe("test/fixtures/hello.txt");
   });
@@ -173,7 +177,7 @@ describe("resolveStaticFiles", () => {
 describe("zip with static files", () => {
 
   it("should include static files in zip archive", async () => {
-    const { files: staticFiles } = resolveStaticFiles(["test/fixtures/hello.txt"], projectDir);
+    const { files: staticFiles } = await run(resolveStaticFiles(["test/fixtures/hello.txt"], projectDir));
     const zipBuffer = await Effect.runPromise(zip({
       content: "export const handler = () => {};",
       staticFiles

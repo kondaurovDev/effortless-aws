@@ -64,7 +64,7 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
       stage,
       handler: handlerName,
     };
-    const tags = makeTags(tagCtx, "ecs");
+    const tags = makeTags(tagCtx);
 
     const clusterName = `${input.project}-${stage}`;
     const serviceName = `${input.project}-${stage}-${handlerName}`;
@@ -96,7 +96,7 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
           VisibilityTimeout: "60",
           MessageRetentionPeriod: "345600", // 4 days
         },
-        tags,
+        tags: makeTags(tagCtx),
       });
       queueUrl = result.QueueUrl!;
     } else {
@@ -120,7 +120,7 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
     });
 
     const resolved = staticGlobs && staticGlobs.length > 0
-      ? resolveStaticFiles(staticGlobs, input.projectDir)
+      ? yield* resolveStaticFiles(staticGlobs, input.projectDir)
       : undefined;
 
     const zipBuffer = yield* zip({
@@ -201,7 +201,7 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
       executionRoleArn,
       logGroup: logGroupName,
       region: input.region,
-      tags,
+      tags: tags,
     });
 
     // 8. Discover default VPC subnets
@@ -214,7 +214,7 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
       taskDefinitionArn,
       subnets,
       assignPublicIp: true,
-      tags,
+      tags: tags,
     });
 
     yield* Effect.logDebug(`Worker deployment complete: ${serviceName}`);

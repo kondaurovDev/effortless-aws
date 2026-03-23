@@ -39,7 +39,7 @@ export const deployMailer = ({ project, stage, region, fn }: DeployMailerInput) 
     yield* Effect.logDebug(`Ensuring SES identity for ${config.domain}...`);
     const { domain, verified, dkimRecords } = yield* ensureSesIdentity({
       domain: config.domain,
-      tags: makeTags(tagCtx, "ses"),
+      tags: makeTags(tagCtx),
     });
 
     if (!verified && dkimRecords.length > 0) {

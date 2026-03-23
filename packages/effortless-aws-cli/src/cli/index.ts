@@ -2,7 +2,7 @@
 
 import { CliConfig, Command } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect } from "effect";
+import { Effect, Fiber } from "effect";
 import { createRequire } from "module";
 
 import { deployCommand } from "./commands/deploy";
@@ -28,11 +28,14 @@ const cli = Command.run(mainCommand, {
   version: versionString,
 });
 
-const updateCheck = checkForUpdate(version);
+const program = Effect.gen(function* () {
+  const updateFiber = yield* Effect.fork(checkForUpdate(version));
+  yield* cli(process.argv) as Effect.Effect<void>;
+  yield* Fiber.join(updateFiber);
+});
 
-cli(process.argv).pipe(
+program.pipe(
   Effect.provide(NodeContext.layer),
   Effect.provide(CliConfig.layer({ showBuiltIns: false, showTypes: false })),
-  Effect.tap(() => Effect.promise(() => updateCheck)),
-  NodeRuntime.runMain
+  NodeRuntime.runMain,
 );

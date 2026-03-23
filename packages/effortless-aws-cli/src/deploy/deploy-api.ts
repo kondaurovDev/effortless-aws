@@ -54,7 +54,7 @@ export const deployApiFunction = ({ input, fn, layerArn, external, depsEnv, deps
 
 export const deploy = (input: DeployInput) =>
   Effect.gen(function* () {
-    const configs = yield* Effect.promise(() => extractConfigsFromFile<import("effortless-aws").ApiConfig>(input.file, input.projectDir, "api"));
+    const configs = yield* extractConfigsFromFile<import("effortless-aws").ApiConfig>(input.file, input.projectDir, "api");
 
     if (configs.length === 0) {
       return yield* Effect.fail(new Error("Could not extract defineApi config from source"));

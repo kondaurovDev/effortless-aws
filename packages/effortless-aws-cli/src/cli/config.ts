@@ -1,15 +1,17 @@
 import { Options } from "@effect/cli";
-import * as path from "path";
-import * as fs from "fs";
-import { pathToFileURL } from "url";
+import { Path, FileSystem } from "@effect/platform";
 import * as esbuild from "esbuild";
 import { Effect } from "effect";
 import type { EffortlessConfig } from "effortless-aws";
 
 export const loadConfig = Effect.fn("loadConfig")(function* () {
-  const configPath = path.resolve(process.cwd(), "effortless.config.ts");
+  const p = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
 
-  if (!fs.existsSync(configPath)) {
+  const configPath = p.resolve(process.cwd(), "effortless.config.ts");
+
+  const exists = yield* fs.exists(configPath);
+  if (!exists) {
     return null as EffortlessConfig | null;
   }
 
@@ -32,13 +34,14 @@ export const loadConfig = Effect.fn("loadConfig")(function* () {
   }
 
   const code = output.text;
-  const tempFile = path.join(process.cwd(), ".effortless-config.mjs");
-  fs.writeFileSync(tempFile, code);
+  const tempFile = p.join(process.cwd(), ".effortless-config.mjs");
+  yield* fs.writeFileString(tempFile, code);
 
+  const fileUrl = yield* p.toFileUrl(tempFile);
   const mod = yield* Effect.tryPromise({
-    try: () => import(pathToFileURL(tempFile).href),
+    try: () => import(fileUrl.href),
     catch: (error) => new Error(`Failed to load config: ${error}`),
-  }).pipe(Effect.ensuring(Effect.sync(() => fs.unlinkSync(tempFile))));
+  }).pipe(Effect.ensuring(fs.remove(tempFile).pipe(Effect.catchAll(() => Effect.void))));
 
   return mod.default as EffortlessConfig | null;
 });

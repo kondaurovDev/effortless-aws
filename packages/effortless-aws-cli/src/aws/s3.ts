@@ -1,6 +1,5 @@
 import { Effect } from "effect";
-import * as fs from "fs";
-import * as path from "path";
+import { Path, FileSystem } from "@effect/platform";
 import * as crypto from "crypto";
 import { s3, lambda } from "./clients";
 import { toAwsTagList } from "./tags";
@@ -107,6 +106,8 @@ export type SyncFilesResult = {
 
 export const syncFiles = (input: SyncFilesInput) =>
   Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
     const { bucketName, sourceDir } = input;
 
     // List existing objects in bucket
@@ -128,18 +129,21 @@ export const syncFiles = (input: SyncFilesInput) =>
 
     // Walk local directory
     const localFiles = new Map<string, string>(); // key -> absolute path
-    const walkDir = (dir: string, prefix: string) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const fullPath = path.join(dir, entry.name);
-        const key = prefix ? `${prefix}/${entry.name}` : entry.name;
-        if (entry.isDirectory()) {
-          walkDir(fullPath, key);
-        } else {
-          localFiles.set(key, fullPath);
+    const walkDir = (dir: string, prefix: string): Effect.Effect<void, any> =>
+      Effect.gen(function* () {
+        const entries = yield* fileSystem.readDirectory(dir);
+        for (const name of entries) {
+          const fullPath = p.join(dir, name);
+          const key = prefix ? `${prefix}/${name}` : name;
+          const stat = yield* fileSystem.stat(fullPath);
+          if (stat.type === "Directory") {
+            yield* walkDir(fullPath, key);
+          } else {
+            localFiles.set(key, fullPath);
+          }
         }
-      }
-    };
-    walkDir(sourceDir, "");
+      });
+    yield* walkDir(sourceDir, "");
 
     let uploaded = 0;
     let unchanged = 0;
@@ -147,7 +151,7 @@ export const syncFiles = (input: SyncFilesInput) =>
 
     // Upload new/changed files
     for (const [key, filePath] of localFiles) {
-      const content = fs.readFileSync(filePath);
+      const content = yield* fileSystem.readFile(filePath);
       const md5 = crypto.createHash("md5").update(content).digest("hex");
       const etag = `"${md5}"`;
 
@@ -156,7 +160,7 @@ export const syncFiles = (input: SyncFilesInput) =>
         continue;
       }
 
-      const ext = path.extname(key).toLowerCase();
+      const ext = p.extname(key).toLowerCase();
       const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
       const isHtml = ext === ".html" || ext === ".htm";
       const cacheControl = isHtml

@@ -1,8 +1,6 @@
 import { Effect } from "effect";
+import { Path, FileSystem, Command } from "@effect/platform";
 import { Architecture } from "@aws-sdk/client-lambda";
-import { execSync } from "child_process";
-import * as fs from "fs";
-import * as path from "path";
 import type { ExtractedStaticSiteFunction } from "~/build/bundle";
 import { bundleMiddleware, zip } from "~/build/bundle";
 import {
@@ -72,7 +70,7 @@ const deployMiddlewareLambda = (input: {
       project,
       stage,
       middlewareName,
-      makeTags(tagCtx, "iam-role")
+      makeTags(tagCtx)
     );
 
     // 2. Bundle middleware code (standalone — extracts only the middleware fn via AST)
@@ -100,7 +98,7 @@ const deployMiddlewareLambda = (input: {
       memory: 128,
       timeout: 5,
       architecture: Architecture.x86_64,
-      tags: makeTags(tagCtx, "lambda"),
+      tags: makeTags(tagCtx),
     }).pipe(
       Effect.provide(Aws.makeClients({ lambda: { region: "us-east-1" } }))
     );
@@ -160,6 +158,8 @@ const generateErrorPageHtml = (): string => `<!DOCTYPE html>
 /** @internal */
 export const deployStaticSite = (input: DeployStaticSiteInput) =>
   Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
     const { projectDir, project, region, fn } = input;
     const { exportName, config } = fn;
     const stage = resolveStage(input.stage);
@@ -182,19 +182,17 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     if (config.build) {
       yield* Effect.logDebug(`Building site: ${config.build}`);
       const buildStart = Date.now();
-      yield* Effect.try({
-        try: () => execSync(config.build!, {
-          cwd: projectDir,
-          stdio: input.verbose ? "inherit" : "pipe",
-        }),
-        catch: (error) => {
-          if (!input.verbose && error && typeof error === "object" && "stderr" in error) {
-            const stderr = String((error as { stderr: unknown }).stderr);
-            if (stderr) process.stderr.write(stderr);
-          }
-          return new Error(`Site build failed: ${config.build}`);
-        },
-      });
+      yield* Command.make("/bin/sh", "-c", config.build!).pipe(
+        Command.workingDirectory(projectDir),
+        input.verbose ? Command.stdout("inherit") : (c => c),
+        input.verbose ? Command.stderr("inherit") : (c => c),
+        Command.exitCode,
+        Effect.flatMap(code =>
+          code === 0
+            ? Effect.void
+            : Effect.fail(new Error(`Site build failed (exit ${code}): ${config.build}`))
+        ),
+      );
       yield* Effect.logDebug(`Site built in ${((Date.now() - buildStart) / 1000).toFixed(1)}s`);
     }
 
@@ -203,7 +201,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     yield* ensureBucket({
       name: bucketName,
       region,
-      tags: makeTags(tagCtx, "s3-bucket"),
+      tags: makeTags(tagCtx),
     });
 
     // 3. Ensure Origin Access Control
@@ -295,7 +293,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       oacId,
       spa: isSpa,
       index,
-      tags: makeTags(tagCtx, "cloudfront-distribution"),
+      tags: makeTags(tagCtx),
       urlRewriteFunctionArn,
       lambdaEdgeArn,
       aliases,
@@ -310,7 +308,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     yield* putBucketPolicyForOAC(bucketName, distributionArn);
 
     // 8. Sync files to S3
-    const sourceDir = path.resolve(projectDir, config.dir);
+    const sourceDir = p.resolve(projectDir, config.dir);
     yield* syncFiles({ bucketName, sourceDir });
 
     // 8b. Generate and upload SEO files (sitemap.xml, robots.txt)
@@ -321,8 +319,8 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     if (seo) {
       const sitemapName = seo.sitemap;
 
-      if (!fs.existsSync(path.join(sourceDir, sitemapName))) {
-        const sitemap = generateSitemap(siteUrl, sourceDir);
+      if (!(yield* fileSystem.exists(p.join(sourceDir, sitemapName)))) {
+        const sitemap = yield* generateSitemap(siteUrl, sourceDir);
         yield* putObject({
           bucketName,
           key: sitemapName,
@@ -358,7 +356,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     // 11. Submit pages to Google Indexing API (skips already indexed)
     let indexingResult: { submitted: number; skipped: number; failed: number } | undefined;
     if (seo?.googleIndexing) {
-      const allHtmlKeys = collectHtmlKeys(sourceDir);
+      const allHtmlKeys = yield* collectHtmlKeys(sourceDir);
       const allPageUrls = keysToUrls(siteUrl, allHtmlKeys);
       indexingResult = yield* submitToGoogleIndexing({
         serviceAccountPath: seo.googleIndexing,

@@ -1,7 +1,6 @@
 import { Effect } from "effect";
+import { Path, Command } from "@effect/platform";
 import { toSeconds } from "effortless-aws";
-import { execSync } from "child_process";
-import * as path from "path";
 import type { ExtractedAppFunction } from "~/build/bundle";
 import { zipDirectory, detectAssetPatterns } from "~/build/bundle";
 import {
@@ -47,6 +46,7 @@ export type DeployAppResult = {
 /** @internal */
 export const deployApp = (input: DeployAppInput) =>
   Effect.gen(function* () {
+    const p = yield* Path.Path;
     const { projectDir, project, region, fn } = input;
     const { exportName, config } = fn;
     const stage = resolveStage(input.stage);
@@ -68,24 +68,22 @@ export const deployApp = (input: DeployAppInput) =>
     if (config.build) {
       yield* Effect.logDebug(`Building app: ${config.build}`);
       const buildStart = Date.now();
-      yield* Effect.try({
-        try: () => execSync(config.build!, {
-          cwd: projectDir,
-          stdio: input.verbose ? "inherit" : "pipe",
-        }),
-        catch: (error) => {
-          if (!input.verbose && error && typeof error === "object" && "stderr" in error) {
-            const stderr = String((error as { stderr: unknown }).stderr);
-            if (stderr) process.stderr.write(stderr);
-          }
-          return new Error(`App build failed: ${config.build}`);
-        },
-      });
+      yield* Command.make("/bin/sh", "-c", config.build!).pipe(
+        Command.workingDirectory(projectDir),
+        input.verbose ? Command.stdout("inherit") : (c => c),
+        input.verbose ? Command.stderr("inherit") : (c => c),
+        Command.exitCode,
+        Effect.flatMap(code =>
+          code === 0
+            ? Effect.void
+            : Effect.fail(new Error(`App build failed (exit ${code}): ${config.build}`))
+        ),
+      );
       yield* Effect.logDebug(`App built in ${((Date.now() - buildStart) / 1000).toFixed(1)}s`);
     }
 
     // 2. ZIP server directory
-    const serverDir = path.resolve(projectDir, config.server);
+    const serverDir = p.resolve(projectDir, config.server);
     yield* Effect.logDebug(`Zipping server directory: ${serverDir}`);
     const code = yield* zipDirectory(serverDir);
 
@@ -94,7 +92,7 @@ export const deployApp = (input: DeployAppInput) =>
     const roleArn = yield* ensureRole(
       project, stage, handlerName,
       permissions.length > 0 ? permissions : undefined,
-      makeTags(tagCtx, "iam-role"),
+      makeTags(tagCtx),
     );
 
     // 4. Deploy Lambda
@@ -108,7 +106,7 @@ export const deployApp = (input: DeployAppInput) =>
       handler: "index.handler",
       memory: config.lambda?.memory ?? 1024,
       timeout: toSeconds(config.lambda?.timeout ?? 30),
-      tags: makeTags(tagCtx, "lambda"),
+      tags: makeTags(tagCtx),
       environment: {
         EFF_PROJECT: project,
         EFF_STAGE: stage,
@@ -128,7 +126,7 @@ export const deployApp = (input: DeployAppInput) =>
     yield* ensureBucket({
       name: bucketName,
       region,
-      tags: makeTags(tagCtx, "s3-bucket"),
+      tags: makeTags(tagCtx),
     });
 
     // 7. Ensure S3 OAC
@@ -136,8 +134,8 @@ export const deployApp = (input: DeployAppInput) =>
     const { oacId: s3OacId } = yield* ensureOAC({ name: s3OacName, originType: "s3" });
 
     // 9. Detect asset patterns from the assets directory
-    const assetsDir = path.resolve(projectDir, config.assets);
-    const assetPatterns = detectAssetPatterns(assetsDir);
+    const assetsDir = p.resolve(projectDir, config.assets);
+    const assetPatterns = yield* detectAssetPatterns(assetsDir);
     yield* Effect.logDebug(`Detected ${assetPatterns.length} asset pattern(s): ${assetPatterns.join(", ")}`);
 
     // 10. Resolve domain + ACM certificate
@@ -163,7 +161,7 @@ export const deployApp = (input: DeployAppInput) =>
       s3OacId,
       lambdaOriginDomain,
       assetPatterns,
-      tags: makeTags(tagCtx, "cloudfront-distribution"),
+      tags: makeTags(tagCtx),
       aliases,
       acmCertificateArn,
       ...(input.apiOriginDomain && routePatterns.length > 0

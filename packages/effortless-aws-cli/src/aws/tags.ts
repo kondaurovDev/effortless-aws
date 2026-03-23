@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import type { ResourceTagMapping } from "@aws-sdk/client-resource-groups-tagging-api";
 import { resource_groups_tagging_api as tagging } from "./clients";
 
-export type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway" | "lambda-layer" | "s3-bucket" | "cloudfront-distribution" | "sqs" | "ses" | "scheduler" | "ecs";
+export type ResourceType = "lambda" | "iam-role" | "dynamodb" | "api-gateway" | "lambda-layer" | "s3-bucket" | "cloudfront-distribution" | "sqs" | "ses" | "scheduler" | "ecs" | "logs";
 
 export type TagContext = {
   project: string;
@@ -13,12 +13,33 @@ export type TagContext = {
 /**
  * Generate standard effortless tags for a resource.
  */
-export const makeTags = (ctx: TagContext, type: ResourceType): Record<string, string> => ({
+export const makeTags = (ctx: TagContext): Record<string, string> => ({
   "effortless:project": ctx.project,
   "effortless:stage": ctx.stage,
   "effortless:handler": ctx.handler,
-  "effortless:type": type,
 });
+
+/**
+ * Detect resource type from an ARN.
+ * Returns the ResourceType that matches the ARN pattern.
+ */
+export const resourceTypeFromArn = (arn: string): ResourceType | undefined => {
+  if (arn.startsWith("arn:aws:lambda:")) {
+    if (arn.includes(":layer:")) return "lambda-layer";
+    return "lambda";
+  }
+  if (arn.startsWith("arn:aws:iam:")) return "iam-role";
+  if (arn.startsWith("arn:aws:dynamodb:")) return "dynamodb";
+  if (arn.startsWith("arn:aws:apigateway:")) return "api-gateway";
+  if (arn.startsWith("arn:aws:s3:")) return "s3-bucket";
+  if (arn.startsWith("arn:aws:cloudfront:")) return "cloudfront-distribution";
+  if (arn.startsWith("arn:aws:sqs:")) return "sqs";
+  if (arn.startsWith("arn:aws:ses:")) return "ses";
+  if (arn.startsWith("arn:aws:scheduler:")) return "scheduler";
+  if (arn.startsWith("arn:aws:ecs:")) return "ecs";
+  if (arn.startsWith("arn:aws:logs:")) return "logs";
+  return undefined;
+};
 
 /**
  * Convert Record<string, string> to AWS tag list format: { Key, Value }[]
@@ -108,6 +129,34 @@ export const findOrphanedResources = (
       const handlerTag = r.Tags?.find(t => t.Key === "effortless:handler");
       return handlerTag && !currentHandlers.includes(handlerTag.Value ?? "");
     });
+  });
+
+/**
+ * Find a specific handler's resource by ARN prefix.
+ * Used for resources whose names can't be derived from naming convention
+ * (e.g. CloudFront distribution IDs, SES domain identities).
+ */
+/**
+ * Find a specific handler's resource by matching ARN prefix.
+ * Queries both regional and global (us-east-1) endpoints.
+ * Used for resources whose names can't be derived from naming convention
+ * (e.g. CloudFront distribution IDs, SES domain identities).
+ */
+export const findHandlerResourceArns = (
+  project: string,
+  stage: string,
+  region: string,
+  handler: string,
+  arnPrefix: string,
+) =>
+  Effect.gen(function* () {
+    const resources = yield* getAllResourcesByTags(project, stage, region);
+    return resources
+      .filter(r =>
+        r.ResourceARN?.startsWith(arnPrefix) &&
+        r.Tags?.find(t => t.Key === "effortless:handler")?.Value === handler
+      )
+      .map(r => r.ResourceARN!);
   });
 
 /**

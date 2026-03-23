@@ -501,8 +501,8 @@ const buildTableTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["tableHandlers"],
   results: DeployTableResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
@@ -530,8 +530,8 @@ const buildAppTasks = (
   handlers: DiscoveredHandlers["appHandlers"],
   results: DeployAppResult[],
   apiOriginDomain?: string,
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { exports } of handlers) {
     for (const fn of exports) {
@@ -561,8 +561,8 @@ const buildStaticSiteTasks = (
   handlers: DiscoveredHandlers["staticSiteHandlers"],
   results: DeployStaticSiteResult[],
   apiOriginDomain?: string,
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
@@ -591,8 +591,8 @@ const buildFifoQueueTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["fifoQueueHandlers"],
   results: DeployFifoQueueResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
@@ -619,8 +619,8 @@ const buildBucketTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["bucketHandlers"],
   results: DeployBucketResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
@@ -648,8 +648,8 @@ const buildMailerTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["mailerHandlers"],
   results: DeployMailerResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { exports } of handlers) {
     for (const fn of exports) {
@@ -674,8 +674,8 @@ const buildApiTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["apiHandlers"],
   results: DeployResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
@@ -712,8 +712,8 @@ const buildCronTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["cronHandlers"],
   results: DeployCronResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
@@ -740,8 +740,8 @@ const buildWorkerTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["workerHandlers"],
   results: DeployWorkerResult[],
-): Effect.Effect<void, unknown>[] => {
-  const tasks: Effect.Effect<void, unknown>[] = [];
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
@@ -804,7 +804,7 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = yield* Effect.promise(() => discoverHandlers(files, input.projectDir));
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = yield* discoverHandlers(files, input.projectDir);
 
     const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
     const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);

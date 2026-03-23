@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { Effect, Exit, Logger, LogLevel } from "effect"
+import { NodeContext } from "@effect/platform-node"
 import * as path from "path"
 
 import { deploy, deployTable } from "~cli/deploy/deploy"
@@ -20,7 +21,8 @@ describe.skipIf(!RUN_INTEGRATION)("deploy integration", () => {
         stage: "dev",
         region
       }).pipe(
-        Logger.withMinimumLogLevel(LogLevel.Info)
+        Logger.withMinimumLogLevel(LogLevel.Info),
+        Effect.provide(NodeContext.layer),
       )
     );
 
@@ -48,7 +50,8 @@ describe.skipIf(!RUN_INTEGRATION)("deploy integration", () => {
         stage: "dev",
         region
       }).pipe(
-        Logger.withMinimumLogLevel(LogLevel.Info)
+        Logger.withMinimumLogLevel(LogLevel.Info),
+        Effect.provide(NodeContext.layer),
       )
     );
 

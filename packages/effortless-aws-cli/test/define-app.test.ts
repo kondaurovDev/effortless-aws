@@ -6,6 +6,10 @@ import * as os from "os"
 import { extractAppConfigs } from "./helpers/extract-from-source"
 import { detectAssetPatterns, zipDirectory } from "~cli/build/bundle"
 import { Effect } from "effect"
+import { NodeContext } from "@effect/platform-node"
+
+const run = <A>(effect: Effect.Effect<A, any, any>) =>
+  Effect.runPromise(Effect.provide(effect, NodeContext.layer) as Effect.Effect<A>)
 
 // ============ AST extraction ============
 
@@ -177,9 +181,9 @@ describe("defineApp extraction", () => {
 
 describe("detectAssetPatterns", () => {
 
-  it("should detect directories as /{name}/* and files as /{name}", () => {
+  it("should detect directories as /{name}/* and files as /{name}", async () => {
     const fixtureDir = path.resolve(__dirname, "fixtures/site");
-    const patterns = detectAssetPatterns(fixtureDir);
+    const patterns = await run(detectAssetPatterns(fixtureDir));
 
     // The fixtures/site dir has: app.js, assets/, index.html, style.css
     expect(patterns).toContain("/assets/*");
@@ -188,15 +192,15 @@ describe("detectAssetPatterns", () => {
     expect(patterns).toContain("/style.css");
   });
 
-  it("should return empty array for non-existent directory", () => {
-    const patterns = detectAssetPatterns("/tmp/nonexistent-dir-" + Date.now());
+  it("should return empty array for non-existent directory", async () => {
+    const patterns = await run(detectAssetPatterns("/tmp/nonexistent-dir-" + Date.now()));
     expect(patterns).toEqual([]);
   });
 
-  it("should handle empty directory", () => {
+  it("should handle empty directory", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "eff-test-"));
     try {
-      const patterns = detectAssetPatterns(tmpDir);
+      const patterns = await run(detectAssetPatterns(tmpDir));
       expect(patterns).toEqual([]);
     } finally {
       fs.rmdirSync(tmpDir);

@@ -1,6 +1,5 @@
 import { Effect } from "effect";
-import * as fs from "fs/promises";
-import * as path from "path";
+import { Path, FileSystem } from "@effect/platform";
 import {
   ensureRole,
   ensureLambda,
@@ -72,15 +71,17 @@ const formatBytes = (bytes: number): string => {
 
 // ============ Shared utilities ============
 
-export const readSource = (input: DeployInput): Effect.Effect<string> =>
+export const readSource = (input: DeployInput) =>
   Effect.gen(function* () {
     if ("code" in input && typeof input.code === "string") {
       return input.code;
     }
-    const filePath = path.isAbsolute(input.file)
+    const p = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const filePath = p.isAbsolute(input.file)
       ? input.file
-      : path.join(input.projectDir, input.file);
-    return yield* Effect.promise(() => fs.readFile(filePath, "utf-8"));
+      : p.join(input.projectDir, input.file);
+    return yield* fs.readFileString(filePath);
   });
 
 export type LayerInfo = {
@@ -182,7 +183,7 @@ export const deployCoreLambda = ({
       tagCtx.stage,
       handlerName,
       mergedPermissions.length > 0 ? mergedPermissions : undefined,
-      makeTags(tagCtx, "iam-role")
+      makeTags(tagCtx)
     );
 
     const bundleResult = yield* bundle({
@@ -193,7 +194,7 @@ export const deployCoreLambda = ({
     });
     let staticFiles: import("../build/bundle").StaticFile[] | undefined;
     if (staticGlobs && staticGlobs.length > 0) {
-      const resolved = resolveStaticFiles(staticGlobs, input.projectDir);
+      const resolved = yield* resolveStaticFiles(staticGlobs, input.projectDir);
       if (resolved.missing.length > 0) {
         yield* deferWarning(`Static files not found for "${handlerName}": ${resolved.missing.join(", ")}`);
       }
@@ -226,7 +227,7 @@ export const deployCoreLambda = ({
       code,
       memory,
       timeout,
-      tags: makeTags(tagCtx, "lambda"),
+      tags: makeTags(tagCtx),
       ...(layerArn ? { layers: [layerArn] } : {}),
       environment
     });

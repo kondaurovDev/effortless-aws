@@ -53,7 +53,7 @@ export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, d
     const { bucketArn } = yield* ensureBucket({
       name: bucketName,
       region: input.region,
-      tags: makeTags(tagCtx, "s3-bucket"),
+      tags: makeTags(tagCtx),
     });
 
     // Resource-only mode: no Lambda, just the bucket

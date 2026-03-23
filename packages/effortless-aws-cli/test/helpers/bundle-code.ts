@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { NodeContext } from "@effect/platform-node";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -57,7 +58,7 @@ export const bundleCode = (input: BundleCodeInput) =>
  * Unlike data URLs, file-based imports can resolve bare specifiers (e.g. @aws-sdk/*).
  */
 export const importBundle = async (input: BundleCodeInput) => {
-  const result = await Effect.runPromise(bundleCode(input));
+  const result = await Effect.runPromise(bundleCode(input).pipe(Effect.provide(NodeContext.layer)));
   const hash = crypto.createHash("md5").update(result.code).digest("hex").slice(0, 8);
   const tempMjs = path.join(os.tmpdir(), `.temp-bundle-${hash}.mjs`);
   fs.writeFileSync(tempMjs, result.code);

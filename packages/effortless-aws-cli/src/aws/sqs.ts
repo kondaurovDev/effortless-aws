@@ -189,6 +189,9 @@ const deleteSingleQueue = (name: string) =>
     }
   });
 
+export const deleteStandardQueue = (queueName: string) =>
+  deleteSingleQueue(queueName);
+
 export const deleteFifoQueue = (queueName: string) =>
   Effect.gen(function* () {
     const baseName = queueName.endsWith(".fifo") ? queueName.slice(0, -5) : queueName;

@@ -1,14 +1,12 @@
 import { Effect } from "effect";
+import { Path, FileSystem } from "@effect/platform";
 import * as esbuild from "esbuild";
-import * as fsSync from "fs";
-import * as path from "path";
-import { builtinModules } from "module";
-import { createRequire } from "module";
+import { builtinModules, createRequire } from "module";
+import * as os from "os";
 import archiver from "archiver";
 import { globSync } from "glob";
 import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry } from "./handler-registry";
 import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig } from "effortless-aws";
-import * as os from "os";
 
 export type BundleInput = {
   projectDir: string;
@@ -127,56 +125,75 @@ const extractFromHandler = (exportName: string, handler: any, type: HandlerType)
  * Import a handler file, extract all configs of a specific handler type.
  * Replaces the old AST-based extract*Configs functions.
  */
-export const extractConfigsFromFile = async <T>(
+export const extractConfigsFromFile = <T>(
   file: string,
   projectDir: string,
   type: HandlerType,
-): Promise<ExtractedConfig<T>[]> => {
-  const mod = await importHandlerModule(file, projectDir);
-  const results: ExtractedConfig<T>[] = [];
-  for (const [exportName, value] of Object.entries(mod)) {
-    if (!value || typeof value !== "object" || !("__brand" in value)) continue;
-    const handlerType = BRAND_TO_TYPE[(value as any).__brand as string];
-    if (handlerType !== type) continue;
-    results.push(extractFromHandler(exportName, value, type) as ExtractedConfig<T>);
-  }
-  return results;
-};
+) =>
+  Effect.gen(function* () {
+    const mod = yield* importHandlerModule(file, projectDir);
+    const results: ExtractedConfig<T>[] = [];
+    for (const [exportName, value] of Object.entries(mod)) {
+      if (!value || typeof value !== "object" || !("__brand" in value)) continue;
+      const handlerType = BRAND_TO_TYPE[(value as any).__brand as string];
+      if (handlerType !== type) continue;
+      results.push(extractFromHandler(exportName, value, type) as ExtractedConfig<T>);
+    }
+    return results;
+  });
 
 /**
  * Bundle a handler file with esbuild to a temp .mjs, import() it, and extract
  * metadata from the exported handler objects.
  */
-const importHandlerModule = async (file: string, projectDir: string): Promise<Record<string, any>> => {
-  const tmpFile = path.join(os.tmpdir(), `eff-discover-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
-  try {
-    const result = await esbuild.build({
-      entryPoints: [file],
-      bundle: true,
-      platform: "node",
-      target: "node24",
-      write: false,
-      format: "esm",
-      external: ["@aws-sdk/*", "@smithy/*", ...builtinModules.flatMap(m => [m, `node:${m}`])],
-      absWorkingDir: projectDir,
-      banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
+const importHandlerModule = (file: string, projectDir: string) =>
+  Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const tmpFile = p.join(os.tmpdir(), `eff-discover-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
+
+    const result = yield* Effect.tryPromise({
+      try: () => esbuild.build({
+        entryPoints: [file],
+        bundle: true,
+        platform: "node",
+        target: "node24",
+        write: false,
+        format: "esm",
+        external: ["@aws-sdk/*", "@smithy/*", ...builtinModules.flatMap(m => [m, `node:${m}`])],
+        absWorkingDir: projectDir,
+        banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" },
+      }),
+      catch: (err) => new Error(`Failed to bundle ${file}: ${err}`),
     });
+
     const output = result.outputFiles?.[0];
-    if (!output) throw new Error(`esbuild produced no output for ${file}`);
-    fsSync.writeFileSync(tmpFile, output.text);
-    const mod = await import(tmpFile);
-    fsSync.unlinkSync(tmpFile);
+    if (!output) {
+      return yield* Effect.fail(new Error(`esbuild produced no output for ${file}`));
+    }
+
+    yield* fs.writeFileString(tmpFile, output.text);
+
+    const mod = yield* Effect.tryPromise({
+      try: () => import(tmpFile) as Promise<Record<string, any>>,
+      catch: (err) => {
+        console.error(`Discovery bundle left at: ${tmpFile}`);
+        return new Error(`Failed to import ${file}: ${err}`);
+      },
+    });
+
+    yield* fs.remove(tmpFile).pipe(Effect.catchAll(() => Effect.void));
     return mod;
-  } catch (err) {
-    console.error(`Discovery bundle left at: ${tmpFile}`);
-    throw err;
-  }
-};
+  });
 
 // ============ Bundle (uses registry) ============
 
 const _require = createRequire(import.meta.url);
-const runtimeDir = path.join(path.dirname(_require.resolve("effortless-aws/package.json")), "dist/runtime");
+
+const resolveRuntimeDir = Effect.gen(function* () {
+  const p = yield* Path.Path;
+  return p.join(p.dirname(_require.resolve("effortless-aws/package.json")), "dist/runtime");
+});
 
 export type BundleResult = {
   code: string;
@@ -186,13 +203,15 @@ export type BundleResult = {
 
 export const bundle = (input: BundleInput & { exportName?: string; external?: string[]; type?: HandlerType }) =>
   Effect.gen(function* () {
+    const p = yield* Path.Path;
     const exportName = input.exportName ?? "default";
     const type = input.type ?? "api";
     const externals = input.external ?? [];
 
     // Get source path for import statement
-    const sourcePath = path.isAbsolute(input.file) ? input.file : `./${input.file}`;
+    const sourcePath = p.isAbsolute(input.file) ? input.file : `./${input.file}`;
 
+    const runtimeDir = yield* resolveRuntimeDir;
     const entryPoint = generateEntryPoint(sourcePath, exportName, type, runtimeDir);
 
     // AWS SDK v3 is provided by the Lambda runtime — mark external for Lambda handlers.
@@ -277,12 +296,15 @@ const analyzeMetafile = (metafile: esbuild.Metafile): { path: string; bytes: num
  */
 export const bundleMiddleware = (input: { projectDir: string; file: string }) =>
   Effect.gen(function* () {
-    const absFile = path.isAbsolute(input.file)
+    const p = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const absFile = p.isAbsolute(input.file)
       ? input.file
-      : path.resolve(input.projectDir, input.file);
-    const source = fsSync.readFileSync(absFile, "utf-8");
-    const sourceDir = path.dirname(absFile);
+      : p.resolve(input.projectDir, input.file);
+    const source = yield* fs.readFileString(absFile);
+    const sourceDir = p.dirname(absFile);
 
+    const runtimeDir = yield* resolveRuntimeDir;
     const { entryPoint } = generateMiddlewareEntryPoint(source, runtimeDir);
 
     const awsExternals = ["@aws-sdk/*", "@smithy/*"];
@@ -347,33 +369,39 @@ export const zip = (input: ZipInput) =>
 
 // ============ Static file resolution ============
 
-export const resolveStaticFiles = (paths: string[], projectDir: string): { files: StaticFile[]; missing: string[] } => {
-  const files: StaticFile[] = [];
-  const missing: string[] = [];
+export const resolveStaticFiles = (paths: string[], projectDir: string) =>
+  Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const files: StaticFile[] = [];
+    const missing: string[] = [];
 
-  const collectFiles = (absPath: string, relPath: string) => {
-    const stat = fsSync.statSync(absPath, { throwIfNoEntry: false });
-    if (!stat) {
-      missing.push(relPath);
-      return;
+    const collectFiles = (absPath: string, relPath: string): Effect.Effect<void, any> =>
+      Effect.gen(function* () {
+        const exists = yield* fileSystem.exists(absPath);
+        if (!exists) {
+          missing.push(relPath);
+          return;
+        }
+        const stat = yield* fileSystem.stat(absPath);
+        if (stat.type === "Directory") {
+          const entries = yield* fileSystem.readDirectory(absPath);
+          for (const name of entries) {
+            yield* collectFiles(p.join(absPath, name), p.join(relPath, name));
+          }
+        } else {
+          const content = yield* fileSystem.readFile(absPath);
+          files.push({ content: Buffer.from(content), zipPath: relPath });
+        }
+      });
+
+    for (const pathStr of paths) {
+      const rel = pathStr.replace(/^\//, "");
+      yield* collectFiles(p.join(projectDir, rel), rel);
     }
-    if (stat.isDirectory()) {
-      for (const entry of fsSync.readdirSync(absPath, { withFileTypes: true })) {
-        collectFiles(path.join(absPath, entry.name), path.join(relPath, entry.name));
-      }
-    } else {
-      files.push({ content: fsSync.readFileSync(absPath), zipPath: relPath });
-    }
-  };
 
-  for (const p of paths) {
-    // Strip leading slash — paths are always relative to project root
-    const rel = p.replace(/^\//, "");
-    collectFiles(path.join(projectDir, rel), rel);
-  }
-
-  return { files, missing };
-};
+    return { files, missing };
+  });
 
 // ============ Directory ZIP (for SSR frameworks) ============
 
@@ -394,19 +422,24 @@ export const zipDirectory = (dirPath: string) =>
  * Scan a directory's top-level entries and return CloudFront path patterns.
  * Directories become "/{name}/*", files become "/{name}".
  */
-export const detectAssetPatterns = (assetsDir: string): string[] => {
-  if (!fsSync.existsSync(assetsDir)) return [];
+export const detectAssetPatterns = (assetsDir: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const exists = yield* fileSystem.exists(assetsDir);
+    if (!exists) return [] as string[];
 
-  const patterns: string[] = [];
-  for (const entry of fsSync.readdirSync(assetsDir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      patterns.push(`/${entry.name}/*`);
-    } else {
-      patterns.push(`/${entry.name}`);
+    const patterns: string[] = [];
+    const entries = yield* fileSystem.readDirectory(assetsDir);
+    for (const name of entries) {
+      const stat = yield* fileSystem.stat(`${assetsDir}/${name}`);
+      if (stat.type === "Directory") {
+        patterns.push(`/${name}/*`);
+      } else {
+        patterns.push(`/${name}`);
+      }
     }
-  }
-  return patterns;
-};
+    return patterns;
+  });
 
 // ============ File discovery ============
 
@@ -431,63 +464,67 @@ export type DiscoveredHandlers = {
   workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[];
 };
 
-export const discoverHandlers = async (files: string[], projectDir: string): Promise<DiscoveredHandlers> => {
-  const tableHandlers: { file: string; exports: ExtractedTableFunction[] }[] = [];
-  const appHandlers: { file: string; exports: ExtractedAppFunction[] }[] = [];
-  const staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[] = [];
-  const fifoQueueHandlers: { file: string; exports: ExtractedFifoQueueFunction[] }[] = [];
-  const bucketHandlers: { file: string; exports: ExtractedBucketFunction[] }[] = [];
-  const mailerHandlers: { file: string; exports: ExtractedMailerFunction[] }[] = [];
-  const apiHandlers: { file: string; exports: ExtractedApiFunction[] }[] = [];
-  const cronHandlers: { file: string; exports: ExtractedCronFunction[] }[] = [];
-  const workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[] = [];
+export const discoverHandlers = (files: string[], projectDir: string) =>
+  Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const tableHandlers: { file: string; exports: ExtractedTableFunction[] }[] = [];
+    const appHandlers: { file: string; exports: ExtractedAppFunction[] }[] = [];
+    const staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[] = [];
+    const fifoQueueHandlers: { file: string; exports: ExtractedFifoQueueFunction[] }[] = [];
+    const bucketHandlers: { file: string; exports: ExtractedBucketFunction[] }[] = [];
+    const mailerHandlers: { file: string; exports: ExtractedMailerFunction[] }[] = [];
+    const apiHandlers: { file: string; exports: ExtractedApiFunction[] }[] = [];
+    const cronHandlers: { file: string; exports: ExtractedCronFunction[] }[] = [];
+    const workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[] = [];
 
-  for (const file of files) {
-    if (!fsSync.statSync(file).isFile()) continue;
+    for (const file of files) {
+      const stat = yield* fileSystem.stat(file);
+      if (stat.type !== "File") continue;
 
-    const mod = await importHandlerModule(file, projectDir);
+      const mod = yield* importHandlerModule(file, projectDir);
 
-    const byType: Record<HandlerType, ExtractedConfig<any>[]> = {
-      table: [], app: [], staticSite: [], fifoQueue: [], bucket: [], mailer: [], cron: [], api: [], worker: [],
-    };
+      const byType: Record<HandlerType, ExtractedConfig<any>[]> = {
+        table: [], app: [], staticSite: [], fifoQueue: [], bucket: [], mailer: [], cron: [], api: [], worker: [],
+      };
 
-    for (const [exportName, value] of Object.entries(mod)) {
-      if (!value || typeof value !== "object") continue;
+      for (const [exportName, value] of Object.entries(mod)) {
+        if (!value || typeof value !== "object") continue;
 
-      // Detect unfinalized builders (have .build() method but no __brand)
-      if (!("__brand" in value) && typeof (value as any).build === "function") {
-        const shortFile = path.relative(projectDir, file);
-        const v = value as Record<string, unknown>;
-        const hint = typeof v.get === "function" && typeof v.post === "function" ? ".get() or .post()"
-          : typeof v.onRecord === "function" ? ".onRecord() or .onRecordBatch()"
-          : typeof v.onMessage === "function" ? ".onMessage() or .onMessageBatch()"
-          : typeof v.onObjectCreated === "function" ? ".onObjectCreated() or .onObjectRemoved()"
-          : typeof v.onTick === "function" ? ".onTick()"
-          : typeof v.handler === "function" ? ".onMessage()"
-          : ".build()";
-        console.warn(`⚠ ${shortFile}: "${exportName}" is missing a handler — did you forget ${hint}?`);
-        continue;
+        // Detect unfinalized builders (have .build() method but no __brand)
+        if (!("__brand" in value) && typeof (value as any).build === "function") {
+          const shortFile = p.relative(projectDir, file);
+          const v = value as Record<string, unknown>;
+          const hint = typeof v.get === "function" && typeof v.post === "function" ? ".get() or .post()"
+            : typeof v.onRecord === "function" ? ".onRecord() or .onRecordBatch()"
+            : typeof v.onMessage === "function" ? ".onMessage() or .onMessageBatch()"
+            : typeof v.onObjectCreated === "function" ? ".onObjectCreated() or .onObjectRemoved()"
+            : typeof v.onTick === "function" ? ".onTick()"
+            : typeof v.handler === "function" ? ".onMessage()"
+            : ".build()";
+          console.warn(`⚠ ${shortFile}: "${exportName}" is missing a handler — did you forget ${hint}?`);
+          continue;
+        }
+
+        if (!("__brand" in value)) continue;
+        const type = BRAND_TO_TYPE[(value as any).__brand as string];
+        if (!type) continue;
+        byType[type].push(extractFromHandler(exportName, value, type));
       }
 
-      if (!("__brand" in value)) continue;
-      const type = BRAND_TO_TYPE[(value as any).__brand as string];
-      if (!type) continue;
-      byType[type].push(extractFromHandler(exportName, value, type));
+      if (byType.table.length > 0) tableHandlers.push({ file, exports: byType.table });
+      if (byType.app.length > 0) appHandlers.push({ file, exports: byType.app });
+      if (byType.staticSite.length > 0) staticSiteHandlers.push({ file, exports: byType.staticSite });
+      if (byType.fifoQueue.length > 0) fifoQueueHandlers.push({ file, exports: byType.fifoQueue });
+      if (byType.bucket.length > 0) bucketHandlers.push({ file, exports: byType.bucket });
+      if (byType.mailer.length > 0) mailerHandlers.push({ file, exports: byType.mailer });
+      if (byType.api.length > 0) apiHandlers.push({ file, exports: byType.api });
+      if (byType.cron.length > 0) cronHandlers.push({ file, exports: byType.cron });
+      if (byType.worker.length > 0) workerHandlers.push({ file, exports: byType.worker });
     }
 
-    if (byType.table.length > 0) tableHandlers.push({ file, exports: byType.table });
-    if (byType.app.length > 0) appHandlers.push({ file, exports: byType.app });
-    if (byType.staticSite.length > 0) staticSiteHandlers.push({ file, exports: byType.staticSite });
-    if (byType.fifoQueue.length > 0) fifoQueueHandlers.push({ file, exports: byType.fifoQueue });
-    if (byType.bucket.length > 0) bucketHandlers.push({ file, exports: byType.bucket });
-    if (byType.mailer.length > 0) mailerHandlers.push({ file, exports: byType.mailer });
-    if (byType.api.length > 0) apiHandlers.push({ file, exports: byType.api });
-    if (byType.cron.length > 0) cronHandlers.push({ file, exports: byType.cron });
-    if (byType.worker.length > 0) workerHandlers.push({ file, exports: byType.worker });
-  }
-
-  return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers };
-};
+    return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } as DiscoveredHandlers;
+  });
 
 /** Flatten all discovered handlers into a list of { exportName, file, type } */
 export const flattenHandlers = (discovered: DiscoveredHandlers) => {

@@ -166,3 +166,96 @@ export const ensureService = (input: EnsureServiceInput) =>
 
     return result.service!.serviceArn!;
   });
+
+// ============ Delete functions ============
+
+/**
+ * Delete an ECS service (scales to 0 first, then deletes).
+ */
+export const deleteEcsService = (cluster: string, serviceName: string) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug(`Deleting ECS service: ${serviceName}`);
+
+    // Scale to 0 before deleting
+    yield* ecs.make("update_service", {
+      cluster,
+      service: serviceName,
+      desiredCount: 0,
+    }).pipe(
+      Effect.catchIf(
+        (error) => error instanceof ecs.ECSError && (
+          error.cause.name === "ServiceNotFoundException" ||
+          error.cause.name === "ClusterNotFoundException"
+        ),
+        () => Effect.succeed(undefined)
+      )
+    );
+
+    yield* ecs.make("delete_service", {
+      cluster,
+      service: serviceName,
+      force: true,
+    }).pipe(
+      Effect.catchIf(
+        (error) => error instanceof ecs.ECSError && error.cause.name === "ServiceNotFoundException",
+        () => Effect.succeed(undefined)
+      )
+    );
+  });
+
+/**
+ * Delete an ECS cluster (must have no active services).
+ */
+export const deleteEcsCluster = (name: string) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug(`Deleting ECS cluster: ${name}`);
+    yield* ecs.make("delete_cluster", {
+      cluster: name,
+    }).pipe(
+      Effect.catchIf(
+        (error) => error instanceof ecs.ECSError && error.cause.name === "ClusterNotFoundException",
+        () => Effect.succeed(undefined)
+      )
+    );
+  });
+
+/**
+ * Deregister all active revisions of a task definition family.
+ */
+export const deregisterTaskDefinitions = (family: string) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug(`Deregistering task definitions: ${family}`);
+    const result = yield* ecs.make("list_task_definitions", {
+      familyPrefix: family,
+      status: "ACTIVE",
+    }).pipe(
+      Effect.catchIf(
+        (error) => error instanceof ecs.ECSError && error.cause.name === "ClientException",
+        () => Effect.succeed({ taskDefinitionArns: [] })
+      )
+    );
+
+    for (const arn of result.taskDefinitionArns ?? []) {
+      yield* ecs.make("deregister_task_definition", {
+        taskDefinition: arn,
+      }).pipe(
+        Effect.catchAll(() => Effect.succeed(undefined))
+      );
+    }
+  });
+
+/**
+ * Delete a CloudWatch log group.
+ */
+export const deleteLogGroup = (name: string) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug(`Deleting log group: ${name}`);
+    yield* cloudwatch_logs.make("delete_log_group", {
+      logGroupName: name,
+    }).pipe(
+      Effect.catchIf(
+        (error) => error instanceof cloudwatch_logs.CloudWatchLogsError && error.cause.name === "ResourceNotFoundException",
+        () => Effect.succeed(undefined)
+      )
+    );
+  });

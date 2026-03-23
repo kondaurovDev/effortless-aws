@@ -1,56 +1,59 @@
 import { Effect } from "effect";
-import * as fs from "fs";
-import * as path from "path";
+import { Path, FileSystem } from "@effect/platform";
 import * as crypto from "crypto";
 import * as os from "os";
 import { s3 } from "~/aws/clients";
 
 // ============ Sitemap generation ============
 
-const collectHtmlPaths = (sourceDir: string): string[] => {
-  const paths: string[] = [];
+const collectHtmlPaths = (sourceDir: string) =>
+  Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const paths: string[] = [];
 
-  const walk = (dir: string, prefix: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const key = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        walk(path.join(dir, entry.name), key);
-      } else if (entry.name.endsWith(".html") || entry.name.endsWith(".htm")) {
-        if (entry.name === "404.html" || entry.name === "500.html") continue;
+    const walk = (dir: string, prefix: string): Effect.Effect<void, any> =>
+      Effect.gen(function* () {
+        const entries = yield* fileSystem.readDirectory(dir);
+        for (const name of entries) {
+          const key = prefix ? `${prefix}/${name}` : name;
+          const stat = yield* fileSystem.stat(p.join(dir, name));
+          if (stat.type === "Directory") {
+            yield* walk(p.join(dir, name), key);
+          } else if (name.endsWith(".html") || name.endsWith(".htm")) {
+            if (name === "404.html" || name === "500.html") continue;
 
-        // /index.html → /
-        // /about/index.html → /about/
-        // /page.html → /page.html
-        let urlPath = "/" + key;
-        if (urlPath.endsWith("/index.html")) {
-          urlPath = urlPath.slice(0, -"index.html".length);
-        } else if (urlPath.endsWith("/index.htm")) {
-          urlPath = urlPath.slice(0, -"index.htm".length);
+            let urlPath = "/" + key;
+            if (urlPath.endsWith("/index.html")) {
+              urlPath = urlPath.slice(0, -"index.html".length);
+            } else if (urlPath.endsWith("/index.htm")) {
+              urlPath = urlPath.slice(0, -"index.htm".length);
+            }
+
+            paths.push(urlPath);
+          }
         }
+      });
 
-        paths.push(urlPath);
-      }
-    }
-  };
+    yield* walk(sourceDir, "");
+    return paths.sort();
+  });
 
-  walk(sourceDir, "");
-  return paths.sort();
-};
+export const generateSitemap = (siteUrl: string, sourceDir: string) =>
+  Effect.gen(function* () {
+    const baseUrl = siteUrl.replace(/\/$/, "");
+    const paths = yield* collectHtmlPaths(sourceDir);
 
-export const generateSitemap = (siteUrl: string, sourceDir: string): string => {
-  const baseUrl = siteUrl.replace(/\/$/, "");
-  const paths = collectHtmlPaths(sourceDir);
+    const urls = paths
+      .map(urlPath => `  <url>\n    <loc>${baseUrl}${urlPath}</loc>\n  </url>`)
+      .join("\n");
 
-  const urls = paths
-    .map(urlPath => `  <url>\n    <loc>${baseUrl}${urlPath}</loc>\n  </url>`)
-    .join("\n");
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
+    return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${urls}
 </urlset>
 `;
-};
+  });
 
 // ============ Robots.txt generation ============
 
@@ -94,60 +97,69 @@ const createJwt = (serviceAccount: ServiceAccountKey): string => {
   return `${signInput}.${signature}`;
 };
 
-const getAccessToken = async (serviceAccount: ServiceAccountKey): Promise<string> => {
-  const jwt = createJwt(serviceAccount);
-
-  const response = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Failed to get Google access token: ${response.status} ${text}`);
-  }
-
-  const data = (await response.json()) as { access_token: string };
-  return data.access_token;
-};
-
-const publishUrl = async (accessToken: string, url: string): Promise<{ url: string; ok: boolean; error?: string }> => {
-  const response = await fetch("https://indexing.googleapis.com/v3/urlNotifications:publish", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
+const getAccessToken = (serviceAccount: ServiceAccountKey) =>
+  Effect.tryPromise({
+    try: async () => {
+      const jwt = createJwt(serviceAccount);
+      const response = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`${response.status} ${text}`);
+      }
+      const data = (await response.json()) as { access_token: string };
+      return data.access_token;
     },
-    body: JSON.stringify({ url, type: "URL_UPDATED" }),
+    catch: (error) => new Error(`Failed to get Google access token: ${error}`),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    return { url, ok: false, error: `${response.status} ${text}` };
-  }
-
-  return { url, ok: true };
-};
+const publishUrl = (accessToken: string, url: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const response = await fetch("https://indexing.googleapis.com/v3/urlNotifications:publish", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ url, type: "URL_UPDATED" }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        return { url, ok: false as const, error: `${response.status} ${text}` };
+      }
+      return { url, ok: true as const };
+    },
+    catch: (error) => new Error(`Failed to submit ${url}: ${error}`),
+  });
 
 /** Collect all HTML file keys from a directory (e.g. ["index.html", "about/index.html"]) */
-export const collectHtmlKeys = (sourceDir: string): string[] => {
-  const keys: string[] = [];
-  const walk = (dir: string, prefix: string) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const fullPath = path.join(dir, entry.name);
-      const key = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        walk(fullPath, key);
-      } else if (entry.name.endsWith(".html") || entry.name.endsWith(".htm")) {
-        if (entry.name === "404.html" || entry.name === "500.html") continue;
-        keys.push(key);
-      }
-    }
-  };
-  walk(sourceDir, "");
-  return keys;
-};
+export const collectHtmlKeys = (sourceDir: string) =>
+  Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const keys: string[] = [];
+    const walk = (dir: string, prefix: string): Effect.Effect<void, any> =>
+      Effect.gen(function* () {
+        const entries = yield* fileSystem.readDirectory(dir);
+        for (const name of entries) {
+          const fullPath = p.join(dir, name);
+          const key = prefix ? `${prefix}/${name}` : name;
+          const stat = yield* fileSystem.stat(fullPath);
+          if (stat.type === "Directory") {
+            yield* walk(fullPath, key);
+          } else if (name.endsWith(".html") || name.endsWith(".htm")) {
+            if (name === "404.html" || name === "500.html") continue;
+            keys.push(key);
+          }
+        }
+      });
+    yield* walk(sourceDir, "");
+    return keys;
+  });
 
 /** Convert S3 keys (e.g. "about/index.html") to page URLs (e.g. "https://example.com/about/") */
 export const keysToUrls = (siteUrl: string, keys: string[]): string[] => {
@@ -202,6 +214,8 @@ export const submitToGoogleIndexing = (input: {
   allPageUrls: string[];
 }) =>
   Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
     const { serviceAccountPath, projectDir, bucketName, allPageUrls } = input;
 
     // Load already indexed URLs from S3
@@ -222,17 +236,18 @@ export const submitToGoogleIndexing = (input: {
     }
 
     const expanded = serviceAccountPath.startsWith("~/")
-      ? path.join(os.homedir(), serviceAccountPath.slice(2))
+      ? p.join(os.homedir(), serviceAccountPath.slice(2))
       : serviceAccountPath;
-    const keyPath = path.resolve(projectDir, expanded);
+    const keyPath = p.resolve(projectDir, expanded);
 
-    if (!fs.existsSync(keyPath)) {
+    const keyExists = yield* fileSystem.exists(keyPath);
+    if (!keyExists) {
       return yield* Effect.fail(
         new Error(`Google service account key not found: ${keyPath}`)
       );
     }
 
-    const serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf-8")) as ServiceAccountKey;
+    const serviceAccount = JSON.parse(yield* fileSystem.readFileString(keyPath)) as ServiceAccountKey;
 
     if (!serviceAccount.client_email || !serviceAccount.private_key) {
       return yield* Effect.fail(
@@ -242,10 +257,7 @@ export const submitToGoogleIndexing = (input: {
 
     yield* Effect.logDebug(`Authenticating with Google as ${serviceAccount.client_email}`);
 
-    const accessToken = yield* Effect.tryPromise({
-      try: () => getAccessToken(serviceAccount),
-      catch: (error) => new Error(`Google auth failed: ${error}`),
-    });
+    const accessToken = yield* getAccessToken(serviceAccount);
 
     // Google Indexing API has a 200 requests/day quota
     const maxUrls = Math.min(urlsToSubmit.length, 200);
@@ -259,10 +271,7 @@ export const submitToGoogleIndexing = (input: {
     let failed = 0;
 
     for (const url of urlsToSubmit.slice(0, maxUrls)) {
-      const result = yield* Effect.tryPromise({
-        try: () => publishUrl(accessToken, url),
-        catch: (error) => new Error(`Failed to submit ${url}: ${error}`),
-      });
+      const result = yield* publishUrl(accessToken, url);
 
       if (result.ok) {
         submitted++;

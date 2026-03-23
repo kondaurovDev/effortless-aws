@@ -48,7 +48,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       name: tableName,
       billingMode: config.billingMode ?? "PAY_PER_REQUEST",
       streamView: config.streamView ?? "NEW_AND_OLD_IMAGES",
-      tags: makeTags(tagCtx, "dynamodb")
+      tags: makeTags(tagCtx)
     });
 
     // Merge EFF_DEP_SELF (own table name) into deps env vars
@@ -93,7 +93,7 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
 
 export const deployTable = (input: DeployInput) =>
   Effect.gen(function* () {
-    const configs = yield* Effect.promise(() => extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, input.projectDir, "table"));
+    const configs = yield* extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, input.projectDir, "table");
 
     if (configs.length === 0) {
       return yield* Effect.fail(new Error("No defineTable exports found in source"));
@@ -132,7 +132,7 @@ export const deployTable = (input: DeployInput) =>
 
 export const deployAllTables = (input: DeployInput) =>
   Effect.gen(function* () {
-    const functions = yield* Effect.promise(() => extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, input.projectDir, "table"));
+    const functions = yield* extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, input.projectDir, "table");
 
     if (functions.length === 0) {
       return yield* Effect.fail(new Error("No defineTable exports found in source"));
