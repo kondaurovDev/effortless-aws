@@ -1,5 +1,20 @@
 # @effortless-aws/cli
 
+## 0.16.0
+
+### Minor Changes
+
+- [`a46fada`](https://github.com/kondaurovDev/effortless-aws/commit/a46fada333cfa0da5e96772a446883a09f931a6c) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Rework `eff cleanup` command: replace `--orphaned` with `--stale` for smarter resource detection, add interactive confirmation prompts, and remove `--roles` and `--layer` flags.
+
+  - `--stale` detects stale handlers (in AWS but not in code), stale individual resources (e.g. IAM role without its Lambda), and unused Lambda layer versions
+  - All destructive actions now require confirmation via interactive prompt (`--yes`/`-y` to skip)
+  - Scheduler resources are now discovered via name-based listing (not affected by Resource Groups Tagging API gaps)
+  - Rename "orphaned" to "stale" in `eff status` for consistency
+
+### Patch Changes
+
+- [`bf1f731`](https://github.com/kondaurovDev/effortless-aws/commit/bf1f73190c44e9facb675e01e76fb299ceb21c23) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Internal refactoring: extract CliContext and resource registry, replace `execSync` with Effect `Command` for app/site builds, use `@effect/platform` Path/FileSystem instead of Node builtins, simplify tag generation, add ECS/S3/SQS cleanup functions.
+
 ## 0.15.0
 
 ### Minor Changes
