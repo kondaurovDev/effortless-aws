@@ -34,15 +34,15 @@ export type { EnsureOACInput, EnsureDistributionInput, EnsureSsrDistributionInpu
 export { getDefaultVpcSubnets } from "./vpc";
 
 // ECS
-export { ensureCluster, ensureTaskDefinition, ensureService, ensureLogGroup } from "./ecs";
+export { ensureCluster, ensureTaskDefinition, ensureService, ensureLogGroup, deleteEcsService, deleteEcsCluster, deregisterTaskDefinitions, deleteLogGroup } from "./ecs";
 export type { EnsureTaskDefinitionInput, EnsureServiceInput } from "./ecs";
 
 // SQS
-export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue } from "./sqs";
+export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue, deleteStandardQueue } from "./sqs";
 export type { EnsureFifoQueueInput, EnsureFifoQueueResult, EnsureSqsEventSourceMappingInput } from "./sqs";
 
 // Scheduler
-export { ensureSchedule } from "./scheduler";
+export { ensureSchedule, deleteSchedule, listSchedulesByPrefix } from "./scheduler";
 export type { EnsureScheduleInput, EnsureScheduleResult } from "./scheduler";
 
 // SES
@@ -50,7 +50,7 @@ export { ensureSesIdentity, deleteSesIdentity } from "./ses";
 export type { EnsureSesIdentityInput, EnsureSesIdentityResult, DkimRecord } from "./ses";
 
 // Tags
-export { makeTags, toAwsTagList, resolveStage, getResourcesByTags, getAllResourcesByTags, findOrphanedResources, groupResourcesByHandler } from "./tags";
+export { makeTags, toAwsTagList, resolveStage, getResourcesByTags, getAllResourcesByTags, findOrphanedResources, groupResourcesByHandler, resourceTypeFromArn, findHandlerResourceArns } from "./tags";
 export type { ResourceType, TagContext } from "./tags";
 
 // Clients

@@ -1,6 +1,30 @@
 import { Effect } from "effect";
 import { scheduler } from "./clients";
 
+/**
+ * List all schedules with a given name prefix.
+ * Used for stale resource detection since EventBridge Scheduler
+ * is not indexed by the Resource Groups Tagging API.
+ */
+export const listSchedulesByPrefix = (prefix: string) =>
+  Effect.gen(function* () {
+    const schedules: { name: string; arn: string }[] = [];
+    let token: string | undefined;
+
+    do {
+      const result = yield* scheduler.make("list_schedules", {
+        NamePrefix: prefix,
+        ...(token ? { NextToken: token } : {}),
+      });
+      for (const s of result.Schedules ?? []) {
+        if (s.Name && s.Arn) schedules.push({ name: s.Name, arn: s.Arn });
+      }
+      token = result.NextToken;
+    } while (token);
+
+    return schedules;
+  });
+
 export type EnsureScheduleInput = {
   /** Schedule name (deterministic: project-stage-handler) */
   name: string;
@@ -23,6 +47,22 @@ export type EnsureScheduleResult = {
 /**
  * Create or update an EventBridge Scheduler schedule that invokes a Lambda function.
  */
+/**
+ * Delete an EventBridge Scheduler schedule.
+ */
+export const deleteSchedule = (name: string) =>
+  Effect.gen(function* () {
+    yield* Effect.logDebug(`Deleting schedule: ${name}`);
+    yield* scheduler.make("delete_schedule", {
+      Name: name,
+    }).pipe(
+      Effect.catchIf(
+        (error) => error instanceof scheduler.SchedulerError && error.cause.name === "ResourceNotFoundException",
+        () => Effect.succeed(undefined)
+      )
+    );
+  });
+
 export const ensureSchedule = (input: EnsureScheduleInput) =>
   Effect.gen(function* () {
     const { name, schedule, targetArn, roleArn, timezone, tags } = input;

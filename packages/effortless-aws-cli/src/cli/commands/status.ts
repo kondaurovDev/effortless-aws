@@ -1,15 +1,16 @@
 import { Command } from "@effect/cli";
-import { Effect, Console, Logger, LogLevel, Option } from "effect";
+import { Effect, Console } from "effect";
 
 import {
   Aws,
   getAllResourcesByTags,
   groupResourcesByHandler,
   checkDependencyWarnings,
+  resourceTypeFromArn,
 } from "../../aws";
 import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
-import { projectOption, stageOption, regionOption, verboseOption, getPatternsFromConfig } from "~/cli/config";
-import { ProjectConfig } from "~/cli/project-config";
+import { projectOption, stageOption, regionOption, verboseOption } from "~/cli/config";
+import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
 
 const { lambda, cloudfront } = Aws;
@@ -18,13 +19,6 @@ const { lambda, cloudfront } = Aws;
 
 type HandlerType = "table" | "app" | "site" | "queue" | "api";
 
-type CodeHandler = {
-  name: string;
-  type: HandlerType;
-  method?: string;
-  path?: string;
-};
-
 type LambdaDetails = {
   lastModified?: string;
   memory?: number;
@@ -32,7 +26,7 @@ type LambdaDetails = {
 };
 
 type StatusEntry = {
-  status: "new" | "deployed" | "orphaned";
+  status: "new" | "deployed" | "stale";
   name: string;
   type: HandlerType | string;
   method?: string;
@@ -98,14 +92,15 @@ const getDistributionInfo = (distributionArn: string) =>
 
 // ============ Code discovery ============
 
-const discoverCodeHandlers = async (projectDir: string, patterns: string[]): Promise<CodeHandler[]> => {
-  const files = findHandlerFiles(patterns, projectDir);
-  const discovered = await discoverHandlers(files, projectDir);
-  return flattenHandlers(discovered).map(h => ({
-    name: h.exportName,
-    type: h.type as HandlerType,
-  }));
-};
+const discoverCodeHandlers = (projectDir: string, patterns: string[]) =>
+  Effect.gen(function* () {
+    const files = findHandlerFiles(patterns, projectDir);
+    const discovered = yield* discoverHandlers(files, projectDir);
+    return flattenHandlers(discovered).map(h => ({
+      name: h.exportName,
+      type: h.type as HandlerType,
+    }));
+  });
 
 // ============ AWS discovery ============
 
@@ -126,13 +121,23 @@ const discoverAwsHandlers = (
     if (INTERNAL_HANDLERS.has(name)) continue;
 
     const lambdaResource = handlerResources.find(r =>
-      r.Tags?.find(t => t.Key === "effortless:type" && t.Value === "lambda")
+      r.ResourceARN && resourceTypeFromArn(r.ResourceARN) === "lambda"
     );
     const cfResource = handlerResources.find(r =>
-      r.Tags?.find(t => t.Key === "effortless:type" && t.Value === "cloudfront-distribution")
+      r.ResourceARN && resourceTypeFromArn(r.ResourceARN) === "cloudfront-distribution"
     );
-    const typeTag = handlerResources[0]?.Tags?.find(t => t.Key === "effortless:type");
-    const type = typeTag?.Value ?? "unknown";
+
+    const resourceTypes = handlerResources
+      .map(r => r.ResourceARN ? resourceTypeFromArn(r.ResourceARN) : undefined)
+      .filter(Boolean) as string[];
+    const type = resourceTypes.includes("dynamodb") ? "dynamodb"
+      : resourceTypes.includes("cloudfront-distribution") ? "s3-bucket"
+      : resourceTypes.includes("sqs") ? "sqs"
+      : resourceTypes.includes("ses") ? "ses"
+      : resourceTypes.includes("ecs") ? "ecs"
+      : resourceTypes.includes("scheduler") ? "scheduler"
+      : resourceTypes.includes("lambda") ? "lambda"
+      : "unknown";
 
     handlers.push({
       name,
@@ -168,10 +173,10 @@ const formatType = (type: string): string => {
 const STATUS_COLORS = {
   new: c.yellow,
   deployed: c.green,
-  orphaned: c.red,
+  stale: c.red,
 } as const;
 
-const formatStatus = (status: "new" | "deployed" | "orphaned"): string => {
+const formatStatus = (status: "new" | "deployed" | "stale"): string => {
   return STATUS_COLORS[status](status.padEnd(10));
 };
 
@@ -208,150 +213,126 @@ const formatEntry = (entry: StatusEntry): string => {
   return `  ${parts.join("  ")}`;
 };
 
+// ============ Status logic ============
+
+const statusHandler = Effect.gen(function* () {
+  const { project, stage, region, patterns, projectDir } = yield* CliContext;
+
+  const codeHandlers = patterns ? yield* discoverCodeHandlers(projectDir, patterns) : [];
+  const codeHandlerNames = new Set(codeHandlers.map(h => h.name));
+
+  yield* Console.log(`\nStatus for ${c.bold(project + "/" + stage)}:\n`);
+
+  const resources = yield* getAllResourcesByTags(project, stage, region);
+  const awsHandlers = discoverAwsHandlers(resources);
+
+  const entries: StatusEntry[] = [];
+
+  // Deployed + New: iterate code handlers
+  for (const handler of codeHandlers) {
+    const inAws = awsHandlers.find(h => h.name === handler.name);
+
+    if (inAws) {
+      let lambdaDetails: LambdaDetails | undefined;
+      if (inAws.lambdaArn) {
+        const functionName = extractFunctionName(inAws.lambdaArn);
+        if (functionName) {
+          lambdaDetails = yield* getLambdaDetails(functionName);
+        }
+      }
+
+      let distributionDomain: string | undefined;
+      let customDomain: string | undefined;
+      if (inAws.distributionArn) {
+        const info = yield* getDistributionInfo(inAws.distributionArn);
+        distributionDomain = info.domain;
+        customDomain = info.customDomain;
+      }
+
+      entries.push({
+        status: "deployed",
+        name: handler.name,
+        type: handler.type,
+        lambda: lambdaDetails,
+        distributionDomain,
+        customDomain,
+      });
+    } else {
+      entries.push({
+        status: "new",
+        name: handler.name,
+        type: handler.type,
+      });
+    }
+  }
+
+  // Stale: in AWS but not in code
+  for (const handler of awsHandlers) {
+    if (!codeHandlerNames.has(handler.name)) {
+      let lambdaDetails: LambdaDetails | undefined;
+      if (handler.lambdaArn) {
+        const functionName = extractFunctionName(handler.lambdaArn);
+        if (functionName) {
+          lambdaDetails = yield* getLambdaDetails(functionName);
+        }
+      }
+
+      entries.push({
+        status: "stale",
+        name: handler.name,
+        type: handler.type,
+        lambda: lambdaDetails,
+      });
+    }
+  }
+
+  if (entries.length === 0 && codeHandlers.length === 0) {
+    yield* Console.log("No handlers found in code or AWS.");
+    return;
+  }
+
+  const order = { new: 0, deployed: 1, stale: 2 };
+  entries.sort((a, b) => order[a.status] - order[b.status]);
+
+  for (const entry of entries) {
+    yield* Console.log(formatEntry(entry));
+  }
+
+  const counts = {
+    new: entries.filter(e => e.status === "new").length,
+    deployed: entries.filter(e => e.status === "deployed").length,
+    stale: entries.filter(e => e.status === "stale").length,
+  };
+
+  const parts: string[] = [];
+  if (counts.new > 0) parts.push(c.yellow(`${counts.new} new`));
+  if (counts.deployed > 0) parts.push(c.green(`${counts.deployed} deployed`));
+  if (counts.stale > 0) parts.push(c.red(`${counts.stale} stale`));
+
+  yield* Console.log(`\nTotal: ${parts.join(", ")}`);
+
+  const depWarnings = yield* checkDependencyWarnings(projectDir).pipe(
+    Effect.catchAll(() => Effect.succeed([] as string[]))
+  );
+  if (depWarnings.length > 0) {
+    yield* Console.log("");
+    for (const w of depWarnings) {
+      yield* Console.log(c.yellow(`  ⚠ ${w}`));
+    }
+  }
+});
+
 // ============ Command ============
 
 export const statusCommand = Command.make(
   "status",
   { project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption },
-  ({ project: projectOpt, stage, region, verbose }) =>
-    Effect.gen(function* () {
-      const { config, projectDir } = yield* ProjectConfig;
-
-      const project = Option.getOrElse(projectOpt, () => config?.name ?? "");
-      const finalStage = config?.stage ?? stage;
-      const finalRegion = config?.region ?? region;
-
-      if (!project) {
-        yield* Console.error("Error: --project is required (or set 'name' in effortless.config.ts)");
-        return;
-      }
-
-      const clientsLayer = Aws.makeClients({
-        lambda: { region: finalRegion },
+  (opts) =>
+    statusHandler.pipe(
+      withCliContext(opts, (region) => Aws.makeClients({
+        lambda: { region },
         cloudfront: { region: "us-east-1" },
-        resource_groups_tagging_api: { region: finalRegion },
-      });
-
-      const logLevel = verbose ? LogLevel.Debug : LogLevel.Info;
-
-      // Discover handlers from code
-      const patterns = getPatternsFromConfig(config);
-      const codeHandlers = patterns ? yield* Effect.promise(() => discoverCodeHandlers(projectDir, patterns)) : [];
-      const codeHandlerNames = new Set(codeHandlers.map(h => h.name));
-
-      yield* Effect.gen(function* () {
-        yield* Console.log(`\nStatus for ${c.bold(project + "/" + finalStage)}:\n`);
-
-        // Query AWS resources
-        const resources = yield* getAllResourcesByTags(project, finalStage, finalRegion);
-        const awsHandlers = discoverAwsHandlers(resources);
-        const awsHandlerNames = new Set(awsHandlers.map(h => h.name));
-
-        const entries: StatusEntry[] = [];
-
-        // Deployed + New: iterate code handlers
-        for (const handler of codeHandlers) {
-          const inAws = awsHandlers.find(h => h.name === handler.name);
-
-          if (inAws) {
-            // Deployed — get Lambda details
-            let lambdaDetails: LambdaDetails | undefined;
-            if (inAws.lambdaArn) {
-              const functionName = extractFunctionName(inAws.lambdaArn);
-              if (functionName) {
-                lambdaDetails = yield* getLambdaDetails(functionName);
-              }
-            }
-
-            let distributionDomain: string | undefined;
-            let customDomain: string | undefined;
-            if (inAws.distributionArn) {
-              const info = yield* getDistributionInfo(inAws.distributionArn);
-              distributionDomain = info.domain;
-              customDomain = info.customDomain;
-            }
-
-            entries.push({
-              status: "deployed",
-              name: handler.name,
-              type: handler.type,
-              method: handler.method,
-              path: handler.path,
-              lambda: lambdaDetails,
-              distributionDomain,
-              customDomain,
-            });
-          } else {
-            // New
-            entries.push({
-              status: "new",
-              name: handler.name,
-              type: handler.type,
-              method: handler.method,
-              path: handler.path,
-            });
-          }
-        }
-
-        // Orphaned: in AWS but not in code
-        for (const handler of awsHandlers) {
-          if (!codeHandlerNames.has(handler.name)) {
-            let lambdaDetails: LambdaDetails | undefined;
-            if (handler.lambdaArn) {
-              const functionName = extractFunctionName(handler.lambdaArn);
-              if (functionName) {
-                lambdaDetails = yield* getLambdaDetails(functionName);
-              }
-            }
-
-            entries.push({
-              status: "orphaned",
-              name: handler.name,
-              type: handler.type,
-              lambda: lambdaDetails,
-            });
-          }
-        }
-
-        if (entries.length === 0 && codeHandlers.length === 0) {
-          yield* Console.log("No handlers found in code or AWS.");
-          return;
-        }
-
-        // Sort: new first, then deployed, then orphaned
-        const order = { new: 0, deployed: 1, orphaned: 2 };
-        entries.sort((a, b) => order[a.status] - order[b.status]);
-
-        for (const entry of entries) {
-          yield* Console.log(formatEntry(entry));
-        }
-
-        const counts = {
-          new: entries.filter(e => e.status === "new").length,
-          deployed: entries.filter(e => e.status === "deployed").length,
-          orphaned: entries.filter(e => e.status === "orphaned").length,
-        };
-
-        const parts: string[] = [];
-        if (counts.new > 0) parts.push(c.yellow(`${counts.new} new`));
-        if (counts.deployed > 0) parts.push(c.green(`${counts.deployed} deployed`));
-        if (counts.orphaned > 0) parts.push(c.red(`${counts.orphaned} orphaned`));
-
-        yield* Console.log(`\nTotal: ${parts.join(", ")}`);
-
-        // Dependency warnings
-        const depWarnings = yield* checkDependencyWarnings(projectDir).pipe(
-          Effect.catchAll(() => Effect.succeed([] as string[]))
-        );
-        if (depWarnings.length > 0) {
-          yield* Console.log("");
-          for (const w of depWarnings) {
-            yield* Console.log(c.yellow(`  ⚠ ${w}`));
-          }
-        }
-      }).pipe(
-        Effect.provide(clientsLayer),
-        Logger.withMinimumLogLevel(logLevel)
-      );
-    }).pipe(Effect.provide(ProjectConfig.Live))
-).pipe(Command.withDescription("Compare local handlers with deployed AWS resources. Shows new, deployed, and orphaned handlers"));
+        resource_groups_tagging_api: { region },
+      })),
+    )
+).pipe(Command.withDescription("Compare local handlers with deployed AWS resources. Shows new, deployed, and stale handlers."));
