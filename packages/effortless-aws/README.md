@@ -13,15 +13,8 @@ npm install effortless-aws
 ```typescript
 import { defineApi } from "effortless-aws";
 
-export const hello = defineApi({
-  basePath: "/hello",
-  get: {
-    "/": async () => ({
-      status: 200,
-      body: { message: "Hello!" },
-    }),
-  },
-});
+export const hello = defineApi({ basePath: "/hello" })
+  .get("/", async ({ ok }) => ok({ message: "Hello!" }));
 ```
 
 ## Handlers
@@ -39,9 +32,9 @@ export const hello = defineApi({
 ## Features
 
 - **Infrastructure from code** — export a handler, get the AWS resources
-- **Typed everything** — `defineTable<Order>` gives you typed `put()`, typed `deps.orders.get()`, typed `record.new`
-- **Cross-handler deps** — `deps: { orders }` auto-wires IAM and injects a typed `TableClient`
-- **SSM params** — `param("stripe-key")` fetches from Parameter Store at cold start
+- **Typed everything** — `defineTable<Order>()` gives you typed `put()`, typed `deps.orders.get()`, typed `record.new`
+- **Cross-handler deps** — `.deps(() => ({ orders }))` auto-wires IAM and injects a typed `TableClient`
+- **SSM params** — `.config(({ defineSecret }) => ...)` fetches secrets from Parameter Store at cold start
 - **Static files** — `static: ["templates/*.ejs"]` bundles files into the Lambda ZIP
 - **Cold start caching** — `setup` factory runs once per cold start, cached across invocations
 
