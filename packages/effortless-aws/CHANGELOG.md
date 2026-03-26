@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.32.1
+
+### Patch Changes
+
+- [`a04ce2e`](https://github.com/kondaurovDev/effortless-aws/commit/a04ce2efc30f4aeefcbb39e9920cd88e40cb004e) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix path parameter routing for Lambda Function URLs. Routes with `{param}` patterns (e.g. `/templates/{id}`) now correctly match incoming requests and extract parameters into `req.params` and `input`.
+
 ## 0.32.0
 
 ### Minor Changes

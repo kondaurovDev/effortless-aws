@@ -1,5 +1,12 @@
 # @effortless-aws/cli
 
+## 0.16.1
+
+### Patch Changes
+
+- Updated dependencies [[`a04ce2e`](https://github.com/kondaurovDev/effortless-aws/commit/a04ce2efc30f4aeefcbb39e9920cd88e40cb004e)]:
+  - effortless-aws@0.32.1
+
 ## 0.16.0
 
 ### Minor Changes
