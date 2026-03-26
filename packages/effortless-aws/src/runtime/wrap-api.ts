@@ -67,11 +67,40 @@ const unauthorized = () => ({
 
 // ============ Route matching ============
 
-/** Find a matching route for the given method and path (relative to basePath) */
-const findRoute = (routes: RouteEntry[], method: string, relativePath: string): RouteEntry | undefined =>
-  routes.find(r =>
-    r.path === relativePath && (r.method === method || (r.method === "GET" && method === "HEAD"))
+/** Extract param names from a route pattern like /templates/{id} */
+const extractParamNames = (pattern: string): string[] => {
+  const names: string[] = [];
+  pattern.replace(/\{(\w+)\}/g, (_, name) => { names.push(name); return ""; });
+  return names;
+};
+
+/** Convert a route pattern like /templates/{id} to a RegExp */
+const patternToRegex = (pattern: string): RegExp => {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, (ch) =>
+    ch === "{" || ch === "}" ? ch : `\\${ch}`
   );
+  const withParams = escaped.replace(/\{(\w+)\}/g, "([^/]+)");
+  return new RegExp(`^${withParams}$`);
+};
+
+type RouteMatch = { entry: RouteEntry; params: Record<string, string> };
+
+/** Find a matching route for the given method and path (relative to basePath) */
+const findRoute = (routes: RouteEntry[], method: string, relativePath: string): RouteMatch | undefined => {
+  for (const r of routes) {
+    if (!(r.method === method || (r.method === "GET" && method === "HEAD"))) continue;
+    if (r.path === relativePath) return { entry: r, params: {} };
+    const regex = patternToRegex(r.path);
+    const match = relativePath.match(regex);
+    if (match) {
+      const names = extractParamNames(r.path);
+      const params: Record<string, string> = {};
+      for (let i = 0; i < names.length; i++) params[names[i]!] = decodeURIComponent(match[i + 1]!);
+      return { entry: r, params };
+    }
+  }
+  return undefined;
+};
 
 // ============ Wrapper ============
 
@@ -117,9 +146,25 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
       const method = event.requestContext?.http?.method ?? event.httpMethod ?? "GET";
       const path = event.requestContext?.http?.path ?? event.path ?? "/";
       const headers = event.headers ?? {};
-      const query = event.queryStringParameters ?? {};
-      const params = event.pathParameters ?? {} as Record<string, string | undefined>;
       const body = parseBody(event.body, event.isBase64Encoded ?? false);
+
+      const logInput = { method, path, query: event.queryStringParameters ?? {}, body };
+      const relativePath = extractRelativePath(path);
+
+      if (!relativePath) {
+        rt.logExecution(startTime, logInput, { status: 404 });
+        return notFound();
+      }
+
+      const routeMatch = findRoute(routes, method, relativePath);
+      if (!routeMatch) {
+        rt.logExecution(startTime, logInput, { status: 404 });
+        return notFound();
+      }
+
+      const { entry, params: routeParams } = routeMatch;
+      const query = event.queryStringParameters ?? {};
+      const params = { ...(event.pathParameters ?? {}), ...routeParams };
 
       // Merged input: query < body < params (higher priority wins)
       const merged = {
@@ -132,20 +177,6 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
         method, path, headers, query, params, body,
         rawBody: event.body,
       };
-
-      const logInput = { method, path, query, body };
-      const relativePath = extractRelativePath(req.path);
-
-      if (!relativePath) {
-        rt.logExecution(startTime, logInput, { status: 404 });
-        return notFound();
-      }
-
-      const entry = findRoute(routes, req.method, relativePath);
-      if (!entry) {
-        rt.logExecution(startTime, logInput, { status: 404 });
-        return notFound();
-      }
 
       // Extract auth cookie from request headers
       const cookieHeader = req.headers["cookie"] ?? req.headers["Cookie"] ?? "";

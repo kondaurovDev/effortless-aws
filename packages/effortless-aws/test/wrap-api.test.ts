@@ -326,6 +326,66 @@ describe("wrapApi", () => {
     });
   });
 
+  // ============ Path parameter matching ============
+
+  describe("path parameter matching", () => {
+    it("matches single path parameter", async () => {
+      const handler = vi.fn(({ req }: any) => ({ status: 200, body: req.params }));
+      const fn = wrapApi(makeHandler({ routes: [{ method: "GET", path: "/templates/{id}", onRequest: handler }] }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/templates/classic" } } }));
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body)).toEqual({ id: "classic" });
+    });
+
+    it("matches multiple path parameters", async () => {
+      const handler = vi.fn(({ req }: any) => ({ status: 200, body: req.params }));
+      const fn = wrapApi(makeHandler({ routes: [{ method: "GET", path: "/users/{userId}/posts/{postId}", onRequest: handler }] }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/users/42/posts/7" } } }));
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body)).toEqual({ userId: "42", postId: "7" });
+    });
+
+    it("extracts path params into input with highest priority", async () => {
+      const handler = vi.fn(({ input }: any) => ({ status: 200, body: input }));
+      const fn = wrapApi(makeHandler({ routes: [{ method: "GET", path: "/items/{id}", onRequest: handler }] }));
+      const result = await fn(makeEvent({
+        requestContext: { http: { method: "GET", path: "/api/items/99" } },
+        queryStringParameters: { id: "from-query" },
+      }));
+      expect(JSON.parse(result.body).id).toBe("99");
+    });
+
+    it("decodes URL-encoded path parameters", async () => {
+      const handler = vi.fn(({ req }: any) => ({ status: 200, body: req.params }));
+      const fn = wrapApi(makeHandler({ routes: [{ method: "GET", path: "/search/{term}", onRequest: handler }] }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/search/hello%20world" } } }));
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body)).toEqual({ term: "hello world" });
+    });
+
+    it("returns 404 when parameterized route does not match structure", async () => {
+      const fn = wrapApi(makeHandler({ routes: [{ method: "GET", path: "/templates/{id}", onRequest: () => ({ status: 200, body: "ok" }) }] }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/templates/a/b" } } }));
+      expect(result.statusCode).toBe(404);
+    });
+
+    it("prefers exact route over parameterized", async () => {
+      const paramHandler = vi.fn(() => ({ status: 200, body: "param" }));
+      const exactHandler = vi.fn(() => ({ status: 200, body: "exact" }));
+      const fn = wrapApi(makeHandler({
+        routes: [
+          { method: "GET", path: "/templates/featured", onRequest: exactHandler },
+          { method: "GET", path: "/templates/{id}", onRequest: paramHandler },
+        ],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/templates/featured" } } }));
+      expect(result.statusCode).toBe(200);
+      expect(JSON.parse(result.body)).toBe("exact");
+      expect(exactHandler).toHaveBeenCalled();
+      expect(paramHandler).not.toHaveBeenCalled();
+    });
+  });
+
   // ============ Streaming fallback ============
 
   describe("streaming", () => {
