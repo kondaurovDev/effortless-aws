@@ -15,13 +15,13 @@ Effortless AWS is a TypeScript framework where you define AWS resources (Lambda,
 import { defineConfig } from "effortless-aws";
 
 export default defineConfig({
-  name: "my-service",       // prefix for all AWS resources
+  name: "my-service",
   region: "eu-central-1",
-  handlers: ["src/**/*.ts"], // glob patterns to discover handlers
-  stage: "dev",              // default stage, override with --stage
-  defaults: {
-    memory: 256,             // MB (128–10240)
-    timeout: "30 seconds",   // human-readable
+  handlers: ["src/**/*.ts"],
+  stage: "dev",
+  lambda: {
+    memory: 256,
+    timeout: "30 seconds",
     runtime: "nodejs24.x",
   },
 });

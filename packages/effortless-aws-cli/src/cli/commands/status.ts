@@ -7,11 +7,13 @@ import {
   groupResourcesByHandler,
   checkDependencyWarnings,
   resourceTypeFromArn,
+  findDepsDir,
 } from "../../aws";
 import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
 import { projectOption, stageOption, regionOption, verboseOption } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
+import * as path from "path";
 
 const { lambda, cloudfront } = Aws;
 
@@ -25,7 +27,7 @@ type LambdaDetails = {
   timeout?: number;
 };
 
-type StatusEntry = {
+export type StatusEntry = {
   status: "new" | "deployed" | "stale";
   name: string;
   type: HandlerType | string;
@@ -40,7 +42,7 @@ type StatusEntry = {
 
 const INTERNAL_HANDLERS = new Set(["api", "platform"]);
 
-const extractFunctionName = (arn: string): string | undefined => {
+export const extractFunctionName = (arn: string): string | undefined => {
   const match = arn.match(/:function:([^:]+)$/);
   return match?.[1];
 };
@@ -63,7 +65,7 @@ const formatDate = (date: Date | string | undefined): string => {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 };
 
-const getLambdaDetails = (functionName: string) =>
+export const getLambdaDetails = (functionName: string) =>
   Effect.gen(function* () {
     const config = yield* lambda.make("get_function_configuration", {
       FunctionName: functionName,
@@ -77,7 +79,7 @@ const getLambdaDetails = (functionName: string) =>
     Effect.catchAll(() => Effect.succeed({} as LambdaDetails))
   );
 
-const getDistributionInfo = (distributionArn: string) =>
+export const getDistributionInfo = (distributionArn: string) =>
   Effect.gen(function* () {
     const distributionId = distributionArn.split("/").pop()!;
     const result = yield* cloudfront.make("get_distribution", { Id: distributionId });
@@ -92,7 +94,7 @@ const getDistributionInfo = (distributionArn: string) =>
 
 // ============ Code discovery ============
 
-const discoverCodeHandlers = (projectDir: string, patterns: string[]) =>
+export const discoverCodeHandlers = (projectDir: string, patterns: string[]) =>
   Effect.gen(function* () {
     const files = findHandlerFiles(patterns, projectDir);
     const discovered = yield* discoverHandlers(files, projectDir);
@@ -111,7 +113,7 @@ type AwsHandler = {
   distributionArn?: string;
 };
 
-const discoverAwsHandlers = (
+export const discoverAwsHandlers = (
   resources: Awaited<ReturnType<typeof getAllResourcesByTags>> extends Effect.Effect<infer A, any, any> ? A : never
 ) => {
   const byHandler = groupResourcesByHandler(resources as any);
@@ -213,15 +215,23 @@ const formatEntry = (entry: StatusEntry): string => {
   return `  ${parts.join("  ")}`;
 };
 
-// ============ Status logic ============
+// ============ Status data (pure — no side effects) ============
 
-const statusHandler = Effect.gen(function* () {
+export type StatusResult = {
+  project: string;
+  stage: string;
+  region: string;
+  handlers: StatusEntry[];
+  summary: { new: number; deployed: number; stale: number };
+  depWarnings: string[];
+};
+
+/** Collect status data: compare code handlers with AWS resources. No Console output. */
+export const getStatus = Effect.gen(function* () {
   const { project, stage, region, patterns, projectDir } = yield* CliContext;
 
   const codeHandlers = patterns ? yield* discoverCodeHandlers(projectDir, patterns) : [];
   const codeHandlerNames = new Set(codeHandlers.map(h => h.name));
-
-  yield* Console.log(`\nStatus for ${c.bold(project + "/" + stage)}:\n`);
 
   const resources = yield* getAllResourcesByTags(project, stage, region);
   const awsHandlers = discoverAwsHandlers(resources);
@@ -286,40 +296,22 @@ const statusHandler = Effect.gen(function* () {
     }
   }
 
-  if (entries.length === 0 && codeHandlers.length === 0) {
-    yield* Console.log("No handlers found in code or AWS.");
-    return;
-  }
-
   const order = { new: 0, deployed: 1, stale: 2 };
   entries.sort((a, b) => order[a.status] - order[b.status]);
 
-  for (const entry of entries) {
-    yield* Console.log(formatEntry(entry));
-  }
-
-  const counts = {
+  const summary = {
     new: entries.filter(e => e.status === "new").length,
     deployed: entries.filter(e => e.status === "deployed").length,
     stale: entries.filter(e => e.status === "stale").length,
   };
 
-  const parts: string[] = [];
-  if (counts.new > 0) parts.push(c.yellow(`${counts.new} new`));
-  if (counts.deployed > 0) parts.push(c.green(`${counts.deployed} deployed`));
-  if (counts.stale > 0) parts.push(c.red(`${counts.stale} stale`));
-
-  yield* Console.log(`\nTotal: ${parts.join(", ")}`);
-
-  const depWarnings = yield* checkDependencyWarnings(projectDir).pipe(
+  const files = patterns ? findHandlerFiles(patterns, projectDir) : [];
+  const depsDir = files.length > 0 ? findDepsDir(path.dirname(files[0]!), projectDir) : projectDir;
+  const depWarnings = yield* checkDependencyWarnings(depsDir).pipe(
     Effect.catchAll(() => Effect.succeed([] as string[]))
   );
-  if (depWarnings.length > 0) {
-    yield* Console.log("");
-    for (const w of depWarnings) {
-      yield* Console.log(c.yellow(`  ⚠ ${w}`));
-    }
-  }
+
+  return { project, stage, region, handlers: entries, summary, depWarnings } satisfies StatusResult;
 });
 
 // ============ Command ============
@@ -328,7 +320,34 @@ export const statusCommand = Command.make(
   "status",
   { project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption },
   (opts) =>
-    statusHandler.pipe(
+    Effect.gen(function* () {
+      const result = yield* getStatus;
+
+      yield* Console.log(`\nStatus for ${c.bold(result.project + "/" + result.stage)}:\n`);
+
+      if (result.handlers.length === 0) {
+        yield* Console.log("No handlers found in code or AWS.");
+        return;
+      }
+
+      for (const entry of result.handlers) {
+        yield* Console.log(formatEntry(entry));
+      }
+
+      const parts: string[] = [];
+      if (result.summary.new > 0) parts.push(c.yellow(`${result.summary.new} new`));
+      if (result.summary.deployed > 0) parts.push(c.green(`${result.summary.deployed} deployed`));
+      if (result.summary.stale > 0) parts.push(c.red(`${result.summary.stale} stale`));
+
+      yield* Console.log(`\nTotal: ${parts.join(", ")}`);
+
+      if (result.depWarnings.length > 0) {
+        yield* Console.log("");
+        for (const w of result.depWarnings) {
+          yield* Console.log(c.yellow(`  ⚠ ${w}`));
+        }
+      }
+    }).pipe(
       withCliContext(opts, (region) => Aws.makeClients({
         lambda: { region },
         cloudfront: { region: "us-east-1" },

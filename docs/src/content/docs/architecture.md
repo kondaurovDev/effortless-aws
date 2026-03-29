@@ -9,7 +9,7 @@ description: How effortless works under the hood — build pipeline, deploy flow
 ┌─────────────────────────────────────────────────────────┐
 │                    User's Project                       │
 │                                                         │
-│  effortless.config.ts                                   │
+│  effortless.config.ts                                 │
 │  src/                                                   │
 │    ├── api.ts         → export users = defineApi(...)    │
 │    ├── orders.ts      → export orders = ...             │
@@ -21,7 +21,7 @@ description: How effortless works under the hood — build pipeline, deploy flow
 ┌─────────────────────────────────────────────────────────┐
 │                    effortless-aws CLI                    │
 │                                                         │
-│  1. Load config (effortless.config.ts)                  │
+│  1. Load config (effortless.config.ts)                │
 │  2. Analyze handlers (ts-morph)                         │
 │     - Find all defineApi/defineTable/etc exports         │
 │     - Extract metadata from handler configs             │
@@ -503,10 +503,6 @@ The CLI warns about common `package.json` mistakes that affect the layer:
 - **Empty `dependencies`** — if `dependencies` is empty but `devDependencies` has packages, the layer will be empty. Runtime packages must be in `dependencies` to be included.
 
 These warnings appear during `eff deploy` and `eff layer`.
-
-### Monorepo Note
-
-When using the `root` config option, the layer reads `package.json` and `node_modules` from the **directory where you run the CLI** (`cwd`), not from the resolved `root`. This ensures the correct project-level dependencies are used, not workspace-root dependencies.
 
 ### AWS SDK Handling
 

@@ -15,7 +15,7 @@ export { ensureProjectApi, addRouteToApi, removeStaleRoutes, deleteApi } from ".
 export type { ProjectApiConfig, RouteConfig, HttpMethod } from "./apigateway";
 
 // Layer
-export { ensureLayer, readProductionDependencies, computeLockfileHash, collectLayerPackages, checkDependencyWarnings, listLayerVersions, deleteAllLayerVersions, deleteLayerVersion } from "./layer";
+export { ensureLayer, readProductionDependencies, computeLockfileHash, collectLayerPackages, checkDependencyWarnings, listLayerVersions, deleteAllLayerVersions, deleteLayerVersion, findDepsDir } from "./layer";
 export type { LayerConfig, LayerResult, LayerStatus, LayerVersionInfo } from "./layer";
 
 // S3

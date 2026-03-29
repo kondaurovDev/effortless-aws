@@ -29,7 +29,7 @@ my-service/
 │   ├── orders.ts                 ← API + database + stream processing
 │   ├── uploads.ts                ← file storage + image processing
 │   └── notifications.ts         ← queue + email
-├── effortless.config.ts          ← project name, region, defaults
+├── effortless.config.ts        ← project name, region, defaults
 └── package.json
 ```
 

@@ -8,6 +8,7 @@ import {
   ensureLayer,
   readProductionDependencies,
   collectLayerPackages,
+  findDepsDir,
   cleanupOrphanedFunctions,
   ensureFunctionUrl,
   addFunctionUrlPublicAccess,
@@ -16,6 +17,7 @@ import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/b
 import { toSeconds } from "effortless-aws";
 import type { SecretEntry } from "~/build/handler-registry";
 import * as crypto from "crypto";
+import * as path from "path";
 import { ssm } from "~/aws/clients";
 import { collectRequiredSecrets, checkMissingSecrets } from "./resolve-config";
 
@@ -66,7 +68,12 @@ type HandlerManifest = { name: string; type: string }[];
  * TTY mode: pre-prints all handler lines with a spinner, then updates them in place via ANSI escape codes.
  * Non-TTY mode (CI): prints each line sequentially as handlers complete.
  */
-const createLiveProgress = (manifest: HandlerManifest) => {
+const createLiveProgress = (manifest: HandlerManifest, silent = false) => {
+  if (silent) {
+    return (_name: string, _type: string, _status: StepStatus, _bundleSize?: number): Effect.Effect<void> =>
+      Effect.void;
+  }
+
   const isTTY = process.stdout.isTTY ?? false;
   const lineIndex = new Map<string, number>();
   manifest.forEach((h, i) => lineIndex.set(`${h.name}:${h.type}`, i));
@@ -133,9 +140,7 @@ type PrepareLayerInput = {
   project: string;
   stage: string;
   region: string;
-  /** Directory with package.json and node_modules (= cwd) */
-  packageDir: string;
-  extraNodeModules?: string[];
+  depsDir: string;
 };
 
 const prepareLayer = (input: PrepareLayerInput) =>
@@ -144,8 +149,7 @@ const prepareLayer = (input: PrepareLayerInput) =>
       project: input.project,
       stage: input.stage,
       region: input.region,
-      projectDir: input.packageDir,
-      extraNodeModules: input.extraNodeModules
+      projectDir: input.depsDir,
     }).pipe(
       Effect.provide(
         Aws.makeClients({
@@ -155,10 +159,10 @@ const prepareLayer = (input: PrepareLayerInput) =>
     );
 
     const prodDeps = layerResult
-      ? yield* readProductionDependencies(input.packageDir)
+      ? yield* readProductionDependencies(input.depsDir)
       : [];
     const { packages: external } = prodDeps.length > 0
-      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps, input.extraNodeModules))
+      ? yield* Effect.sync(() => collectLayerPackages(input.depsDir, prodDeps))
       : { packages: [] as string[] };
 
     yield* Effect.logDebug(`Layer result: ${layerResult ? "exists" : "null"}, external packages: ${external.length}`);
@@ -769,15 +773,14 @@ const buildWorkerTasks = (
 
 export type DeployProjectInput = {
   projectDir: string;
-  /** Directory with package.json and node_modules (= cwd). Falls back to projectDir. */
-  packageDir?: string;
   patterns: string[];
   project: string;
   stage?: string;
   region: string;
   noSites?: boolean;
   verbose?: boolean;
-  extraNodeModules?: string[];
+  /** Suppress all stdout output (for MCP server where stdout is the transport). */
+  silent?: boolean;
 };
 
 export type DeployProjectResult = {
@@ -886,13 +889,15 @@ export const deployProject = (input: DeployProjectInput) =>
 
     // Prepare layer only when Lambda-based handlers exist
     const needsLambda = totalTableHandlers + totalAppHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers + totalCronHandlers > 0;
+    // Find the directory with runtime deps — may differ from projectDir in monorepos
+    // (e.g. handlers in `infra/src/*` with deps in `infra/package.json`)
+    const depsDir = findDepsDir(path.dirname(files[0]!), input.projectDir);
     const { layerArn, layerVersion, layerStatus, external } = needsLambda
       ? yield* prepareLayer({
           project: input.project,
           stage: stage,
           region: input.region,
-          packageDir: input.packageDir ?? input.projectDir,
-          extraNodeModules: input.extraNodeModules
+          depsDir,
         })
       : { layerArn: undefined, layerVersion: undefined, layerStatus: undefined, external: [] as string[] };
 
@@ -927,7 +932,7 @@ export const deployProject = (input: DeployProjectInput) =>
       for (const fn of exports) manifest.push({ name: fn.exportName, type: "worker" });
 
     manifest.sort((a, b) => a.name.localeCompare(b.name));
-    const logComplete = createLiveProgress(manifest);
+    const logComplete = createLiveProgress(manifest, input.silent);
     const ctx: DeployTaskCtx = {
       input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap, logComplete,
     };

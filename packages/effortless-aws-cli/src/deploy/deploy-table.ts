@@ -108,8 +108,8 @@ export const deployTable = (input: DeployInput) =>
       project: input.project,
       stage: resolveStage(input.stage),
       region: input.region,
-      packageDir: input.packageDir ?? input.projectDir,
-      extraNodeModules: input.extraNodeModules
+      projectDir: input.projectDir,
+      file: input.file,
     });
 
     const result = yield* deployTableFunction({
@@ -145,8 +145,8 @@ export const deployAllTables = (input: DeployInput) =>
       project: input.project,
       stage: resolveStage(input.stage),
       region: input.region,
-      packageDir: input.packageDir ?? input.projectDir,
-      extraNodeModules: input.extraNodeModules
+      projectDir: input.projectDir,
+      file: input.file,
     });
 
     const results = yield* Effect.forEach(

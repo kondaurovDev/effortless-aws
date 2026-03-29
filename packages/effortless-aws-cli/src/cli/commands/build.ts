@@ -61,13 +61,13 @@ const bundleAndWrite = (input: BundleAndWriteInput) =>
     }
   });
 
-const resolveExternals = (projectDir: string, extraNodeModules?: string[]) =>
+const resolveExternals = (projectDir: string) =>
   Effect.gen(function* () {
     const prodDeps = yield* readProductionDependencies(projectDir).pipe(
       Effect.catchAll(() => Effect.succeed([] as string[]))
     );
     const { packages: external, warnings } = prodDeps.length > 0
-      ? yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps, extraNodeModules))
+      ? yield* Effect.sync(() => collectLayerPackages(projectDir, prodDeps))
       : { packages: [] as string[], warnings: [] as string[] };
 
     for (const warning of warnings) {
@@ -149,16 +149,15 @@ export const buildCommand = Command.make(
     Effect.gen(function* () {
       const p = yield* Path.Path;
       const fs = yield* FileSystem.FileSystem;
-      const { projectDir, cwd } = yield* ProjectConfig;
+      const { projectDir } = yield* ProjectConfig;
       const outputDir = p.isAbsolute(output) ? output : p.resolve(projectDir, output);
-      const extraNodeModules = projectDir !== cwd ? [p.join(projectDir, "node_modules")] : undefined;
 
       const exists = yield* fs.exists(outputDir);
       if (!exists) {
         yield* fs.makeDirectory(outputDir, { recursive: true });
       }
 
-      const external = yield* resolveExternals(projectDir, extraNodeModules);
+      const external = yield* resolveExternals(projectDir);
 
       yield* Option.match(file, {
         onNone: () => buildAll(projectDir, outputDir, external),

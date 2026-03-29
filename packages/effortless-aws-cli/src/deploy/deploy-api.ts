@@ -76,8 +76,8 @@ export const deploy = (input: DeployInput) =>
       project: input.project,
       stage: tagCtx.stage,
       region: input.region,
-      packageDir: input.packageDir ?? input.projectDir,
-      extraNodeModules: input.extraNodeModules
+      projectDir: input.projectDir,
+      file: input.file,
     });
 
     const { functionArn } = yield* deployApiFunction({

@@ -113,7 +113,7 @@ The region closest to your users. Effortless supports any AWS region. Set it in 
 ```typescript
 export default defineConfig({
   name: "my-app",
-  region: "eu-west-1", // Ireland
+  region: "eu-west-1",
 });
 ```
 
@@ -135,9 +135,9 @@ Yes, in `effortless.config.ts`:
 export default defineConfig({
   name: "my-app",
   region: "eu-west-1",
-  defaults: {
-    memorySize: 512,  // MB
-    timeout: 30,      // seconds
+  lambda: {
+    memory: 512,
+    timeout: "30 seconds",
   },
 });
 ```
@@ -146,18 +146,7 @@ You can also override per handler. See [Configuration](/configuration/).
 
 ### Can I use Lambda inside a VPC?
 
-Yes. Configure VPC settings in `effortless.config.ts`:
-
-```typescript
-export default defineConfig({
-  name: "my-app",
-  region: "eu-west-1",
-  vpc: {
-    subnetIds: ["subnet-abc", "subnet-def"],
-    securityGroupIds: ["sg-123"],
-  },
-});
-```
+VPC support is planned. When available, it will be configurable in `effortless.config.ts`.
 
 ### Can I use npm packages in my handlers?
 

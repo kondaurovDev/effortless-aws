@@ -1,19 +1,22 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm --filter effortless-aws build)",
-      "Bash(pnpm --filter effortless-aws typecheck)",
-      "Bash(pnpm --filter @effortless-aws/cli typecheck)",
-      "Bash(pnpm --filter effortless-aws test)",
-      "Bash(pnpm test:*)",
-      "Bash(npx vitest:*)",
-      "Bash(pnpm exec:*)",
-      "Bash(pnpm --filter effortless-aws run build)",
-      "Bash(pnpm typecheck:*)",
+      "Bash(node -e \"const e = require\\(''effect/package.json''\\); console.log\\(e.version\\)\")",
+      "Bash(npx -y effect --version)",
+      "Bash(npx tsx:*)",
       "Bash(pnpm build:*)",
-      "Bash(grep -r \"defineTable\\\\|defineBucket\\\\|defineFifoQueue\" /Users/alex/projects/effortless-aws --include=*.ts --include=*.tsx --exclude-dir=node_modules --exclude-dir=dist -l)",
-      "Bash(pnpm tsup:*)",
+      "Bash(pnpm test:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Read(//private/tmp/**)",
+      "Bash(gh api:*)",
+      "Bash(gh search:*)",
+      "WebFetch(domain:vite.dev)",
+      "Bash(git stash:*)",
+      "Bash(git rebase:*)",
       "Bash(git add:*)",
+      "Bash(git commit:*)",
       "Bash(git reset:*)"
     ]
   }

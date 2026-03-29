@@ -1,6 +1,6 @@
 // Config
-export { defineConfig } from "./config"
 export type { EffortlessConfig } from "./config"
+export { defineConfig } from "./config"
 
 // Handlers
 export { defineTable } from "./handlers/define-table"

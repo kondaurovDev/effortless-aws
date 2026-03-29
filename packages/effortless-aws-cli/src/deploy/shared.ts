@@ -9,9 +9,11 @@ import {
   type TagContext,
   ensureLayer,
   readProductionDependencies,
-  collectLayerPackages
+  collectLayerPackages,
+  findDepsDir,
 } from "../aws";
 import { bundle, zip, resolveStaticFiles, type BundleInput } from "~/build/bundle";
+import * as path from "path";
 
 // ============ Deferred warnings ============
 
@@ -57,9 +59,6 @@ export type DeployInput = BundleInput & {
   stage?: string;
   region: string;
   exportName?: string;
-  /** Directory with package.json and node_modules (= cwd). Falls back to projectDir. */
-  packageDir?: string;
-  extraNodeModules?: string[];
 };
 
 const formatBytes = (bytes: number): string => {
@@ -93,24 +92,27 @@ export const ensureLayerAndExternal = (input: {
   project: string;
   stage: string;
   region: string;
-  /** Directory with package.json and node_modules (may differ from projectDir when root is set) */
-  packageDir: string;
-  extraNodeModules?: string[];
+  projectDir: string;
+  /** Handler file path — used to find the correct package.json in monorepos */
+  file?: string;
 }) =>
   Effect.gen(function* () {
+    const depsDir = input.file
+      ? findDepsDir(path.dirname(path.resolve(input.projectDir, input.file)), input.projectDir)
+      : input.projectDir;
+
     const layerResult = yield* ensureLayer({
       project: input.project,
       stage: input.stage,
       region: input.region,
-      projectDir: input.packageDir,
-      extraNodeModules: input.extraNodeModules
+      projectDir: depsDir,
     });
 
     const prodDeps = layerResult
-      ? yield* readProductionDependencies(input.packageDir)
+      ? yield* readProductionDependencies(depsDir)
       : [];
     const { packages: external, warnings: layerWarnings } = prodDeps.length > 0
-      ? yield* Effect.sync(() => collectLayerPackages(input.packageDir, prodDeps, input.extraNodeModules))
+      ? yield* Effect.sync(() => collectLayerPackages(depsDir, prodDeps))
       : { packages: [] as string[], warnings: [] as string[] };
 
     for (const warning of layerWarnings) {

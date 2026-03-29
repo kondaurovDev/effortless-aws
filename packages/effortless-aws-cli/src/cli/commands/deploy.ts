@@ -70,8 +70,7 @@ const formatDeploySummary = (results: DeployProjectResult): string[] => {
 
 const deployAll = (deployOpts: { noSites: boolean; verbose: boolean }) =>
   Effect.gen(function* () {
-    const p = yield* Path.Path;
-    const { project, stage, region, patterns, cwd, projectDir } = yield* CliContext;
+    const { project, stage, region, patterns, projectDir } = yield* CliContext;
 
     if (!patterns) {
       yield* Console.error("Error: No target specified and no 'handlers' patterns in config");
@@ -80,14 +79,12 @@ const deployAll = (deployOpts: { noSites: boolean; verbose: boolean }) =>
 
     const results = yield* deployProject({
       projectDir,
-      packageDir: cwd,
       patterns,
       project,
       stage,
       region,
       noSites: deployOpts.noSites,
       verbose: deployOpts.verbose,
-      extraNodeModules: projectDir !== cwd ? [p.join(projectDir, "node_modules")] : undefined,
     });
 
     for (const line of formatDeploySummary(results)) {
@@ -98,12 +95,11 @@ const deployAll = (deployOpts: { noSites: boolean; verbose: boolean }) =>
 const deployByFilePath = (targetValue: string) =>
   Effect.gen(function* () {
     const p = yield* Path.Path;
-    const { project, stage, region, cwd, projectDir } = yield* CliContext;
+    const { project, stage, region, projectDir } = yield* CliContext;
     const fullPath = p.isAbsolute(targetValue) ? targetValue : p.resolve(projectDir, targetValue);
 
     const input = {
       projectDir,
-      packageDir: cwd,
       file: fullPath,
       project,
       stage,
@@ -131,7 +127,7 @@ const deployByFilePath = (targetValue: string) =>
 const deployByName = (targetValue: string) =>
   Effect.gen(function* () {
     const p = yield* Path.Path;
-    const { project, stage, region, patterns, cwd, projectDir } = yield* CliContext;
+    const { project, stage, region, patterns, projectDir } = yield* CliContext;
 
     if (!patterns) {
       yield* Console.error("Error: No 'handlers' patterns in config to search for handler name");
@@ -156,13 +152,11 @@ const deployByName = (targetValue: string) =>
 
     const input = {
       projectDir,
-      packageDir: cwd,
       file: found.file,
       project,
       stage,
       region,
       exportName: found.exportName,
-      extraNodeModules: projectDir !== cwd ? [p.join(projectDir, "node_modules")] : undefined,
     };
 
     if (found.type === "table") {

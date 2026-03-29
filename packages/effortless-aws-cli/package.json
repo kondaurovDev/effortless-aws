@@ -15,7 +15,8 @@
   ],
   "bin": {
     "eff": "./dist/cli/index.js",
-    "effortless": "./dist/cli/index.js"
+    "effortless": "./dist/cli/index.js",
+    "eff-mcp": "./dist/mcp/index.js"
   },
   "scripts": {
     "gen": "gen-aws-sdk",
@@ -49,6 +50,8 @@
     "effortless-aws": "workspace:*",
     "esbuild": "^0.25.0",
     "glob": "^13.0.0",
+    "@modelcontextprotocol/sdk": "^1.28.0",
+    "zod": "^4.3.6",
     "ts-morph": "^27.0.2"
   },
   "devDependencies": {

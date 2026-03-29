@@ -25,7 +25,7 @@ const sinceOption = Options.text("since").pipe(
 
 // ============ Helpers ============
 
-const parseDuration = (input: string): number => {
+export const parseDuration = (input: string): number => {
   const match = input.match(/^(\d+)(s|m|h|d)$/);
   if (!match) return 5 * 60 * 1000;
 
@@ -78,7 +78,7 @@ const formatLogMessage = (message: string): string => {
   return msg;
 };
 
-const fetchLogs = (logGroupName: string, startTime: number, nextToken?: string) =>
+export const fetchLogs = (logGroupName: string, startTime: number, nextToken?: string) =>
   cloudwatch_logs.make("filter_log_events", {
     logGroupName,
     startTime,
@@ -86,9 +86,26 @@ const fetchLogs = (logGroupName: string, startTime: number, nextToken?: string) 
     ...(nextToken ? { nextToken } : {}),
   });
 
-// ============ Logs handler ============
+// ============ Log data (pure — no side effects) ============
 
-const logsHandler = (handlerName: string, tail: boolean, since: string) =>
+export type LogEvent = {
+  timestamp: string | null;
+  message: string;
+};
+
+export type GetLogsResult = {
+  logGroupName: string;
+  count: number;
+  events: LogEvent[];
+};
+
+export type GetLogsError = {
+  error: string;
+  available?: string[];
+};
+
+/** Fetch log events for a handler. No Console output. */
+export const getLogs = (handlerName: string, since = "5m", maxLines = 100) =>
   Effect.gen(function* () {
     const { project, stage, patterns, projectDir } = yield* CliContext;
 
@@ -101,14 +118,10 @@ const logsHandler = (handlerName: string, tail: boolean, since: string) =>
       const matched = allHandlers.find(h => h.exportName === handlerName);
 
       if (!matched) {
-        yield* Console.error(`Handler "${handlerName}" not found in code.`);
-        if (allHandlers.length > 0) {
-          yield* Console.log("\nAvailable handlers:");
-          for (const h of allHandlers) {
-            yield* Console.log(`  ${h.exportName}`);
-          }
-        }
-        return;
+        return {
+          error: `Handler "${handlerName}" not found in code`,
+          available: allHandlers.map(h => h.exportName),
+        } satisfies GetLogsError;
       }
 
       handlerType = matched.type;
@@ -120,66 +133,29 @@ const logsHandler = (handlerName: string, tail: boolean, since: string) =>
       : `/aws/lambda/${resourceName}`;
 
     const durationMs = parseDuration(since);
-    let startTime = Date.now() - durationMs;
+    const startTime = Date.now() - durationMs;
 
-    yield* Console.log(`Logs for ${c.bold(handlerName)} ${c.dim(`(${logGroupName})`)}:\n`);
-
-    let hasLogs = false;
     const result = yield* fetchLogs(logGroupName, startTime).pipe(
       Effect.catchAll((error) => {
         if (error instanceof Aws.cloudwatch_logs.CloudWatchLogsError && error.cause.name === "ResourceNotFoundException") {
           return Effect.succeed({ events: undefined, nextToken: undefined });
         }
         return Effect.fail(error);
-      })
-    );
-
-    if (result.events && result.events.length > 0) {
-      hasLogs = true;
-      for (const event of result.events) {
-        const ts = formatTimestamp(event.timestamp ?? 0);
-        const msg = formatLogMessage(event.message ?? "");
-        if (msg) {
-          yield* Console.log(`${c.dim(ts)}  ${msg}`);
-        }
-        if (event.timestamp) {
-          startTime = Math.max(startTime, event.timestamp + 1);
-        }
-      }
-    }
-
-    if (!hasLogs && !tail) {
-      yield* Console.log("No logs found. Try --since 1h or --tail to wait for new logs.");
-      return;
-    }
-
-    if (!tail) return;
-
-    if (!hasLogs) {
-      yield* Console.log("Waiting for logs... (Ctrl+C to stop)\n");
-    }
-
-    yield* Effect.repeat(
-      Effect.gen(function* () {
-        const result = yield* fetchLogs(logGroupName, startTime).pipe(
-          Effect.catchAll(() => Effect.succeed({ events: undefined, nextToken: undefined }))
-        );
-
-        if (result.events && result.events.length > 0) {
-          for (const event of result.events) {
-            const ts = formatTimestamp(event.timestamp ?? 0);
-            const msg = formatLogMessage(event.message ?? "");
-            if (msg) {
-              yield* Console.log(`${c.dim(ts)}  ${msg}`);
-            }
-            if (event.timestamp) {
-              startTime = Math.max(startTime, event.timestamp + 1);
-            }
-          }
-        }
       }),
-      Schedule.spaced("2 seconds")
     );
+
+    const events = (result.events ?? [])
+      .filter(e => {
+        const msg = e.message ?? "";
+        return !msg.startsWith("START RequestId:") && !msg.startsWith("END RequestId:") && !msg.startsWith("REPORT RequestId:");
+      })
+      .slice(-maxLines)
+      .map(e => ({
+        timestamp: e.timestamp ? new Date(e.timestamp).toISOString() : null,
+        message: (e.message ?? "").replace(/\n$/, ""),
+      }));
+
+    return { logGroupName, count: events.length, events } satisfies GetLogsResult;
   });
 
 // ============ Command ============
@@ -188,7 +164,67 @@ export const logsCommand = Command.make(
   "logs",
   { handler: handlerArg, project: projectOption, stage: stageOption, region: regionOption, tail: tailOption, since: sinceOption, verbose: verboseOption },
   ({ handler: handlerName, tail, since, ...opts }) =>
-    logsHandler(handlerName, tail, since).pipe(
+    Effect.gen(function* () {
+      const result = yield* getLogs(handlerName, since);
+
+      if ("error" in result) {
+        yield* Console.error(result.error);
+        if (result.available && result.available.length > 0) {
+          yield* Console.log("\nAvailable handlers:");
+          for (const name of result.available) {
+            yield* Console.log(`  ${name}`);
+          }
+        }
+        return;
+      }
+
+      yield* Console.log(`Logs for ${c.bold(handlerName)} ${c.dim(`(${result.logGroupName})`)}:\n`);
+
+      if (result.events.length > 0) {
+        for (const event of result.events) {
+          const ts = event.timestamp ? formatTimestamp(new Date(event.timestamp).getTime()) : "";
+          const msg = formatLogMessage(event.message);
+          if (msg) {
+            yield* Console.log(`${c.dim(ts)}  ${msg}`);
+          }
+        }
+      }
+
+      if (result.events.length === 0 && !tail) {
+        yield* Console.log("No logs found. Try --since 1h or --tail to wait for new logs.");
+        return;
+      }
+
+      if (!tail) return;
+
+      if (result.events.length === 0) {
+        yield* Console.log("Waiting for logs... (Ctrl+C to stop)\n");
+      }
+
+      let startTime = Date.now() - parseDuration(since);
+
+      yield* Effect.repeat(
+        Effect.gen(function* () {
+          const pollResult = yield* fetchLogs(result.logGroupName, startTime).pipe(
+            Effect.catchAll(() => Effect.succeed({ events: undefined, nextToken: undefined }))
+          );
+
+          if (pollResult.events && pollResult.events.length > 0) {
+            for (const event of pollResult.events) {
+              const ts = formatTimestamp(event.timestamp ?? 0);
+              const msg = formatLogMessage(event.message ?? "");
+              if (msg) {
+                yield* Console.log(`${c.dim(ts)}  ${msg}`);
+              }
+              if (event.timestamp) {
+                startTime = Math.max(startTime, event.timestamp + 1);
+              }
+            }
+          }
+        }),
+        Schedule.spaced("2 seconds")
+      );
+    }).pipe(
       withCliContext(opts, (region) => Aws.makeClients({
         cloudwatch_logs: { region },
       })),

@@ -11,13 +11,37 @@ import { lambda, s3 } from "./clients";
 // Fixed date for deterministic zip (same content = same hash)
 const FIXED_DATE = new Date(0);
 
+/**
+ * Find the nearest directory (at or above `startDir`, up to `rootDir`) that
+ * contains a `package.json` with non-empty `dependencies`.
+ * In a monorepo the handlers may live in a subdirectory (e.g. `infra/`) whose
+ * own `package.json` declares runtime deps, while the root `package.json` only
+ * has workspace-level devDependencies.
+ */
+export const findDepsDir = (startDir: string, rootDir: string): string => {
+  let dir = startDir;
+  while (true) {
+    const pkgPath = path.join(dir, "package.json");
+    if (fsSync.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fsSync.readFileSync(pkgPath, "utf-8"));
+        const deps = Object.keys(pkg.dependencies ?? {}).filter(d => !isDevOnly(d));
+        if (deps.length > 0) return dir;
+      } catch {}
+    }
+    if (dir === rootDir || dir === path.dirname(dir)) break;
+    dir = path.dirname(dir);
+  }
+  // Fallback to projectDir
+  return rootDir;
+};
+
 export type LayerConfig = {
   project: string;
   stage: string;
   region: string;
   projectDir: string;
   tags?: Record<string, string>;
-  extraNodeModules?: string[];
 };
 
 export type LayerStatus = "created" | "cached";
@@ -50,7 +74,7 @@ const getPackageVersion = (pkgPath: string): string | null => {
  * This ensures the layer is only recreated when prod deps change,
  * not when dev deps are updated.
  */
-export const computeLockfileHash = (projectDir: string, extraNodeModules?: string[]) =>
+export const computeLockfileHash = (projectDir: string) =>
   Effect.gen(function* () {
     const prodDeps = yield* readProductionDependencies(projectDir);
 
@@ -60,14 +84,14 @@ export const computeLockfileHash = (projectDir: string, extraNodeModules?: strin
 
     // Collect all transitive production packages
     const { packages: allPackages, resolvedPaths } = collectTransitiveDeps(
-      projectDir, prodDeps, undefined, undefined, undefined, undefined, undefined, extraNodeModules
+      projectDir, prodDeps
     );
 
     // Build a sorted list of package@version pairs (exclude AWS runtime packages)
     const packageVersions: string[] = [];
     for (const pkgName of Array.from(allPackages).filter(p => !isAwsRuntime(p)).sort()) {
       const pkgPath = resolvedPaths.get(pkgName)
-        ?? findInPnpmStore(projectDir, pkgName, extraNodeModules)
+        ?? findInPnpmStore(projectDir, pkgName)
         ?? getPackageRealPath(projectDir, pkgName);
 
       if (pkgPath) {
@@ -98,7 +122,7 @@ export const readProductionDependencies = (projectDir: string) =>
       catch: () => new Error(`Cannot read package.json at ${pkgPath}`)
     });
     const pkg = JSON.parse(content);
-    return Object.keys(pkg.dependencies ?? {});
+    return Object.keys(pkg.dependencies ?? {}).filter(d => !isDevOnly(d));
   });
 
 /** Packages that are almost certainly dev-only and shouldn't be in `dependencies` */
@@ -124,6 +148,7 @@ const DEV_ONLY_PACKAGES = new Set([
   "ts-jest",
   "concurrently",
   "rimraf",
+  "@effortless-aws/cli",
 ]);
 
 /** Prefixes that indicate dev-only packages */
@@ -135,7 +160,12 @@ const DEV_ONLY_PREFIXES = [
   "eslint-config-",
   "@vitest/",
   "@jest/",
+  "@effortless-aws/",
 ];
+
+/** Check if a package is dev-only (build tools, test frameworks, CLI tooling) */
+const isDevOnly = (pkg: string) =>
+  DEV_ONLY_PACKAGES.has(pkg) || DEV_ONLY_PREFIXES.some(p => pkg.startsWith(p));
 
 /**
  * Standard Node.js runtime conditions and subpath patterns.
@@ -185,9 +215,7 @@ export const checkDependencyWarnings = (projectDir: string) =>
     const warnings: string[] = [];
 
     // Check for dev-only packages in `dependencies` (bloats layer)
-    const devInProd = deps.filter(d =>
-      DEV_ONLY_PACKAGES.has(d) || DEV_ONLY_PREFIXES.some(p => d.startsWith(p))
-    );
+    const devInProd = deps.filter(isDevOnly);
     if (devInProd.length > 0) {
       warnings.push(
         `These packages are in "dependencies" but look like dev tools (they will bloat the Lambda layer): ${devInProd.join(", ")}. Consider moving them to "devDependencies".`
@@ -311,18 +339,8 @@ const searchPnpmDir = (pnpmDir: string, pkgName: string): string | null => {
  * Find a package in the pnpm store (.pnpm directory).
  * Checks projectDir and any extra node_modules directories.
  */
-const findInPnpmStore = (projectDir: string, pkgName: string, extraNodeModules?: string[]): string | null => {
-  const result = searchPnpmDir(path.join(projectDir, "node_modules", ".pnpm"), pkgName);
-  if (result) return result;
-
-  if (extraNodeModules) {
-    for (const dir of extraNodeModules) {
-      const found = searchPnpmDir(path.join(dir, ".pnpm"), pkgName);
-      if (found) return found;
-    }
-  }
-
-  return null;
+const findInPnpmStore = (projectDir: string, pkgName: string): string | null => {
+  return searchPnpmDir(path.join(projectDir, "node_modules", ".pnpm"), pkgName);
 };
 
 export type CollectResult = {
@@ -349,7 +367,6 @@ const collectTransitiveDeps = (
   warnings: string[] = [],
   /** Names of deps that are optional/peer — missing ones are silently skipped */
   optionalNames = new Set<string>(),
-  extraNodeModules?: string[]
 ): CollectResult => {
   const rootNodeModules = path.join(projectDir, "node_modules");
 
@@ -380,24 +397,9 @@ const collectTransitiveDeps = (
       }
     }
 
-    // Fallback to extra node_modules directories (e.g., workspace root)
-    if (!realPath && extraNodeModules) {
-      for (const dir of extraNodeModules) {
-        pkgPath = path.join(dir, dep);
-        if (fsSync.existsSync(pkgPath)) {
-          try {
-            realPath = fsSync.realpathSync(pkgPath);
-            break;
-          } catch {
-            // ignore
-          }
-        }
-      }
-    }
-
     // Fallback to pnpm store search
     if (!realPath) {
-      realPath = findInPnpmStore(projectDir, dep, extraNodeModules);
+      realPath = findInPnpmStore(projectDir, dep);
     }
 
     if (!realPath) {
@@ -425,7 +427,7 @@ const collectTransitiveDeps = (
       const nextOptional = new Set(optionalNames);
       for (const name of pkgDeps.optional) nextOptional.add(name);
 
-      collectTransitiveDeps(projectDir, pkgDeps.all, pkgNodeModules, visited, resolvedPaths, warnings, nextOptional, extraNodeModules);
+      collectTransitiveDeps(projectDir, pkgDeps.all, pkgNodeModules, visited, resolvedPaths, warnings, nextOptional);
     }
   }
 
@@ -467,12 +469,12 @@ export type CollectLayerResult = {
  * Uses package.json declarations recursively, then verifies completeness
  * and auto-adds any missing transitive deps as a safety net.
  */
-export const collectLayerPackages = (projectDir: string, dependencies: string[], extraNodeModules?: string[]): CollectLayerResult => {
+export const collectLayerPackages = (projectDir: string, dependencies: string[]): CollectLayerResult => {
   if (dependencies.length === 0) return { packages: [], resolvedPaths: new Map(), warnings: [] };
 
   // Phase 1: collect all transitive deps from package.json declarations
   const { packages, resolvedPaths, warnings } = collectTransitiveDeps(
-    projectDir, dependencies, undefined, undefined, undefined, undefined, undefined, extraNodeModules
+    projectDir, dependencies
   );
 
   // Phase 2: verify completeness — ensure all deps of included packages are also included
@@ -489,7 +491,7 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[],
       const pkgPaths = new Set<string>();
       const resolved = resolvedPaths.get(pkg);
       if (resolved) pkgPaths.add(resolved);
-      const found = findPackagePath(projectDir, pkg, extraNodeModules);
+      const found = findPackagePath(projectDir, pkg);
       if (found) pkgPaths.add(found);
 
       if (pkgPaths.size === 0) continue;
@@ -500,7 +502,7 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[],
         for (const dep of pkgDeps.all) {
           if (!packages.has(dep) && !isAwsRuntime(dep)) {
             // Resolve the dep's path
-            let depPath = findPackagePath(projectDir, dep, extraNodeModules);
+            let depPath = findPackagePath(projectDir, dep);
             // Fallback: look in parent package's node_modules (pnpm nested structure)
             if (!depPath) {
               const isScoped = pkg.startsWith("@");
@@ -534,7 +536,7 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[],
   // Also filter out packages without a resolved path — they can't be zipped.
   const filtered = Array.from(packages).filter(pkg => {
     if (isAwsRuntime(pkg)) return false;
-    const pkgPath = resolvedPaths.get(pkg) ?? findPackagePath(projectDir, pkg, extraNodeModules);
+    const pkgPath = resolvedPaths.get(pkg) ?? findPackagePath(projectDir, pkg);
     if (!pkgPath) return false;
     if (hasTypeScriptEntryPoints(pkgPath)) {
       warnings.push(`Package "${pkg}" has TypeScript entry points — it will be bundled by esbuild instead of included in the layer`);
@@ -548,27 +550,10 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[],
 /**
  * Find package path, checking root node_modules, extra dirs, and pnpm store
  */
-const findPackagePath = (projectDir: string, pkgName: string, extraNodeModules?: string[]): string | null => {
-  // First try root node_modules
+const findPackagePath = (projectDir: string, pkgName: string): string | null => {
   const rootPath = getPackageRealPath(projectDir, pkgName);
   if (rootPath) return rootPath;
-
-  // Try extra node_modules directories
-  if (extraNodeModules) {
-    for (const dir of extraNodeModules) {
-      const pkgPath = path.join(dir, pkgName);
-      if (fsSync.existsSync(pkgPath)) {
-        try {
-          return fsSync.realpathSync(pkgPath);
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-
-  // Fallback to pnpm store
-  return findInPnpmStore(projectDir, pkgName, extraNodeModules);
+  return findInPnpmStore(projectDir, pkgName);
 };
 
 export type CreateLayerZipResult = {
@@ -666,7 +651,7 @@ export const ensureLayer = (config: LayerConfig) =>
       return null;
     }
 
-    const hash = yield* computeLockfileHash(config.projectDir, config.extraNodeModules).pipe(
+    const hash = yield* computeLockfileHash(config.projectDir).pipe(
       Effect.catchAll((e) => {
         const message = e instanceof Error ? e.message : String(e);
         return deferWarning(`Cannot compute lockfile hash: ${message}, skipping layer`).pipe(
@@ -689,7 +674,7 @@ export const ensureLayer = (config: LayerConfig) =>
     }
 
     // Collect all packages via transitive dep walking + completeness verification
-    const { packages: allPackages, resolvedPaths, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(config.projectDir, dependencies, config.extraNodeModules));
+    const { packages: allPackages, resolvedPaths, warnings: layerWarnings } = yield* Effect.sync(() => collectLayerPackages(config.projectDir, dependencies));
 
     // Surface all warnings so issues are visible, not silently swallowed
     for (const warning of layerWarnings) {

@@ -52,12 +52,6 @@ export default defineConfig({
   name: "my-service",
   region: "eu-central-1",
   handlers: ["src/**/*.ts"],
-
-  defaults: {
-    memory: 256,
-    timeout: "30 seconds",
-    runtime: "nodejs24.x",
-  },
 });
 ```
 

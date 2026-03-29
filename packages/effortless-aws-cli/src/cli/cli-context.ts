@@ -15,7 +15,6 @@ export type CliContextShape = {
   stage: string;
   region: string;
   config: EffortlessConfig | null;
-  cwd: string;
   projectDir: string;
   patterns: string[] | null;
 };
@@ -34,7 +33,7 @@ export const makeCliContext = (opts: {
   Layer.effect(
     CliContext,
     Effect.gen(function* () {
-      const { config, cwd, projectDir } = yield* ProjectConfig;
+      const { config, projectDir } = yield* ProjectConfig;
       const project = Option.getOrElse(opts.project, () => config?.name ?? "");
       if (!project) {
         yield* Console.error("Error: --project is required (or set 'name' in effortless.config.ts)");
@@ -43,7 +42,7 @@ export const makeCliContext = (opts: {
       const stage = config?.stage ?? opts.stage;
       const region = config?.region ?? opts.region;
       const patterns = getPatternsFromConfig(config);
-      return { project, stage, region, config, cwd, projectDir, patterns };
+      return { project, stage, region, config, projectDir, patterns };
     })
   );
 

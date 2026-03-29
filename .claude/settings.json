@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Glob(**)",
+      "Grep(**)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(pnpm run:*)",
+      "Bash(pnpm install)",
+      "Bash(npx tsc:*)",
+      "Bash(pnpm tsc:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(npx --package=typescript tsc --noEmit)",
+      "Bash(node_modules/.bin/tsc --build --noEmit)",
+      "Bash(pnpm ls:*)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm typecheck:*)"
+    ]
+  }
+}

@@ -5,14 +5,6 @@
  */
 export type EffortlessConfig = {
   /**
-   * Project root directory. All relative paths (handlers, server, assets, etc.)
-   * are resolved from this directory.
-   * Resolved relative to where the CLI runs (process.cwd()).
-   * @default "." (current working directory)
-   */
-  root?: string;
-
-  /**
    * Project name used for resource naming and tagging.
    * This becomes part of Lambda function names, IAM roles, etc.
    */
