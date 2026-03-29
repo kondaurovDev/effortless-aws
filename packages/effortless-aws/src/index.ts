@@ -12,6 +12,7 @@ export { defineMailer } from "./handlers/define-mailer"
 export { defineApi } from "./handlers/define-api"
 export { defineCron } from "./handlers/define-cron"
 export { defineWorker } from "./handlers/define-worker"
+export { defineMcp } from "./handlers/define-mcp"
 export { defineSecret, secret, param, generateHex, generateBase64, generateUuid } from "./handlers/handler-options"
 export { toSeconds } from "./handlers/handler-options"
 
@@ -26,6 +27,7 @@ export type { MailerConfig, MailerHandler } from "./handlers/define-mailer"
 export type { ApiAuthConfig, ApiConfig, ApiHandler, ApiRoutes } from "./handlers/define-api"
 export type { CronConfig } from "./handlers/define-cron"
 export type { WorkerConfig } from "./handlers/define-worker"
+export type { McpConfig, McpToolDef, McpToolContent, McpToolResult, McpInputSchema } from "./handlers/define-mcp"
 
 // Handler types — re-exported without internal generic C
 import type { TableHandler as _TableHandler } from "./handlers/define-table"
@@ -33,11 +35,13 @@ import type { FifoQueueHandler as _FifoQueueHandler } from "./handlers/define-fi
 import type { BucketHandler as _BucketHandler } from "./handlers/define-bucket"
 import type { CronHandler as _CronHandler } from "./handlers/define-cron"
 import type { WorkerHandler as _WorkerHandler } from "./handlers/define-worker"
+import type { McpHandler as _McpHandler } from "./handlers/define-mcp"
 export type TableHandler<T = Record<string, unknown>> = _TableHandler<T, any>
 export type FifoQueueHandler<T = unknown> = _FifoQueueHandler<T, any>
 export type BucketHandler = _BucketHandler<any>
 export type CronHandler = _CronHandler<any>
 export type WorkerHandler<T = any> = _WorkerHandler<T, any>
+export type McpHandler = _McpHandler<any>
 export type { Timezone } from "./handlers/timezone"
 export type { TableClient, QueryParams, QueryByTagParams, SkCondition, UpdateActions, PutOptions } from "./runtime/table-client"
 export type { BucketClient } from "./runtime/bucket-client"
