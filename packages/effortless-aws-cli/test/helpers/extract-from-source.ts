@@ -12,8 +12,8 @@ const projectDir = path.resolve(import.meta.dirname, "../..");
  * Test helper: writes source to a temp .ts file, extracts configs via runtime import, cleans up.
  */
 const extractFromSource = async (source: string, type: HandlerType): Promise<ExtractedConfig<any>[]> => {
-  const hash = crypto.createHash("md5").update(source).digest("hex").slice(0, 8);
-  const tempFile = path.join(projectDir, `.temp-extract-${hash}.ts`);
+  const id = crypto.randomUUID().slice(0, 8);
+  const tempFile = path.join(projectDir, `.temp-extract-${id}.ts`);
   fs.writeFileSync(tempFile, source);
   try {
     return await Effect.runPromise(
