@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.33.0
+
+### Minor Changes
+
+- [`6ecba64`](https://github.com/kondaurovDev/effortless-aws/commit/6ecba64b179a7daf64185a5c0ed1d477e59e15f9) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Remove `root` option from EffortlessConfig. Project root is now always resolved from the current working directory.
+
 ## 0.32.1
 
 ### Patch Changes
