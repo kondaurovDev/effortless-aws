@@ -1,5 +1,16 @@
 # @effortless-aws/cli
 
+## 0.17.0
+
+### Minor Changes
+
+- [`6ecba64`](https://github.com/kondaurovDev/effortless-aws/commit/6ecba64b179a7daf64185a5c0ed1d477e59e15f9) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Add MCP server for AI-assisted workflows (describe, deploy, logs, config, cleanup, status, layer-info tools). Refactor CLI commands to expose reusable functions for MCP integration. Add JSON schema generation for effortless.config.ts.
+
+### Patch Changes
+
+- Updated dependencies [[`6ecba64`](https://github.com/kondaurovDev/effortless-aws/commit/6ecba64b179a7daf64185a5c0ed1d477e59e15f9)]:
+  - effortless-aws@0.33.0
+
 ## 0.16.1
 
 ### Patch Changes
