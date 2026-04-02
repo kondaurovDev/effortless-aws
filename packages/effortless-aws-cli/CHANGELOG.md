@@ -1,5 +1,18 @@
 # @effortless-aws/cli
 
+## 0.17.1
+
+### Patch Changes
+
+- [`4183258`](https://github.com/kondaurovDev/effortless-aws/commit/41832588bb9a37c8d77da97eb8daf35536c20f1c) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - - Add bucket routes in static sites with public/private access (CloudFront signed cookies)
+  - Add SPA fallback mode for static sites (extensionless paths rewrite to /index.html)
+  - Deploy API routes to per-handler Lambda origins instead of shared API Gateway
+  - Add cache options for GET routes (auto Cache-Control headers)
+  - Support multiple set-cookie headers via Lambda Function URL cookies array
+  - Use custom CloudFront cache policy (UseOriginCacheHeaders) for API behaviors
+- Updated dependencies [[`4183258`](https://github.com/kondaurovDev/effortless-aws/commit/41832588bb9a37c8d77da97eb8daf35536c20f1c)]:
+  - effortless-aws@0.33.1
+
 ## 0.17.0
 
 ### Minor Changes
