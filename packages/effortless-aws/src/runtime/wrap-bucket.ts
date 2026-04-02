@@ -1,6 +1,8 @@
 import type { BucketHandler, BucketEvent } from "../handlers/define-bucket";
-import { createBucketClient } from "./bucket-client";
+import { createBucketClient, createBucketClientWithEntities } from "./bucket-client";
 import { createHandlerRuntime } from "./handler-utils";
+import { toSeconds } from "../handlers/handler-options";
+import type { Duration } from "../handlers/handler-options";
 
 type S3EventRecord = {
   eventName: string;
@@ -32,7 +34,18 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
     const raw = process.env[ENV_DEP_SELF];
     if (!raw) return undefined;
     const bucketName = raw.startsWith("bucket:") ? raw.slice(7) : raw;
-    selfClient = createBucketClient(bucketName);
+    const entities = handler.__spec.entities;
+    if (entities && Object.keys(entities).length > 0) {
+      const config: Record<string, { cacheSeconds?: number }> = {};
+      for (const [entityName, entityOpts] of Object.entries(entities)) {
+        config[entityName] = (entityOpts as { cache?: Duration }).cache
+          ? { cacheSeconds: toSeconds((entityOpts as { cache: Duration }).cache) }
+          : {};
+      }
+      selfClient = createBucketClientWithEntities(bucketName, config);
+    } else {
+      selfClient = createBucketClient(bucketName);
+    }
     return selfClient;
   };
 

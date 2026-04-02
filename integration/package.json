@@ -1,0 +1,19 @@
+{
+  "name": "@effortless-aws/integration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "deploy": "eff deploy"
+  },
+  "dependencies": {
+    "effortless-aws": "workspace:*"
+  },
+  "devDependencies": {
+    "@effortless-aws/cli": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

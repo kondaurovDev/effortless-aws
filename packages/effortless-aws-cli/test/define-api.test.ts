@@ -274,5 +274,65 @@ describe("defineApi", () => {
 
   });
 
+  describe("cache", () => {
+
+    it("should set Cache-Control header from shorthand duration", async () => {
+      const handlerCode = `
+        import { defineApi } from "effortless-aws";
+
+        export default defineApi({ basePath: "/api" })
+          .get("/data", async () => ({ status: 200, body: { ok: true } }), { cache: "30s" });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
+      const res = await mod.handler(makeEvent("GET", "/api/data"));
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["Cache-Control"]).toBe("public, max-age=30, s-maxage=30, stale-while-revalidate=60");
+    });
+
+    it("should set Cache-Control from object with custom swr", async () => {
+      const handlerCode = `
+        import { defineApi } from "effortless-aws";
+
+        export default defineApi({ basePath: "/api" })
+          .get("/data", async () => ({ status: 200, body: {} }), { cache: { ttl: "1m", swr: "5m" } });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
+      const res = await mod.handler(makeEvent("GET", "/api/data"));
+
+      expect(res.headers["Cache-Control"]).toBe("public, max-age=60, s-maxage=60, stale-while-revalidate=300");
+    });
+
+    it("should set private Cache-Control for scope private", async () => {
+      const handlerCode = `
+        import { defineApi } from "effortless-aws";
+
+        export default defineApi({ basePath: "/api" })
+          .get("/me", async () => ({ status: 200, body: {} }), { cache: { ttl: "10s", scope: "private" } });
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
+      const res = await mod.handler(makeEvent("GET", "/api/me"));
+
+      expect(res.headers["Cache-Control"]).toBe("private, max-age=10");
+    });
+
+    it("should not set Cache-Control on routes without cache option", async () => {
+      const handlerCode = `
+        import { defineApi } from "effortless-aws";
+
+        export default defineApi({ basePath: "/api" })
+          .get("/data", async () => ({ status: 200, body: {} }));
+      `;
+
+      const mod = await importBundle({ code: handlerCode, projectDir, type: "api" });
+      const res = await mod.handler(makeEvent("GET", "/api/data"));
+
+      expect(res.headers["Cache-Control"]).toBeUndefined();
+    });
+
+  });
 
 });

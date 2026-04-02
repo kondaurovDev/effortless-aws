@@ -37,3 +37,11 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Integration tests
+        if: vars.API_URL != ''
+        run: pnpm test:integration
+        env:
+          API_URL: ${{ vars.API_URL }}
+          API_DEPS_URL: ${{ vars.API_DEPS_URL }}
+          SITE_URL: ${{ vars.SITE_URL }}

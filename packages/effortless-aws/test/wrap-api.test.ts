@@ -386,6 +386,45 @@ describe("wrapApi", () => {
     });
   });
 
+  // ============ Cache-Control headers ============
+
+  describe("cache", () => {
+    it("sets public Cache-Control header for route with cache option", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/hello", onRequest: () => ({ status: 200, body: "ok" }), cache: { ttl: 30, swr: 60 } }],
+      }));
+      const result = await fn(makeEvent());
+      expect(result.headers["Cache-Control"]).toBe("public, max-age=30, s-maxage=30, stale-while-revalidate=60");
+    });
+
+    it("sets private Cache-Control header for private cache", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/hello", onRequest: () => ({ status: 200, body: "ok" }), cache: { private: true, ttl: 10 } }],
+      }));
+      const result = await fn(makeEvent());
+      expect(result.headers["Cache-Control"]).toBe("private, max-age=10");
+    });
+
+    it("does not set Cache-Control when route has no cache option", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/hello", onRequest: () => ({ status: 200, body: "ok" }) }],
+      }));
+      const result = await fn(makeEvent());
+      expect(result.headers["Cache-Control"]).toBeUndefined();
+    });
+
+    it("does not override handler-set Cache-Control", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{
+          method: "GET", path: "/hello", cache: { ttl: 30, swr: 60 },
+          onRequest: () => ({ status: 200, body: "ok", headers: { "Cache-Control": "no-cache" } }),
+        }],
+      }));
+      const result = await fn(makeEvent());
+      expect(result.headers["Cache-Control"]).toBe("no-cache");
+    });
+  });
+
   // ============ Streaming fallback ============
 
   describe("streaming", () => {

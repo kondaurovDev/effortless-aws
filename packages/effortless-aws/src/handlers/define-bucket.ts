@@ -1,8 +1,16 @@
-import type { AnySecretRef, ResolveConfig, ConfigFactory, LambdaOptions } from "./handler-options";
+import type { AnySecretRef, ResolveConfig, Duration, ConfigFactory, LambdaOptions } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles } from "./shared";
-import type { BucketClient } from "../runtime/bucket-client";
+import type { BucketClient, BucketClientWithEntities } from "../runtime/bucket-client";
+
+/**
+ * Per-entity configuration for typed JSON key-value storage within a bucket.
+ */
+export type BucketEntityConfig = {
+  /** Cache duration for CloudFront/browser caching (e.g., "10s", "5m", "1h"). No caching if omitted. */
+  cache?: Duration;
+};
 
 /**
  * Configuration options for defineBucket.
@@ -14,6 +22,8 @@ export type BucketConfig = {
   prefix?: string;
   /** S3 key suffix filter for event notifications (e.g., ".jpg") */
   suffix?: string;
+  /** Typed JSON entity definitions for key-value storage */
+  entities?: Record<string, BucketEntityConfig>;
 };
 
 /**
@@ -40,8 +50,8 @@ export type BucketEvent = {
 type SpreadCtx<C> = [C] extends [undefined] ? {} : C & {};
 
 /** Setup factory — receives bucket/deps/config/files based on what was declared */
-type SetupArgs<D, P, HasFiles extends boolean> =
-  & { bucket: BucketClient }
+type SetupArgs<D, P, HasFiles extends boolean, Entities extends Record<string, any> = {}> =
+  & { bucket: {} extends Entities ? BucketClient : BucketClientWithEntities<Entities> }
   & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
   & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
   & (HasFiles extends true ? { files: StaticFiles } : {});
@@ -68,7 +78,7 @@ export type BucketObjectRemovedFn<C = undefined> =
  * Internal handler object created by defineBucket
  * @internal
  */
-export type BucketHandler<C = any> = {
+export type BucketHandler<C = any, Entities extends Record<string, any> = {}> = {
   readonly __brand: "effortless-bucket";
   readonly __spec: BucketConfig;
   readonly onError?: (...args: any[]) => any;
@@ -98,54 +108,61 @@ interface BucketBuilder<
   P = undefined,
   C = undefined,
   HasFiles extends boolean = false,
+  Entities extends Record<string, any> = {},
 > {
   /** Declare handler dependencies */
   deps<D2 extends Record<string, AnyDepHandler>>(
     fn: () => D2
-  ): BucketBuilder<D2, P, C, HasFiles>;
+  ): BucketBuilder<D2, P, C, HasFiles, Entities>;
 
   /** Declare SSM secrets */
   config<P2 extends Record<string, AnySecretRef>>(
     fn: ConfigFactory<P2>
-  ): BucketBuilder<D, P2, C, HasFiles>;
+  ): BucketBuilder<D, P2, C, HasFiles, Entities>;
 
   /** Include static files in the Lambda ZIP */
-  include(glob: string): BucketBuilder<D, P, C, true>;
+  include(glob: string): BucketBuilder<D, P, C, true, Entities>;
+
+  /** Register a typed JSON entity stored as `{name}/{id}.json` in the bucket */
+  entity<N extends string, T>(
+    name: N,
+    options?: BucketEntityConfig,
+  ): BucketBuilder<D, P, C, HasFiles, Entities & { [K in N]: T }>;
 
   /** Initialize shared state on cold start with lambda options */
-  setup(lambda: LambdaOptions): BucketBuilder<D, P, C, HasFiles>;
+  setup(lambda: LambdaOptions): BucketBuilder<D, P, C, HasFiles, Entities>;
   /** Initialize shared state on cold start. Receives bucket (self-client), deps, config, files. */
   setup<C2>(
-    fn: (args: SetupArgs<D, P, HasFiles>) => C2 | Promise<C2>
-  ): BucketBuilder<D, P, C2, HasFiles>;
+    fn: (args: SetupArgs<D, P, HasFiles, Entities>) => C2 | Promise<C2>
+  ): BucketBuilder<D, P, C2, HasFiles, Entities>;
   /** Initialize shared state on cold start with lambda options. Receives bucket (self-client), deps, config, files. */
   setup<C2>(
-    fn: (args: SetupArgs<D, P, HasFiles>) => C2 | Promise<C2>,
+    fn: (args: SetupArgs<D, P, HasFiles, Entities>) => C2 | Promise<C2>,
     lambda: LambdaOptions,
-  ): BucketBuilder<D, P, C2, HasFiles>;
+  ): BucketBuilder<D, P, C2, HasFiles, Entities>;
 
   /** Handle errors thrown by callbacks */
   onError(
     fn: (args: { error: unknown } & SpreadCtx<C>) => void | Promise<void>
-  ): BucketBuilder<D, P, C, HasFiles>;
+  ): BucketBuilder<D, P, C, HasFiles, Entities>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */
   onCleanup(
     fn: (args: SpreadCtx<C>) => void | Promise<void>
-  ): BucketBuilder<D, P, C, HasFiles>;
+  ): BucketBuilder<D, P, C, HasFiles, Entities>;
 
   /** Handle S3 ObjectCreated events (terminal — returns finalized handler) */
   onObjectCreated(
     fn: BucketObjectCreatedFn<C>
-  ): BucketHandler<C>;
+  ): BucketHandler<C, Entities>;
 
   /** Handle S3 ObjectRemoved events (terminal — returns finalized handler) */
   onObjectRemoved(
     fn: BucketObjectRemovedFn<C>
-  ): BucketHandler<C>;
+  ): BucketHandler<C, Entities>;
 
   /** Finalize as resource-only bucket (no Lambda) */
-  build(): BucketHandler<C>;
+  build(): BucketHandler<C, Entities>;
 }
 
 // ============ Implementation ============
@@ -220,6 +237,13 @@ export function defineBucket(
     },
     include(glob: string) {
       state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    entity(name: string, options?: BucketEntityConfig) {
+      state.spec = {
+        ...state.spec,
+        entities: { ...state.spec.entities, [name]: options ?? {} },
+      };
       return builder as any;
     },
     setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {

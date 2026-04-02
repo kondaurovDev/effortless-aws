@@ -2,10 +2,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import type { LogLevel, Duration } from "../handlers/handler-options";
 import { toSeconds } from "../handlers/handler-options";
-import type { AuthRuntime } from "../handlers/auth";
+import type { AuthRuntime, CfSigningConfig } from "../handlers/auth";
 import { createAuthRuntime } from "../handlers/auth";
 import { createTableClient } from "./table-client";
-import { createBucketClient } from "./bucket-client";
+import { createBucketClient, createBucketClientWithEntities } from "./bucket-client";
 import { createEmailClient } from "./email-client";
 import { createQueueClient } from "./queue-client";
 import { createWorkerClient } from "./worker-client";
@@ -34,7 +34,17 @@ const DEP_FACTORIES: Record<string, (name: string, depHandler: unknown) => unkno
     const tagField = (depHandler as { __spec?: { tagField?: string } } | undefined)?.__spec?.tagField;
     return createTableClient(name, tagField ? { tagField } : undefined);
   },
-  bucket: (name) => createBucketClient(name),
+  bucket: (name, depHandler) => {
+    const entities = (depHandler as { __spec?: { entities?: Record<string, { cache?: Duration }> } } | undefined)?.__spec?.entities;
+    if (entities && Object.keys(entities).length > 0) {
+      const config: Record<string, { cacheSeconds?: number }> = {};
+      for (const [entityName, entityOpts] of Object.entries(entities)) {
+        config[entityName] = entityOpts.cache ? { cacheSeconds: toSeconds(entityOpts.cache) } : {};
+      }
+      return createBucketClientWithEntities(name, config);
+    }
+    return createBucketClient(name);
+  },
   mailer: () => createEmailClient(),
   queue: (name) => createQueueClient(name),
   worker: (name) => createWorkerClient(name),
@@ -154,6 +164,27 @@ export const createHandlerRuntime = (
     return resolvedParams;
   };
 
+  let resolvedCfSigningConfig: CfSigningConfig | undefined | null = null;
+
+  const getCfSigningConfig = async (): Promise<CfSigningConfig | undefined> => {
+    if (resolvedCfSigningConfig !== null) return resolvedCfSigningConfig;
+    const cfSigningKeySsmPath = process.env.EFF_CF_SIGNING_KEY;
+    const cfKeyPairId = process.env.EFF_CF_KEY_PAIR_ID;
+    const cfDomain = process.env.EFF_CF_DOMAIN;
+    if (!cfSigningKeySsmPath || !cfKeyPairId || !cfDomain) {
+      resolvedCfSigningConfig = undefined;
+      return undefined;
+    }
+    const values = await getParameters([cfSigningKeySsmPath]);
+    const privateKey = values.get(cfSigningKeySsmPath);
+    if (!privateKey) {
+      resolvedCfSigningConfig = undefined;
+      return undefined;
+    }
+    resolvedCfSigningConfig = { privateKey, keyPairId: cfKeyPairId, domain: cfDomain };
+    return resolvedCfSigningConfig;
+  };
+
   const getAuthRuntime = async (setupCtx?: unknown) => {
     if (resolvedAuthRuntime !== null) return resolvedAuthRuntime;
     // Auth config lives on ctx.auth (returned from setup)
@@ -170,12 +201,14 @@ export const createHandlerRuntime = (
     const wrappedVerify = rawVerify
       ? (args: { value: string }) => rawVerify(args.value)
       : undefined;
+    const cfSigningConfig = await getCfSigningConfig();
     resolvedAuthRuntime = createAuthRuntime(
       secret,
       defaultExpires,
       wrappedVerify,
       apiToken?.header,
       cacheTtlSeconds,
+      cfSigningConfig,
     );
     return resolvedAuthRuntime;
   };

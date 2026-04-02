@@ -1,6 +1,22 @@
 /** Any branded handler that deploys to API Gateway (HttpHandler, ApiHandler, etc.) */
 type AnyRoutableHandler = { readonly __brand: string };
 
+/** Route configuration for serving bucket content through CloudFront */
+export type BucketRouteConfig = {
+  bucket: { readonly __brand: "effortless-bucket" };
+  /** Access control: "private" requires CloudFront signed cookies, "public" serves openly. Default: "public" */
+  access?: "private" | "public";
+};
+
+/** A route value: either an API handler or a bucket route config */
+type RouteValue = AnyRoutableHandler | BucketRouteConfig;
+
+/** Type guard for bucket route entries */
+export const isBucketRoute = (v: unknown): v is BucketRouteConfig =>
+  v != null && typeof v === "object" && "bucket" in v &&
+  (v as any).bucket != null && typeof (v as any).bucket === "object" &&
+  (v as any).bucket.__brand === "effortless-bucket";
+
 /** Simplified request object passed to middleware */
 export type MiddlewareRequest = {
   uri: string;
@@ -55,10 +71,10 @@ export type StaticSiteConfig = {
   build?: string;
   /** Custom domain name. Accepts a string (same domain for all stages) or a Record mapping stage names to domains (e.g., `{ prod: "example.com", dev: "dev.example.com" }`). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
   domain?: string | Record<string, string>;
-  /** CloudFront route overrides: path patterns forwarded to API Gateway instead of S3.
-   * Keys are CloudFront path patterns (e.g., "/api/*"), values are HTTP handlers.
-   * Example: `routes: { "/api/*": api }` */
-  routes?: Record<string, AnyRoutableHandler>;
+  /** CloudFront route overrides: path patterns forwarded to API Gateway or S3 bucket origins.
+   * Keys are CloudFront path patterns (e.g., "/api/*"), values are HTTP handlers or bucket route configs.
+   * Example: `routes: { "/api/*": api, "/files/*": { bucket: storage, access: "private" } }` */
+  routes?: Record<string, RouteValue>;
   /** Custom 404 error page path relative to `dir` (e.g. "404.html").
    * For non-SPA sites only. If not set, a default page is generated automatically. */
   errorPage?: string;

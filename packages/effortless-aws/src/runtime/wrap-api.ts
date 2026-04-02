@@ -37,17 +37,29 @@ type LambdaEvent = {
 
 // ============ Response helpers ============
 
-const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string>; binary?: boolean }) => {
+const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string>; cookies?: string[]; binary?: boolean }) => {
   const resolved = r.contentType ? CONTENT_TYPE_MAP[r.contentType] : undefined;
   const customContentType = resolved ?? r.headers?.["content-type"] ?? r.headers?.["Content-Type"];
   const isJson = !r.binary && (!customContentType || customContentType === "application/json");
+
+  // Collect cookies: explicit cookies array takes precedence, fall back to set-cookie header
+  const cookies = r.cookies?.length
+    ? r.cookies
+    : r.headers?.["set-cookie"]
+      ? [r.headers["set-cookie"]]
+      : undefined;
+
+  // Remove set-cookie from headers when using cookies array (Lambda Function URL handles it separately)
+  const { "set-cookie": _sc, ...headersWithoutSetCookie } = r.headers ?? {};
+
   return {
     statusCode: r.status,
     headers: {
       "Content-Type": customContentType ?? "application/json",
-      ...r.headers,
+      ...headersWithoutSetCookie,
       ...(resolved ? { "Content-Type": resolved } : {}),
     },
+    ...(cookies ? { cookies } : {}),
     body: r.binary ? String(r.body ?? "") : isJson ? JSON.stringify(r.body) : String(r.body ?? ""),
     ...(r.binary ? { isBase64Encoded: true } : {}),
   };
@@ -64,6 +76,13 @@ const unauthorized = () => ({
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ error: "Unauthorized" }),
 });
+
+// ============ Cache helpers ============
+
+const buildCacheControl = (cache: { private?: boolean; ttl: number; swr?: number }): string =>
+  cache.private
+    ? `private, max-age=${cache.ttl}`
+    : `public, max-age=${cache.ttl}, s-maxage=${cache.ttl}, stale-while-revalidate=${cache.swr}`;
 
 // ============ Route matching ============
 
@@ -210,6 +229,10 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
       try {
         const response = await entry.onRequest(args);
         if (response) {
+          // Inject Cache-Control header if route has cache option and handler didn't set it manually
+          if (entry.cache != null && !response.headers?.["Cache-Control"] && !response.headers?.["cache-control"]) {
+            response.headers = { ...response.headers, "Cache-Control": buildCacheControl(entry.cache) };
+          }
           rt.logExecution(startTime, logInput, response.body);
           return toResult(response);
         }

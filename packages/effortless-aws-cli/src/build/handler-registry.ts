@@ -73,6 +73,24 @@ export const handlerRegistry = {
 
 export type HandlerType = keyof typeof handlerRegistry;
 
+/** API route extracted from a static site's routes map */
+export type ApiRouteEntry = {
+  /** CloudFront path pattern (e.g., "/api/*") */
+  pattern: string;
+  /** Export name of the referenced API handler */
+  handlerExport: string;
+};
+
+/** Bucket route extracted from a static site's routes map */
+export type BucketRouteEntry = {
+  /** CloudFront path pattern (e.g., "/files/*") */
+  pattern: string;
+  /** Export name of the referenced bucket handler */
+  bucketExportName: string;
+  /** Access control mode */
+  access: "private" | "public";
+};
+
 export type ExtractedConfig<T = unknown> = {
   exportName: string;
   config: T;
@@ -81,6 +99,10 @@ export type ExtractedConfig<T = unknown> = {
   secretEntries: SecretEntry[];
   staticGlobs: string[];
   routePatterns: string[];
+  /** API routes extracted from a static site's routes map (only for staticSite type) */
+  apiRoutes: ApiRouteEntry[];
+  /** Bucket routes extracted from a static site's routes map (only for staticSite type) */
+  bucketRoutes: BucketRouteEntry[];
 };
 
 // ============ Entry point generation ============

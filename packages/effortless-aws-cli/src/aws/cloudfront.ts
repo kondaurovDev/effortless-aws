@@ -5,8 +5,10 @@ import { toAwsTagList, getResourcesByTags } from "./tags";
 
 // AWS managed CachingOptimized policy
 const CACHING_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6";
-// AWS managed CachingDisabled policy (for API proxying)
+// AWS managed CachingDisabled policy (for SSR default behavior)
 const CACHING_DISABLED_POLICY_ID = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad";
+// Custom cache policy name for API routes (respects origin Cache-Control headers)
+const API_CACHE_POLICY_NAME = "Effortless-UseOriginCacheHeaders";
 // AWS managed AllViewerExceptHostHeader origin request policy
 const ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID = "b689b0a8-53d0-40ab-baf2-68738e2966ac";
 // AWS managed SecurityHeadersPolicy (X-Content-Type-Options, X-Frame-Options, HSTS, Referrer-Policy)
@@ -61,14 +63,104 @@ export const ensureOAC = (input: EnsureOACInput) =>
     return { oacId: createResult.OriginAccessControl!.Id! };
   });
 
+// ============ CloudFront Signed Cookies (Public Keys & Key Groups) ============
+
+export type EnsurePublicKeyInput = {
+  name: string;
+  publicKeyPem: string;
+};
+
+export const ensurePublicKey = (input: EnsurePublicKeyInput) =>
+  Effect.gen(function* () {
+    const { name, publicKeyPem } = input;
+
+    const result = yield* cloudfront.make("list_public_keys", {});
+    const existing = result.PublicKeyList?.Items?.find(
+      pk => pk.Name === name
+    );
+
+    if (existing) {
+      yield* Effect.logDebug(`Public key ${name} already exists: ${existing.Id}`);
+      return { publicKeyId: existing.Id! };
+    }
+
+    yield* Effect.logDebug(`Creating CloudFront public key: ${name}`);
+    const createResult = yield* cloudfront.make("create_public_key", {
+      PublicKeyConfig: {
+        CallerReference: `${name}-${Date.now()}`,
+        Name: name,
+        EncodedKey: publicKeyPem,
+        Comment: `Signing key for effortless-aws: ${name}`,
+      },
+    });
+
+    return { publicKeyId: createResult.PublicKey!.Id! };
+  });
+
+export type EnsureKeyGroupInput = {
+  name: string;
+  publicKeyIds: string[];
+};
+
+export const ensureKeyGroup = (input: EnsureKeyGroupInput) =>
+  Effect.gen(function* () {
+    const { name, publicKeyIds } = input;
+
+    const result = yield* cloudfront.make("list_key_groups", {});
+    const existing = result.KeyGroupList?.Items?.find(
+      kg => kg.KeyGroup?.KeyGroupConfig?.Name === name
+    );
+
+    if (existing) {
+      const keyGroupId = existing.KeyGroup!.Id!;
+      // Check if public key IDs match
+      const currentIds = existing.KeyGroup!.KeyGroupConfig!.Items ?? [];
+      const idsMatch = currentIds.length === publicKeyIds.length &&
+        publicKeyIds.every(id => currentIds.includes(id));
+
+      if (!idsMatch) {
+        yield* Effect.logDebug(`Updating Key Group ${name} with new public keys...`);
+        const configResult = yield* cloudfront.make("get_key_group_config", { Id: keyGroupId });
+        yield* cloudfront.make("update_key_group", {
+          Id: keyGroupId,
+          IfMatch: configResult.ETag!,
+          KeyGroupConfig: {
+            Name: name,
+            Items: publicKeyIds,
+            Comment: `Signing key group for effortless-aws: ${name}`,
+          },
+        });
+      } else {
+        yield* Effect.logDebug(`Key Group ${name} already exists: ${keyGroupId}`);
+      }
+
+      return { keyGroupId };
+    }
+
+    yield* Effect.logDebug(`Creating CloudFront Key Group: ${name}`);
+    const createResult = yield* cloudfront.make("create_key_group", {
+      KeyGroupConfig: {
+        Name: name,
+        Items: publicKeyIds,
+        Comment: `Signing key group for effortless-aws: ${name}`,
+      },
+    });
+
+    return { keyGroupId: createResult.KeyGroup!.Id! };
+  });
+
 // ============ CloudFront Functions ============
 
 export type ViewerRequestFunctionConfig = {
-  rewriteUrls: boolean;
+  /** Non-SPA: append index.html to directory paths (e.g. /about → /about/index.html) */
+  rewriteUrls?: boolean;
+  /** SPA: rewrite all extensionless paths to /index.html for client-side routing */
+  spaFallback?: boolean;
   redirectWwwDomain?: string;
 };
 
-const generateViewerRequestCode = (config: ViewerRequestFunctionConfig): string => {
+/** @internal exported for testing */
+export const generateViewerRequestCode = (config: ViewerRequestFunctionConfig): string => {
   const lines: string[] = [];
   lines.push("function handler(event) {");
   lines.push("  var request = event.request;");
@@ -85,7 +177,13 @@ const generateViewerRequestCode = (config: ViewerRequestFunctionConfig): string 
     lines.push("  }");
   }
 
-  if (config.rewriteUrls) {
+  if (config.spaFallback) {
+    lines.push("  var uri = request.uri;");
+    lines.push("  if (uri === '/' || uri.includes('.')) {");
+    lines.push("    return request;");
+    lines.push("  }");
+    lines.push("  request.uri = '/index.html';");
+  } else if (config.rewriteUrls) {
     lines.push("  var uri = request.uri;");
     lines.push("  if (uri.endsWith('/')) {");
     lines.push("    request.uri += 'index.html';");
@@ -179,12 +277,24 @@ export type EnsureDistributionInput = {
   lambdaEdgeArn?: string;
   aliases?: string[];
   acmCertificateArn?: string;
-  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
-  apiOriginDomain?: string;
-  /** CloudFront path patterns to route to API Gateway (e.g. ["/api/*"]) */
-  routePatterns?: string[];
+  /** Resolved API routes: each pattern mapped to its Lambda origin domain */
+  apiRoutes?: { pattern: string; originDomain: string }[];
+  /** CloudFront cache policy ID for API route behaviors */
+  apiCachePolicyId?: string;
   /** S3 key path for custom error page (e.g. "/_effortless/404.html") */
   errorPagePath?: string;
+  /** Additional S3 bucket origins (for bucket routes with optional signed cookies) */
+  bucketOrigins?: {
+    originId: string;
+    bucketName: string;
+    bucketRegion: string;
+    oacId: string;
+    pathPattern: string;
+    /** CloudFront Key Group ID for signed cookies (only for access: "private") */
+    keyGroupId?: string;
+    /** Route prefix to strip from URI before forwarding to S3 (e.g. "/files") */
+    stripPrefix: string;
+  }[];
 };
 
 export type DistributionResult = {
@@ -198,7 +308,7 @@ const makeDistComment = (project: string, stage: string, handlerName: string) =>
 
 export const ensureDistribution = (input: EnsureDistributionInput) =>
   Effect.gen(function* () {
-    const { project, stage, handlerName, bucketName, bucketRegion, oacId, spa, index, tags, urlRewriteFunctionArn, lambdaEdgeArn, aliases, acmCertificateArn, apiOriginDomain, routePatterns } = input;
+    const { project, stage, handlerName, bucketName, bucketRegion, oacId, index, tags, urlRewriteFunctionArn, lambdaEdgeArn, aliases, acmCertificateArn, apiRoutes, apiCachePolicyId } = input;
     const aliasesConfig = aliases && aliases.length > 0
       ? { Quantity: aliases.length, Items: aliases }
       : { Quantity: 0, Items: [] as string[] };
@@ -220,10 +330,47 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
     const s3OriginId = `S3-${bucketName}`;
     const s3OriginDomain = `${bucketName}.s3.${bucketRegion}.amazonaws.com`;
 
-    // Build origins array: S3 + optional API Gateway
-    const expandedRoutePatterns = routePatterns ? expandRoutePatterns(routePatterns) : undefined;
-    const hasApiRoutes = apiOriginDomain && expandedRoutePatterns && expandedRoutePatterns.length > 0;
-    const apiOriginId = hasApiRoutes ? `API-${project}-${stage}` : undefined;
+    // Build API origins: one per unique domain, each route maps to its origin
+    const hasApiRoutes = apiRoutes && apiRoutes.length > 0;
+    const uniqueApiDomains = new Map<string, string>(); // domain → originId
+    if (hasApiRoutes) {
+      let idx = 0;
+      for (const r of apiRoutes) {
+        if (!uniqueApiDomains.has(r.originDomain)) {
+          uniqueApiDomains.set(r.originDomain, `API-${project}-${stage}${idx > 0 ? `-${idx}` : ""}`);
+          idx++;
+        }
+      }
+    }
+
+    // Build bucket origins (for bucket routes)
+    const bucketOriginItems = (input.bucketOrigins ?? []).map(bo => ({
+      Id: bo.originId,
+      DomainName: `${bo.bucketName}.s3.${bo.bucketRegion}.amazonaws.com`,
+      OriginPath: "",
+      OriginAccessControlId: bo.oacId,
+      S3OriginConfig: { OriginAccessIdentity: "" },
+      CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
+    }));
+
+    const apiOriginItems = hasApiRoutes
+      ? [...uniqueApiDomains.entries()].map(([domain, originId]) => ({
+          Id: originId,
+          DomainName: domain,
+          OriginPath: "",
+          ConnectionAttempts: 3,
+          ConnectionTimeout: 10,
+          CustomOriginConfig: {
+            HTTPPort: 80,
+            HTTPSPort: 443,
+            OriginProtocolPolicy: "https-only" as const,
+            OriginSslProtocols: { Quantity: 1, Items: ["TLSv1.2" as const] },
+            OriginReadTimeout: 30,
+            OriginKeepaliveTimeout: 5,
+          },
+          CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
+        }))
+      : [];
 
     const originsItems = [
       {
@@ -234,34 +381,20 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         S3OriginConfig: { OriginAccessIdentity: "" },
         CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
       },
-      ...(hasApiRoutes ? [{
-        Id: apiOriginId!,
-        DomainName: apiOriginDomain,
-        OriginPath: "",
-        ConnectionAttempts: 3,
-        ConnectionTimeout: 10,
-        CustomOriginConfig: {
-          HTTPPort: 80,
-          HTTPSPort: 443,
-          OriginProtocolPolicy: "https-only" as const,
-          OriginSslProtocols: { Quantity: 1, Items: ["TLSv1.2" as const] },
-          OriginReadTimeout: 30,
-          OriginKeepaliveTimeout: 5,
-        },
-        CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
-      }] : []),
+      ...apiOriginItems,
+      ...bucketOriginItems,
     ];
 
     // Build cache behaviors for API routes
     const API_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] as const;
     const CACHED_METHODS = ["GET", "HEAD"] as const;
 
-    const cacheBehaviors = hasApiRoutes
-      ? {
-          Quantity: expandedRoutePatterns.length,
-          Items: expandedRoutePatterns.map(pattern => ({
+    const apiCacheBehaviorItems = hasApiRoutes
+      ? apiRoutes.flatMap(route => {
+          const originId = uniqueApiDomains.get(route.originDomain)!;
+          return expandRoutePatterns([route.pattern]).map(pattern => ({
             PathPattern: pattern,
-            TargetOriginId: apiOriginId!,
+            TargetOriginId: originId,
             ViewerProtocolPolicy: "redirect-to-https" as const,
             AllowedMethods: {
               Quantity: 7 as const,
@@ -270,35 +403,95 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
             },
             Compress: true,
             SmoothStreaming: false,
-            CachePolicyId: CACHING_DISABLED_POLICY_ID,
+            CachePolicyId: apiCachePolicyId!,
             OriginRequestPolicyId: ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
             FunctionAssociations: { Quantity: 0, Items: [] },
             LambdaFunctionAssociations: { Quantity: 0, Items: [] },
             FieldLevelEncryptionId: "",
-          })),
+          }));
+        })
+      : [];
+
+    // Build cache behaviors for bucket origins (with optional signed cookies)
+    // Create a CloudFront Function for prefix stripping if needed
+    const bucketPrefixStripFunctions: Map<string, string> = new Map();
+    for (const bo of (input.bucketOrigins ?? [])) {
+      if (bo.stripPrefix && !bucketPrefixStripFunctions.has(bo.stripPrefix)) {
+        const fnName = `${project}-${stage}-${handlerName}-strip${bo.stripPrefix.replace(/\//g, "-")}`;
+        const stripCode = [
+          "function handler(event) {",
+          "  var request = event.request;",
+          `  var prefix = '${bo.stripPrefix}';`,
+          "  if (request.uri.startsWith(prefix)) {",
+          "    request.uri = request.uri.substring(prefix.length) || '/';",
+          "  }",
+          "  return request;",
+          "}",
+        ].join("\n");
+        const encodedCode = new TextEncoder().encode(stripCode);
+
+        // Create or update the CF Function
+        const list = yield* cloudfront.make("list_functions", {});
+        const existing = list.FunctionList?.Items?.find(f => f.Name === fnName);
+
+        if (existing) {
+          const getResult = yield* cloudfront.make("get_function", { Name: fnName, Stage: "LIVE" });
+          const currentCode = getResult.FunctionCode ? new TextDecoder().decode(getResult.FunctionCode) : "";
+          if (currentCode !== stripCode) {
+            const updateResult = yield* cloudfront.make("update_function", {
+              Name: fnName, IfMatch: getResult.ETag!,
+              FunctionConfig: { Comment: `effortless: strip prefix ${bo.stripPrefix}`, Runtime: "cloudfront-js-2.0" },
+              FunctionCode: encodedCode,
+            });
+            yield* cloudfront.make("publish_function", { Name: fnName, IfMatch: updateResult.ETag! });
+          }
+          bucketPrefixStripFunctions.set(bo.stripPrefix, existing.FunctionMetadata!.FunctionARN!);
+        } else {
+          const result = yield* cloudfront.make("create_function", {
+            Name: fnName,
+            FunctionConfig: { Comment: `effortless: strip prefix ${bo.stripPrefix}`, Runtime: "cloudfront-js-2.0" },
+            FunctionCode: encodedCode,
+          });
+          yield* cloudfront.make("publish_function", { Name: fnName, IfMatch: result.ETag! });
+          bucketPrefixStripFunctions.set(bo.stripPrefix, result.FunctionSummary!.FunctionMetadata!.FunctionARN!);
         }
+      }
+    }
+
+    const bucketCacheBehaviorItems = (input.bucketOrigins ?? []).flatMap(bo => {
+      const expandedPatterns = expandRoutePatterns([bo.pathPattern]);
+      const stripFnArn = bo.stripPrefix ? bucketPrefixStripFunctions.get(bo.stripPrefix) : undefined;
+      return expandedPatterns.map(pattern => ({
+        PathPattern: pattern,
+        TargetOriginId: bo.originId,
+        ViewerProtocolPolicy: "redirect-to-https" as const,
+        AllowedMethods: {
+          Quantity: 2 as const,
+          Items: [...CACHED_METHODS],
+          CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
+        },
+        Compress: true,
+        SmoothStreaming: false,
+        CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
+        ResponseHeadersPolicyId: SECURITY_HEADERS_POLICY_ID,
+        FunctionAssociations: stripFnArn
+          ? { Quantity: 1, Items: [{ FunctionARN: stripFnArn, EventType: "viewer-request" as const }] }
+          : { Quantity: 0, Items: [] },
+        LambdaFunctionAssociations: { Quantity: 0, Items: [] },
+        FieldLevelEncryptionId: "",
+        ...(bo.keyGroupId ? { TrustedKeyGroups: { Enabled: true, Quantity: 1, Items: [bo.keyGroupId] } } : {}),
+      }));
+    });
+
+    const allBehaviorItems = [...apiCacheBehaviorItems, ...bucketCacheBehaviorItems];
+    const cacheBehaviors = allBehaviorItems.length > 0
+      ? { Quantity: allBehaviorItems.length, Items: allBehaviorItems }
       : { Quantity: 0, Items: [] as never[] };
 
     const { errorPagePath } = input;
-    const customErrorResponses = spa
-      ? {
-          Quantity: 2,
-          Items: [
-            {
-              ErrorCode: 403,
-              ResponseCode: "200",
-              ResponsePagePath: `/${index}`,
-              ErrorCachingMinTTL: 0,
-            },
-            {
-              ErrorCode: 404,
-              ResponseCode: "200",
-              ResponsePagePath: `/${index}`,
-              ErrorCachingMinTTL: 0,
-            },
-          ],
-        }
-      : errorPagePath
+    // SPA fallback is handled by CloudFront Function (spaFallback), not CustomErrorResponses.
+    // This avoids intercepting 403 from private bucket routes.
+    const customErrorResponses = errorPagePath
         ? {
             Quantity: 2,
             Items: [
@@ -345,12 +538,13 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
       // Check origins count and cache behaviors
       const originsMatch = (currentConfig.Origins?.Quantity ?? 0) === originsItems.length;
       const currentBehaviorPatterns = (currentConfig.CacheBehaviors?.Items ?? []).map(b => b.PathPattern).sort();
-      const desiredBehaviorPatterns = (expandedRoutePatterns ?? []).slice().sort();
+      const desiredBehaviorPatterns = apiCacheBehaviorItems.map(b => b.PathPattern).sort();
       const behaviorsMatch =
         currentBehaviorPatterns.length === desiredBehaviorPatterns.length &&
         desiredBehaviorPatterns.every((p, i) => currentBehaviorPatterns[i] === p);
-      // Check API origin domain if routes are configured
-      const apiOriginMatch = !hasApiRoutes || currentConfig.Origins?.Items?.some(o => o.DomainName === apiOriginDomain);
+      // Check all API origin domains match
+      const currentOriginDomains = new Set((currentConfig.Origins?.Items ?? []).map(o => o.DomainName));
+      const apiOriginMatch = !hasApiRoutes || [...uniqueApiDomains.keys()].every(d => currentOriginDomains.has(d));
 
       const needsUpdate =
         currentOrigin?.DomainName !== s3OriginDomain ||
@@ -510,15 +704,15 @@ export type EnsureSsrDistributionInput = {
   tags: Record<string, string>;
   aliases?: string[];
   acmCertificateArn?: string;
-  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
-  apiOriginDomain?: string;
-  /** CloudFront path patterns to forward to API Gateway (e.g. ["/api/*"]) */
-  routePatterns?: string[];
+  /** Resolved API routes: each pattern mapped to its Lambda origin domain */
+  apiRoutes?: { pattern: string; originDomain: string }[];
+  /** CloudFront cache policy ID for API route behaviors */
+  apiCachePolicyId?: string;
 };
 
 export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
   Effect.gen(function* () {
-    const { project, stage, handlerName, bucketName, bucketRegion, s3OacId, lambdaOriginDomain, assetPatterns, tags, aliases, acmCertificateArn, apiOriginDomain, routePatterns } = input;
+    const { project, stage, handlerName, bucketName, bucketRegion, s3OacId, lambdaOriginDomain, assetPatterns, tags, aliases, acmCertificateArn, apiRoutes, apiCachePolicyId } = input;
 
     const comment = makeDistComment(project, stage, handlerName);
     const lambdaOriginId = `Lambda-${project}-${stage}-${handlerName}`;
@@ -539,10 +733,38 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
     const ALL_METHODS = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] as const;
     const CACHED_METHODS = ["GET", "HEAD"] as const;
 
-    // Origins: Lambda Function URL (default) + S3 (static assets) + optional API Gateway
-    const expandedRoutePatterns = routePatterns ? expandRoutePatterns(routePatterns) : undefined;
-    const hasApiRoutes = apiOriginDomain && expandedRoutePatterns && expandedRoutePatterns.length > 0;
-    const apiOriginId = hasApiRoutes ? `API-${project}-${stage}` : undefined;
+    // Build API origins: one per unique domain
+    const hasApiRoutes = apiRoutes && apiRoutes.length > 0;
+    const uniqueApiDomains = new Map<string, string>(); // domain → originId
+    if (hasApiRoutes) {
+      let idx = 0;
+      for (const r of apiRoutes) {
+        if (!uniqueApiDomains.has(r.originDomain)) {
+          uniqueApiDomains.set(r.originDomain, `API-${project}-${stage}${idx > 0 ? `-${idx}` : ""}`);
+          idx++;
+        }
+      }
+    }
+
+    // Origins: Lambda Function URL (default) + S3 (static assets) + API origins
+    const apiOriginItems = hasApiRoutes
+      ? [...uniqueApiDomains.entries()].map(([domain, originId]) => ({
+          Id: originId,
+          DomainName: domain,
+          OriginPath: "",
+          ConnectionAttempts: 3,
+          ConnectionTimeout: 10,
+          CustomOriginConfig: {
+            HTTPPort: 80,
+            HTTPSPort: 443,
+            OriginProtocolPolicy: "https-only" as const,
+            OriginSslProtocols: { Quantity: 1, Items: ["TLSv1.2" as const] },
+            OriginReadTimeout: 30,
+            OriginKeepaliveTimeout: 5,
+          },
+          CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
+        }))
+      : [];
 
     const originsItems = [
       {
@@ -567,22 +789,7 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
         S3OriginConfig: { OriginAccessIdentity: "" },
         CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
       },
-      ...(hasApiRoutes ? [{
-        Id: apiOriginId!,
-        DomainName: apiOriginDomain,
-        OriginPath: "",
-        ConnectionAttempts: 3,
-        ConnectionTimeout: 10,
-        CustomOriginConfig: {
-          HTTPPort: 80,
-          HTTPSPort: 443,
-          OriginProtocolPolicy: "https-only" as const,
-          OriginSslProtocols: { Quantity: 1, Items: ["TLSv1.2" as const] },
-          OriginReadTimeout: 30,
-          OriginKeepaliveTimeout: 5,
-        },
-        CustomHeaders: { Quantity: 0, Items: [] as { HeaderName: string; HeaderValue: string }[] },
-      }] : []),
+      ...apiOriginItems,
     ];
 
     // Default behavior → Lambda Function URL (SSR)
@@ -604,25 +811,28 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
       FieldLevelEncryptionId: "",
     };
 
-    // Cache behaviors: API routes (no cache) → asset patterns (cached) → default (SSR)
+    // Cache behaviors: API routes → asset patterns (cached) → default (SSR)
     const apiRouteBehaviors = hasApiRoutes
-      ? expandedRoutePatterns.map(pattern => ({
-          PathPattern: pattern,
-          TargetOriginId: apiOriginId!,
-          ViewerProtocolPolicy: "redirect-to-https" as const,
-          AllowedMethods: {
-            Quantity: 7 as const,
-            Items: [...ALL_METHODS],
-            CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
-          },
-          Compress: true,
-          SmoothStreaming: false,
-          CachePolicyId: CACHING_DISABLED_POLICY_ID,
-          OriginRequestPolicyId: ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
-          FunctionAssociations: { Quantity: 0, Items: [] },
-          LambdaFunctionAssociations: { Quantity: 0, Items: [] },
-          FieldLevelEncryptionId: "",
-        }))
+      ? apiRoutes.flatMap(route => {
+          const originId = uniqueApiDomains.get(route.originDomain)!;
+          return expandRoutePatterns([route.pattern]).map(pattern => ({
+            PathPattern: pattern,
+            TargetOriginId: originId,
+            ViewerProtocolPolicy: "redirect-to-https" as const,
+            AllowedMethods: {
+              Quantity: 7 as const,
+              Items: [...ALL_METHODS],
+              CachedMethods: { Quantity: 2 as const, Items: [...CACHED_METHODS] },
+            },
+            Compress: true,
+            SmoothStreaming: false,
+            CachePolicyId: apiCachePolicyId!,
+            OriginRequestPolicyId: ALL_VIEWER_EXCEPT_HOST_HEADER_POLICY_ID,
+            FunctionAssociations: { Quantity: 0, Items: [] },
+            LambdaFunctionAssociations: { Quantity: 0, Items: [] },
+            FieldLevelEncryptionId: "",
+          }));
+        })
       : [];
 
     const assetBehaviors = assetPatterns.map(pattern => ({
@@ -750,7 +960,7 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
     } satisfies DistributionResult;
   });
 
-const findDistributionByTags = (project: string, stage: string, handlerName: string) =>
+export const findDistributionByTags = (project: string, stage: string, handlerName: string) =>
   Effect.gen(function* () {
     const resources = yield* getResourcesByTags(project, stage);
     const candidates = resources.filter(r => {
@@ -953,4 +1163,51 @@ export const cleanupOrphanedFunctions = (project: string, stage: string) =>
         );
       }
     }
+  });
+
+// ============ API Cache Policy ============
+
+/**
+ * Ensure a custom CloudFront cache policy exists for API routes.
+ *
+ * This policy has DefaultTTL=0 (no caching by default) but respects
+ * origin Cache-Control headers (MaxTTL=86400). Routes that set
+ * Cache-Control via the `cache` option will be cached by CloudFront;
+ * routes without it won't.
+ */
+export const ensureApiCachePolicy = () =>
+  Effect.gen(function* () {
+    // Check if policy already exists
+    const result = yield* cloudfront.make("list_cache_policies", { Type: "custom" });
+    const existing = result.CachePolicyList?.Items?.find(
+      item => item.CachePolicy?.CachePolicyConfig?.Name === API_CACHE_POLICY_NAME,
+    );
+
+    if (existing) {
+      const id = existing.CachePolicy!.Id!;
+      yield* Effect.logDebug(`API cache policy already exists: ${id}`);
+      return id;
+    }
+
+    yield* Effect.logDebug(`Creating CloudFront cache policy: ${API_CACHE_POLICY_NAME}`);
+    const createResult = yield* cloudfront.make("create_cache_policy", {
+      CachePolicyConfig: {
+        Name: API_CACHE_POLICY_NAME,
+        Comment: "Effortless-AWS: Respects origin Cache-Control headers for API routes (DefaultTTL=0)",
+        DefaultTTL: 0,
+        MinTTL: 0,
+        MaxTTL: 86400,
+        ParametersInCacheKeyAndForwardedToOrigin: {
+          EnableAcceptEncodingGzip: true,
+          EnableAcceptEncodingBrotli: true,
+          HeadersConfig: { HeaderBehavior: "none" },
+          CookiesConfig: { CookieBehavior: "none" },
+          QueryStringsConfig: { QueryStringBehavior: "all" },
+        },
+      },
+    });
+
+    const id = createResult.CachePolicy!.Id!;
+    yield* Effect.logDebug(`Created API cache policy: ${id}`);
+    return id;
   });

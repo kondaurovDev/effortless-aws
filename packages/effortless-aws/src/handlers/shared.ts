@@ -47,6 +47,12 @@ export type HttpResponse = {
   /** Response headers (use for custom content-types not covered by contentType) */
   headers?: Record<string, string>;
   /**
+   * Multiple Set-Cookie values. Used by Lambda Function URLs to set multiple cookies
+   * in a single response (e.g., session cookie + CloudFront signed cookies).
+   * When present, takes precedence over `set-cookie` in `headers`.
+   */
+  cookies?: string[];
+  /**
    * Set to `true` to return binary data.
    * When enabled, `body` must be a base64-encoded string and the response
    * will include `isBase64Encoded: true` so Lambda Function URLs / API Gateway

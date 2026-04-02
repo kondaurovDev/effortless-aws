@@ -2,3 +2,5 @@ node_modules
 dist
 packages/effortless-aws-cli/src/aws/clients
 .temp-*
+integration/.env
+integration/deploy.local.json

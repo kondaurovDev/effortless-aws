@@ -21,6 +21,7 @@ import {
   ensureDistribution,
   invalidateDistribution,
   findCertificate,
+  ensureApiCachePolicy,
 } from "../aws";
 import { generateSitemap, generateRobots, collectHtmlKeys, keysToUrls, submitToGoogleIndexing } from "./seo";
 
@@ -34,8 +35,12 @@ export type DeployStaticSiteInput = {
   fn: ExtractedStaticSiteFunction;
   /** Source file path (required when middleware is present) */
   file?: string;
-  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
-  apiOriginDomain?: string;
+  /** Resolved API routes: pattern → Lambda Function URL domain */
+  apiRoutes?: { pattern: string; originDomain: string }[];
+  /** Resolved bucket routes for CloudFront origin proxying */
+  bucketRoutes?: { pattern: string; bucketName: string; bucketRegion: string; access: string }[];
+  /** CloudFront signing info for private bucket routes */
+  cfSigningInfo?: { cfSigningKeySsmPath: string; publicKeyId: string; keyGroupId: string };
   verbose?: boolean;
 };
 
@@ -167,9 +172,9 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     const hasMiddleware = fn.hasHandler;
 
     const tagCtx: TagContext = { project, stage, handler: handlerName };
-    const routePatterns = fn.routePatterns;
+    const apiRoutes = input.apiRoutes ?? [];
 
-    if (routePatterns.length > 0 && !input.apiOriginDomain) {
+    if (fn.routePatterns.length > 0 && apiRoutes.length === 0) {
       return yield* Effect.fail(
         new Error(
           `Static site "${exportName}" has routes but no API handler was deployed. ` +
@@ -259,15 +264,17 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       );
       lambdaEdgeArn = result.versionArn;
     } else {
-      // CloudFront Function for URL rewrite + optional www redirect
+      // CloudFront Function for SPA fallback / URL rewrite + optional www redirect
+      const needsSpaFallback = isSpa;
       const needsUrlRewrite = !isSpa;
       const needsWwwRedirect = !!wwwDomain;
 
-      if (needsUrlRewrite || needsWwwRedirect) {
-        const fnName = needsWwwRedirect
+      if (needsSpaFallback || needsUrlRewrite || needsWwwRedirect) {
+        const fnName = (needsSpaFallback || needsWwwRedirect)
           ? `${project}-${stage}-${handlerName}-viewer-req`
           : `${project}-${stage}-url-rewrite`;
         const result = yield* ensureViewerRequestFunction(fnName, {
+          spaFallback: needsSpaFallback,
           rewriteUrls: needsUrlRewrite,
           redirectWwwDomain: wwwDomain,
         });
@@ -282,7 +289,27 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
         ? `/${config.errorPage}`
         : `/${ERROR_PAGE_KEY}`;
 
-    // 6. Ensure CloudFront distribution
+    // 6. Ensure API cache policy if needed
+    const apiCachePolicyId = apiRoutes.length > 0 ? yield* ensureApiCachePolicy() : undefined;
+
+    // 7. Build bucket origins for CloudFront
+    const bucketOrigins = (input.bucketRoutes ?? []).map(br => {
+      // Strip trailing /* to get the prefix (e.g. "/files/*" → "/files")
+      const stripPrefix = br.pattern.replace(/\/?\*$/, "");
+      return {
+        originId: `S3-${br.bucketName}`,
+        bucketName: br.bucketName,
+        bucketRegion: br.bucketRegion,
+        oacId,
+        pathPattern: br.pattern,
+        stripPrefix,
+        ...(br.access === "private" && input.cfSigningInfo
+          ? { keyGroupId: input.cfSigningInfo.keyGroupId }
+          : {}),
+      };
+    });
+
+    // 8. Ensure CloudFront distribution
     const index = config.index ?? "index.html";
     const { distributionId, distributionArn, domainName } = yield* ensureDistribution({
       project,
@@ -299,13 +326,19 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       aliases,
       acmCertificateArn,
       errorPagePath,
-      ...(input.apiOriginDomain && routePatterns.length > 0
-        ? { apiOriginDomain: input.apiOriginDomain, routePatterns }
+      ...(apiRoutes.length > 0
+        ? { apiRoutes, apiCachePolicyId }
+        : {}),
+      ...(bucketOrigins.length > 0
+        ? { bucketOrigins }
         : {}),
     });
 
-    // 7. Set bucket policy for CloudFront OAC
+    // 9. Set bucket policy for CloudFront OAC (site bucket + route buckets)
     yield* putBucketPolicyForOAC(bucketName, distributionArn);
+    for (const bo of bucketOrigins) {
+      yield* putBucketPolicyForOAC(bo.bucketName, distributionArn);
+    }
 
     // 8. Sync files to S3
     const sourceDir = p.resolve(projectDir, config.dir);

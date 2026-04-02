@@ -63,6 +63,7 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.secretEntries).toEqual([]);
     expect(configs[0]!.staticGlobs).toEqual([]);
     expect(configs[0]!.routePatterns).toEqual([]);
+    expect(configs[0]!.apiRoutes).toEqual([]);
   });
 
   it("should detect middleware and set hasHandler to true", async () => {
@@ -179,6 +180,53 @@ describe("defineStaticSite extraction", () => {
     const configs = await extractStaticSiteConfigs(source);
 
     expect(configs[0]!.routePatterns).toEqual(["/api/*", "/auth/*"]);
+  });
+
+  it("should extract apiRoutes with handler export names", async () => {
+    const source = `
+      import { defineApi, defineStaticSite } from "effortless-aws";
+
+      export const siteApi = defineApi({ basePath: "/api" });
+
+      export const app = defineStaticSite()({
+        dir: "dist",
+        routes: {
+          "/api/*": siteApi,
+        },
+      });
+    `;
+
+    const configs = await extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.apiRoutes).toEqual([
+      { pattern: "/api/*", handlerExport: "siteApi" },
+    ]);
+    expect(configs[0]!.routePatterns).toEqual(["/api/*"]);
+  });
+
+  it("should extract multiple apiRoutes with different handlers", async () => {
+    const source = `
+      import { defineApi, defineStaticSite } from "effortless-aws";
+
+      export const api = defineApi({ basePath: "/api" });
+      export const auth = defineApi({ basePath: "/auth" });
+
+      export const app = defineStaticSite()({
+        dir: "dist",
+        routes: {
+          "/api/*": api,
+          "/auth/*": auth,
+        },
+      });
+    `;
+
+    const configs = await extractStaticSiteConfigs(source);
+
+    expect(configs[0]!.apiRoutes).toEqual([
+      { pattern: "/api/*", handlerExport: "api" },
+      { pattern: "/auth/*", handlerExport: "auth" },
+    ]);
   });
 
   it("should extract route patterns from default export", async () => {

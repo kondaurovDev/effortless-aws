@@ -19,6 +19,7 @@ import {
   ensureSsrDistribution,
   invalidateDistribution,
   findCertificate,
+  ensureApiCachePolicy,
 } from "../aws";
 
 // ============ App (SSR) deployment ============
@@ -29,8 +30,8 @@ export type DeployAppInput = {
   stage?: string;
   region: string;
   fn: ExtractedAppFunction;
-  /** API Gateway domain for route proxying (e.g. "abc123.execute-api.eu-west-1.amazonaws.com") */
-  apiOriginDomain?: string;
+  /** Resolved API routes: pattern → Lambda Function URL domain */
+  apiRoutes?: { pattern: string; originDomain: string }[];
   verbose?: boolean;
 };
 
@@ -53,9 +54,9 @@ export const deployApp = (input: DeployAppInput) =>
     const handlerName = exportName;
 
     const tagCtx: TagContext = { project, stage, handler: handlerName };
-    const routePatterns = fn.routePatterns;
+    const apiRoutes = input.apiRoutes ?? [];
 
-    if (routePatterns.length > 0 && !input.apiOriginDomain) {
+    if (fn.routePatterns.length > 0 && apiRoutes.length === 0) {
       return yield* Effect.fail(
         new Error(
           `App "${exportName}" has routes but no API handler was deployed. ` +
@@ -151,7 +152,10 @@ export const deployApp = (input: DeployAppInput) =>
       aliases = [domain];
     }
 
-    // 11. Create/update CloudFront distribution
+    // 11. Ensure API cache policy if needed
+    const apiCachePolicyId = apiRoutes.length > 0 ? yield* ensureApiCachePolicy() : undefined;
+
+    // 12. Create/update CloudFront distribution
     const { distributionId, distributionArn, domainName } = yield* ensureSsrDistribution({
       project,
       stage,
@@ -164,8 +168,8 @@ export const deployApp = (input: DeployAppInput) =>
       tags: makeTags(tagCtx),
       aliases,
       acmCertificateArn,
-      ...(input.apiOriginDomain && routePatterns.length > 0
-        ? { apiOriginDomain: input.apiOriginDomain, routePatterns }
+      ...(apiRoutes.length > 0
+        ? { apiRoutes, apiCachePolicyId }
         : {}),
     });
 

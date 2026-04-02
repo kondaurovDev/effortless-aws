@@ -5,8 +5,14 @@ import { builtinModules, createRequire } from "module";
 import * as os from "os";
 import archiver from "archiver";
 import { globSync } from "glob";
-import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry } from "./handler-registry";
+import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry, type ApiRouteEntry, type BucketRouteEntry } from "./handler-registry";
 import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig } from "effortless-aws";
+
+/** Check if a route value is a bucket route config (local copy to avoid build dependency) */
+const isBucketRoute = (v: unknown): boolean =>
+  v != null && typeof v === "object" && "bucket" in v &&
+  (v as any).bucket != null && typeof (v as any).bucket === "object" &&
+  (v as any).bucket.__brand === "effortless-bucket";
 
 export type BundleInput = {
   projectDir: string;
@@ -86,10 +92,49 @@ const extractRoutePatternsFromRoutes = (routes: unknown): string[] => {
     .filter((p): p is string => !!p);
 };
 
-/** Extract route patterns from a static site's routes map */
+/** Extract API route patterns from a static site's routes map (excludes bucket routes) */
 const extractRouteMapPatterns = (routes: unknown): string[] => {
   if (!routes || typeof routes !== "object" || Array.isArray(routes)) return [];
-  return Object.keys(routes);
+  return Object.entries(routes as Record<string, unknown>)
+    .filter(([, v]) => !isBucketRoute(v))
+    .map(([k]) => k);
+};
+
+/** Extract API route entries from a static site's routes map (excludes bucket routes) */
+const extractApiRouteEntries = (routes: unknown, allExports: Record<string, unknown>): ApiRouteEntry[] => {
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return [];
+  const entries: ApiRouteEntry[] = [];
+  for (const [pattern, value] of Object.entries(routes as Record<string, unknown>)) {
+    if (isBucketRoute(value)) continue;
+    // Find the export name of the referenced handler by identity comparison
+    let handlerExport = "";
+    for (const [name, exp] of Object.entries(allExports)) {
+      if (exp === value) { handlerExport = name; break; }
+    }
+    entries.push({ pattern, handlerExport });
+  }
+  return entries;
+};
+
+/** Extract bucket route entries from a static site's routes map */
+const extractBucketRouteEntries = (routes: unknown, allExports: Record<string, unknown>): BucketRouteEntry[] => {
+  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return [];
+  const entries: BucketRouteEntry[] = [];
+  for (const [pattern, value] of Object.entries(routes as Record<string, unknown>)) {
+    if (!isBucketRoute(value)) continue;
+    // Find the export name of the referenced bucket by identity comparison
+    const bucket = (value as { bucket: unknown }).bucket;
+    let bucketExportName = "";
+    for (const [name, exp] of Object.entries(allExports)) {
+      if (exp === bucket) { bucketExportName = name; break; }
+    }
+    entries.push({
+      pattern,
+      bucketExportName,
+      access: (value as { access?: string }).access === "private" ? "private" : "public",
+    });
+  }
+  return entries;
 };
 
 /** Props to strip from __spec when building static config */
@@ -99,7 +144,7 @@ const SPEC_RUNTIME_PROPS: Record<string, readonly string[]> = {
 };
 
 /** Extract an ExtractedConfig from a runtime handler object */
-const extractFromHandler = (exportName: string, handler: any, type: HandlerType): ExtractedConfig<any> => {
+const extractFromHandler = (exportName: string, handler: any, type: HandlerType, allExports?: Record<string, unknown>): ExtractedConfig<any> => {
   const rawSpec = handler.__spec ?? {};
   // Some handler types store all props in __spec (e.g. staticSite, app)
   const checkTarget = type === "staticSite" || type === "app" ? rawSpec : handler;
@@ -118,6 +163,8 @@ const extractFromHandler = (exportName: string, handler: any, type: HandlerType)
     secretEntries: extractSecretEntriesFromConfig(handler.config),
     staticGlobs: Array.isArray(handler.static) ? handler.static : [],
     routePatterns: type === "staticSite" ? extractRouteMapPatterns(rawSpec.routes) : extractRoutePatternsFromRoutes(handler.routes),
+    apiRoutes: type === "staticSite" ? extractApiRouteEntries(rawSpec.routes, allExports ?? {}) : [],
+    bucketRoutes: type === "staticSite" ? extractBucketRouteEntries(rawSpec.routes, allExports ?? {}) : [],
   };
 };
 
@@ -137,7 +184,7 @@ export const extractConfigsFromFile = <T>(
       if (!value || typeof value !== "object" || !("__brand" in value)) continue;
       const handlerType = BRAND_TO_TYPE[(value as any).__brand as string];
       if (handlerType !== type) continue;
-      results.push(extractFromHandler(exportName, value, type) as ExtractedConfig<T>);
+      results.push(extractFromHandler(exportName, value, type, mod) as ExtractedConfig<T>);
     }
     return results;
   });
@@ -509,7 +556,7 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
         if (!("__brand" in value)) continue;
         const type = BRAND_TO_TYPE[(value as any).__brand as string];
         if (!type) continue;
-        byType[type].push(extractFromHandler(exportName, value, type));
+        byType[type].push(extractFromHandler(exportName, value, type, mod));
       }
 
       if (byType.table.length > 0) tableHandlers.push({ file, exports: byType.table });

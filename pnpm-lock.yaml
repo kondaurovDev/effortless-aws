@@ -58,7 +58,7 @@ catalogs:
       specifier: ^3.975.0
       version: 3.985.0
     '@types/node':
-      specifier: ^22.19.9
+      specifier: 22.19.9
       version: 22.19.9
     tsup:
       specifier: ^8.5.1
@@ -86,6 +86,25 @@ importers:
       '@changesets/cli':
         specifier: ^2.29.8
         version: 2.29.8(@types/node@22.19.9)
+
+  integration:
+    dependencies:
+      effortless-aws:
+        specifier: workspace:*
+        version: link:../packages/effortless-aws
+    devDependencies:
+      '@effortless-aws/cli':
+        specifier: workspace:*
+        version: link:../packages/effortless-aws-cli
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.9
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.0.18(@types/node@22.19.9)(yaml@2.8.2)
 
   packages/effortless-aws:
     devDependencies:

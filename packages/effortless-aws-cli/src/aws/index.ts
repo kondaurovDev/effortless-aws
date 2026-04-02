@@ -27,8 +27,8 @@ export { findCertificate } from "./acm";
 export type { FindCertificateResult } from "./acm";
 
 // CloudFront
-export { ensureOAC, ensureUrlRewriteFunction, ensureViewerRequestFunction, ensureDistribution, ensureSsrDistribution, invalidateDistribution, disableAndDeleteDistribution, deleteOAC, cleanupOrphanedFunctions } from "./cloudfront";
-export type { EnsureOACInput, EnsureDistributionInput, EnsureSsrDistributionInput, DistributionResult, ViewerRequestFunctionConfig } from "./cloudfront";
+export { ensureOAC, ensurePublicKey, ensureKeyGroup, ensureUrlRewriteFunction, ensureViewerRequestFunction, ensureDistribution, ensureSsrDistribution, invalidateDistribution, disableAndDeleteDistribution, deleteOAC, cleanupOrphanedFunctions, ensureApiCachePolicy, findDistributionByTags } from "./cloudfront";
+export type { EnsureOACInput, EnsurePublicKeyInput, EnsureKeyGroupInput, EnsureDistributionInput, EnsureSsrDistributionInput, DistributionResult, ViewerRequestFunctionConfig } from "./cloudfront";
 
 // VPC
 export { getDefaultVpcSubnets } from "./vpc";

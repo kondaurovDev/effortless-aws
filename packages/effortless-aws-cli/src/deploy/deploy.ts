@@ -12,6 +12,9 @@ import {
   cleanupOrphanedFunctions,
   ensureFunctionUrl,
   addFunctionUrlPublicAccess,
+  ensurePublicKey,
+  ensureKeyGroup,
+  findDistributionByTags,
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
 import { toSeconds } from "effortless-aws";
@@ -310,6 +313,42 @@ const buildWorkerNameMap = (
  * Validate that all handler deps reference a discovered table, bucket, mailer, queue, or worker.
  * Returns a list of human-readable error strings (empty = all valid).
  */
+/** Validate handler export names: no defaults, no duplicates. */
+const validateHandlerNames = (discovered: DiscoveredHandlers): string[] => {
+  const errors: string[] = [];
+  const seen = new Map<string, string[]>();
+  const allGroups: { type: string; handlers: { file: string; exports: { exportName: string }[] }[] }[] = [
+    { type: "table", handlers: discovered.tableHandlers },
+    { type: "app", handlers: discovered.appHandlers },
+    { type: "site", handlers: discovered.staticSiteHandlers },
+    { type: "queue", handlers: discovered.fifoQueueHandlers },
+    { type: "bucket", handlers: discovered.bucketHandlers },
+    { type: "mailer", handlers: discovered.mailerHandlers },
+    { type: "api", handlers: discovered.apiHandlers },
+    { type: "cron", handlers: discovered.cronHandlers },
+    { type: "worker", handlers: discovered.workerHandlers },
+  ];
+  for (const { type, handlers } of allGroups) {
+    for (const h of handlers) {
+      for (const fn of h.exports) {
+        if (fn.exportName === "default") {
+          errors.push(`Default export in ${h.file} is not supported. Use a named export: export const myHandler = define${type[0]!.toUpperCase()}${type.slice(1)}(...)`);
+          continue;
+        }
+        const key = fn.exportName;
+        const label = `${h.file} (${type})`;
+        seen.set(key, [...(seen.get(key) ?? []), label]);
+      }
+    }
+  }
+  for (const [name, locations] of seen) {
+    if (locations.length > 1) {
+      errors.push(`Duplicate handler name "${name}": ${locations.join(", ")}`);
+    }
+  }
+  return errors;
+};
+
 const validateDeps = (
   discovered: DiscoveredHandlers,
   tableNameMap: Map<string, string>,
@@ -465,6 +504,13 @@ const mergeResolved = (
 
 // ============ Parallel deploy task builders ============
 
+/** CloudFront signing info for signed cookies (private bucket routes) */
+type CfSigningInfo = {
+  cfSigningKeySsmPath: string;
+  publicKeyId: string;
+  keyGroupId: string;
+};
+
 type DeployTaskCtx = {
   input: DeployProjectInput;
   layerArn: string | undefined;
@@ -476,6 +522,9 @@ type DeployTaskCtx = {
   queueNameMap: Map<string, string>;
   workerNameMap: Map<string, string>;
   logComplete: (name: string, type: string, status: StepStatus, bundleSize?: number) => Effect.Effect<void>;
+  cfSigningInfo?: CfSigningInfo;
+  /** CloudFront domain for signed cookies (custom domain from static site, or "*") */
+  cfDomain?: string;
 };
 
 const makeDeployInput = (ctx: DeployTaskCtx, file: string): DeployInput => ({
@@ -533,18 +582,24 @@ const buildAppTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["appHandlers"],
   results: DeployAppResult[],
-  apiOriginDomain?: string,
+  apiUrlMap?: Map<string, string>,
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { exports } of handlers) {
     for (const fn of exports) {
+      // Resolve API routes to actual origin domains
+      const apiRoutes = apiUrlMap ? fn.apiRoutes.map(ar => {
+        const originDomain = apiUrlMap.get(ar.handlerExport);
+        if (!originDomain) throw new Error(`API route "${ar.pattern}" references "${ar.handlerExport}" which was not found`);
+        return { pattern: ar.pattern, originDomain };
+      }) : [];
       tasks.push(
         Effect.gen(function* () {
           const result = yield* deployApp({
             projectDir: ctx.input.projectDir, project: ctx.input.project,
             stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
-            ...(apiOriginDomain ? { apiOriginDomain } : {}),
+            ...(apiRoutes.length > 0 ? { apiRoutes } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             lambda: { region }, iam: { region }, s3: { region },
             cloudfront: { region: "us-east-1" },
@@ -564,19 +619,35 @@ const buildStaticSiteTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["staticSiteHandlers"],
   results: DeployStaticSiteResult[],
-  apiOriginDomain?: string,
+  apiUrlMap?: Map<string, string>,
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
+      // Resolve bucket routes to actual bucket names
+      const bucketRoutes = fn.bucketRoutes.map(br => {
+        const bucketName = ctx.bucketNameMap.get(br.bucketExportName);
+        if (!bucketName) throw new Error(`Bucket route "${br.pattern}" references "${br.bucketExportName}" which was not found`);
+        return { pattern: br.pattern, bucketName, bucketRegion: region, access: br.access };
+      });
+
+      // Resolve API routes to actual origin domains
+      const apiRoutes = apiUrlMap ? fn.apiRoutes.map(ar => {
+        const originDomain = apiUrlMap.get(ar.handlerExport);
+        if (!originDomain) throw new Error(`API route "${ar.pattern}" references "${ar.handlerExport}" which was not found`);
+        return { pattern: ar.pattern, originDomain };
+      }) : [];
+
       tasks.push(
         Effect.gen(function* () {
           const result = yield* deployStaticSite({
             projectDir: ctx.input.projectDir, project: ctx.input.project,
             stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
             ...(fn.hasHandler ? { file } : {}),
-            ...(apiOriginDomain ? { apiOriginDomain } : {}),
+            ...(apiRoutes.length > 0 ? { apiRoutes } : {}),
+            ...(bucketRoutes.length > 0 ? { bucketRoutes } : {}),
+            ...(ctx.cfSigningInfo ? { cfSigningInfo: ctx.cfSigningInfo } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             s3: { region }, cloudfront: { region: "us-east-1" },
             resource_groups_tagging_api: { region: "us-east-1" },
@@ -686,6 +757,18 @@ const buildApiTasks = (
       tasks.push(
         Effect.gen(function* () {
           const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
+
+          // Inject CF signing env vars for signed cookies (private bucket routes)
+          if (ctx.cfSigningInfo) {
+            env.depsEnv.EFF_CF_SIGNING_KEY = ctx.cfSigningInfo.cfSigningKeySsmPath;
+            env.depsEnv.EFF_CF_KEY_PAIR_ID = ctx.cfSigningInfo.publicKeyId;
+            env.depsEnv.EFF_CF_DOMAIN = ctx.cfDomain ?? "*";
+            // Ensure SSM read permissions are included
+            if (!env.depsPermissions.includes("ssm:GetParameter")) {
+              env.depsPermissions = [...env.depsPermissions, "ssm:GetParameter", "ssm:GetParameters"];
+            }
+          }
+
           const { exportName, functionArn, status, bundleSize, handlerName } = yield* deployApiFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
@@ -794,11 +877,16 @@ export type DeployProjectResult = {
   apiResults: DeployResult[];
 };
 
-export const deployProject = (input: DeployProjectInput) =>
+type HandlerCounts = {
+  table: number; app: number; site: number; queue: number;
+  bucket: number; mailer: number; api: number; cron: number; worker: number;
+};
+
+// ---- Phase 1: Discover handlers and validate ----
+
+const discoverAndValidate = (input: DeployProjectInput) =>
   Effect.gen(function* () {
     const stage = resolveStage(input.stage);
-
-    // Discover handlers from file patterns
     const files = findHandlerFiles(input.patterns, input.projectDir);
 
     if (files.length === 0) {
@@ -807,44 +895,81 @@ export const deployProject = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = yield* discoverHandlers(files, input.projectDir);
+    const discovered = yield* discoverHandlers(files, input.projectDir);
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = discovered;
 
-    const totalTableHandlers = tableHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAppHandlers = appHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalStaticSiteHandlers = input.noSites ? 0 : staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalFifoQueueHandlers = fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalBucketHandlers = bucketHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalMailerHandlers = mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalApiHandlers = apiHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalCronHandlers = cronHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalWorkerHandlers = workerHandlers.reduce((acc, h) => acc + h.exports.length, 0);
-    const totalAllHandlers = totalTableHandlers + totalAppHandlers + totalStaticSiteHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers + totalCronHandlers + totalWorkerHandlers;
+    const counts: HandlerCounts = {
+      table: tableHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      app: appHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      site: input.noSites ? 0 : staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      queue: fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      bucket: bucketHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      mailer: mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      api: apiHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      cron: cronHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      worker: workerHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+    };
+    const countValues = Object.values(counts) as number[];
+    const totalAll = countValues.reduce((a, b) => a + b, 0);
 
-    if (totalAllHandlers === 0) {
+    if (totalAll === 0) {
       return yield* Effect.fail(new Error("No handlers found in matched files"));
     }
 
-    const parts: string[] = [];
-    if (totalTableHandlers > 0) parts.push(`${totalTableHandlers} table`);
-    if (totalAppHandlers > 0) parts.push(`${totalAppHandlers} app`);
-    if (totalStaticSiteHandlers > 0) parts.push(`${totalStaticSiteHandlers} site`);
-    if (totalFifoQueueHandlers > 0) parts.push(`${totalFifoQueueHandlers} queue`);
-    if (totalBucketHandlers > 0) parts.push(`${totalBucketHandlers} bucket`);
-    if (totalMailerHandlers > 0) parts.push(`${totalMailerHandlers} mailer`);
-    if (totalApiHandlers > 0) parts.push(`${totalApiHandlers} api`);
-    if (totalCronHandlers > 0) parts.push(`${totalCronHandlers} cron`);
-    if (totalWorkerHandlers > 0) parts.push(`${totalWorkerHandlers} worker`);
+    const parts = (Object.entries(counts) as [string, number][])
+      .filter(([, n]) => n > 0)
+      .map(([type, n]) => `${n} ${type}`);
     yield* Console.log(`\n  ${c.dim("Handlers:")} ${parts.join(", ")}`);
 
+    // Validate unique handler names
+    const nameErrors = validateHandlerNames(discovered);
+    if (nameErrors.length > 0) {
+      yield* Console.log("");
+      for (const err of nameErrors) {
+        yield* Console.log(`  ${c.red("✗")} ${err}`);
+      }
+      return yield* Effect.fail(new Error("Invalid handler names — see errors above"));
+    }
+
+    // Build resource maps for deps resolution
+    const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
+    const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
+    const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
+    const queueNameMap = buildQueueNameMap(fifoQueueHandlers, input.project, stage);
+    const workerNameMap = buildWorkerNameMap(workerHandlers, input.project, stage);
+
+    // Validate deps references
+    const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap);
+    if (depsErrors.length > 0) {
+      yield* Console.log("");
+      for (const err of depsErrors) {
+        yield* Console.log(`  ${c.red("✗")} ${err}`);
+      }
+      return yield* Effect.fail(new Error("Unresolved deps — aborting deploy"));
+    }
+
+    return { stage, files, discovered, counts, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap };
+  });
+
+// ---- Phase 2: Ensure secrets and CF signing keys ----
+
+const prepareSecrets = (input: {
+  discovered: DiscoveredHandlers;
+  project: string;
+  stage: string;
+  region: string;
+  noSites?: boolean;
+}) =>
+  Effect.gen(function* () {
+    const { discovered, project, stage, region } = input;
+
     // Check for missing SSM parameters
-    const discovered = { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers };
-    const requiredSecrets = collectRequiredSecrets(discovered, input.project, stage);
+    const requiredSecrets = collectRequiredSecrets(discovered, project, stage);
     if (requiredSecrets.length > 0) {
       const { missing } = yield* checkMissingSecrets(requiredSecrets).pipe(
-        Effect.provide(Aws.makeClients({ ssm: { region: input.region } }))
+        Effect.provide(Aws.makeClients({ ssm: { region } }))
       );
 
-      // Auto-create secrets that have generators
       const withGenerators = missing.filter(m => m.generate);
       const manualOnly = missing.filter(m => !m.generate);
 
@@ -855,7 +980,7 @@ export const deployProject = (input: DeployProjectInput) =>
             Name: entry.ssmPath,
             Value: value,
             Type: "SecureString",
-          }).pipe(Effect.provide(Aws.makeClients({ ssm: { region: input.region } })));
+          }).pipe(Effect.provide(Aws.makeClients({ ssm: { region } })));
           yield* Effect.logDebug(`Auto-created SSM parameter: ${entry.ssmPath}`);
         }
         yield* Console.log(`\n  ${c.green("✓")} Auto-created ${withGenerators.length} secret(s)`);
@@ -870,72 +995,167 @@ export const deployProject = (input: DeployProjectInput) =>
       }
     }
 
-    // Build resource maps for deps resolution
-    const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
-    const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
-    const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
-    const queueNameMap = buildQueueNameMap(fifoQueueHandlers, input.project, stage);
-    const workerNameMap = buildWorkerNameMap(workerHandlers, input.project, stage);
+    // Check if any static site has private bucket routes — if so, set up CF signing keys
+    const hasPrivateBucketRoutes = !input.noSites && discovered.staticSiteHandlers.some(
+      ({ exports }) => exports.some(fn => fn.bucketRoutes.some(br => br.access === "private"))
+    );
 
-    // Validate deps references before deploying anything
-    const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap);
-    if (depsErrors.length > 0) {
-      yield* Console.log("");
-      for (const err of depsErrors) {
-        yield* Console.log(`  ${c.red("✗")} ${err}`);
+    let cfSigningInfo: CfSigningInfo | undefined;
+    if (hasPrivateBucketRoutes) {
+      const cfKeyName = `${project}-${stage}-cf-signing`;
+      const cfSigningKeySsmPath = `/${project}/${stage}/cf-signing-key`;
+
+      const { missing: missingCfKey } = yield* checkMissingSecrets([
+        { ssmPath: cfSigningKeySsmPath, propName: "cf-signing-key", ssmKey: "cf-signing-key", handlerName: "__cf-signing__", generate: undefined },
+      ]).pipe(Effect.provide(Aws.makeClients({ ssm: { region } })));
+
+      if (missingCfKey.length > 0) {
+        const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+          modulusLength: 2048,
+          publicKeyEncoding: { type: "spki", format: "pem" },
+          privateKeyEncoding: { type: "pkcs8", format: "pem" },
+        });
+
+        yield* ssm.make("put_parameter", {
+          Name: cfSigningKeySsmPath,
+          Value: privateKey,
+          Type: "SecureString",
+          Description: `CloudFront signing key for effortless-aws: ${cfKeyName}`,
+        }).pipe(Effect.provide(Aws.makeClients({ ssm: { region } })));
+
+        const { publicKeyId } = yield* ensurePublicKey({
+          name: cfKeyName,
+          publicKeyPem: publicKey,
+        }).pipe(Effect.provide(Aws.makeClients({ cloudfront: { region: "us-east-1" } })));
+
+        const { keyGroupId } = yield* ensureKeyGroup({
+          name: cfKeyName,
+          publicKeyIds: [publicKeyId],
+        }).pipe(Effect.provide(Aws.makeClients({ cloudfront: { region: "us-east-1" } })));
+
+        cfSigningInfo = { cfSigningKeySsmPath, publicKeyId, keyGroupId };
+        yield* Console.log(`  ${c.green("✓")} Created CloudFront signing key pair`);
+      } else {
+        const paramResult = yield* ssm.make("get_parameter", {
+          Name: cfSigningKeySsmPath,
+          WithDecryption: true,
+        }).pipe(Effect.provide(Aws.makeClients({ ssm: { region } })));
+
+        const privateKeyPem = paramResult.Parameter!.Value!;
+        const publicKeyObj = crypto.createPublicKey(privateKeyPem);
+        const publicKeyPem = publicKeyObj.export({ type: "spki", format: "pem" }) as string;
+
+        const { publicKeyId } = yield* ensurePublicKey({
+          name: cfKeyName,
+          publicKeyPem,
+        }).pipe(Effect.provide(Aws.makeClients({ cloudfront: { region: "us-east-1" } })));
+
+        const { keyGroupId } = yield* ensureKeyGroup({
+          name: cfKeyName,
+          publicKeyIds: [publicKeyId],
+        }).pipe(Effect.provide(Aws.makeClients({ cloudfront: { region: "us-east-1" } })));
+
+        cfSigningInfo = { cfSigningKeySsmPath, publicKeyId, keyGroupId };
       }
-      return yield* Effect.fail(new Error("Unresolved deps — aborting deploy"));
     }
 
-    // Prepare layer only when Lambda-based handlers exist
-    const needsLambda = totalTableHandlers + totalAppHandlers + totalFifoQueueHandlers + totalBucketHandlers + totalMailerHandlers + totalApiHandlers + totalCronHandlers > 0;
-    // Find the directory with runtime deps — may differ from projectDir in monorepos
-    // (e.g. handlers in `infra/src/*` with deps in `infra/package.json`)
-    const depsDir = findDepsDir(path.dirname(files[0]!), input.projectDir);
-    const { layerArn, layerVersion, layerStatus, external } = needsLambda
-      ? yield* prepareLayer({
-          project: input.project,
-          stage: stage,
-          region: input.region,
-          depsDir,
-        })
-      : { layerArn: undefined, layerVersion: undefined, layerStatus: undefined, external: [] as string[] };
+    return { cfSigningInfo };
+  });
+
+// ---- Phase 3: Prepare Lambda layer ----
+
+const prepareLambdaLayer = (input: {
+  project: string;
+  stage: string;
+  region: string;
+  files: string[];
+  projectDir: string;
+  needsLambda: boolean;
+}) =>
+  Effect.gen(function* () {
+    if (!input.needsLambda) {
+      return { layerArn: undefined, layerVersion: undefined, external: [] as string[] };
+    }
+
+    const depsDir = findDepsDir(path.dirname(input.files[0]!), input.projectDir);
+    const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
+      project: input.project,
+      stage: input.stage,
+      region: input.region,
+      depsDir,
+    });
 
     if (layerArn && layerStatus) {
       const status = layerStatus === "cached" ? c.dim("cached") : c.green("created");
       yield* Console.log(`  ${c.dim("Layer:")} ${status} ${c.dim(`v${layerVersion}`)} (${external.length} packages)`);
     }
 
-    yield* Console.log("");
+    return { layerArn, layerVersion, external };
+  });
 
-    // Build handler manifest and live progress tracker
-    const manifest: HandlerManifest = [];
-    for (const { exports } of tableHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "table" });
-    for (const { exports } of appHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "app" });
-    if (!input.noSites) {
-      for (const { exports } of staticSiteHandlers)
-        for (const fn of exports) manifest.push({ name: fn.exportName, type: "site" });
+// ---- Phase 4: Resolve CF domain for signed cookies ----
+
+const resolveCfDomain = (input: {
+  staticSiteHandlers: DiscoveredHandlers["staticSiteHandlers"];
+  project: string;
+  stage: string;
+}) =>
+  Effect.gen(function* () {
+    for (const { exports } of input.staticSiteHandlers) {
+      for (const fn of exports) {
+        if (fn.bucketRoutes.some(br => br.access === "private")) {
+          const domainCfg = fn.config.domain;
+          const d = typeof domainCfg === "string" ? domainCfg : domainCfg?.[input.stage];
+          if (d) return d;
+
+          const existing = yield* findDistributionByTags(input.project, input.stage, fn.exportName).pipe(
+            Effect.provide(Aws.makeClients({
+              resource_groups_tagging_api: { region: "us-east-1" },
+              cloudfront: { region: "us-east-1" },
+            })),
+          );
+          if (existing?.DomainName) return existing.DomainName;
+        }
+      }
     }
-    for (const { exports } of fifoQueueHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "queue" });
-    for (const { exports } of bucketHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "bucket" });
-    for (const { exports } of mailerHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "mailer" });
-    for (const { exports } of apiHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "api" });
-    for (const { exports } of cronHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "cron" });
-    for (const { exports } of workerHandlers)
-      for (const fn of exports) manifest.push({ name: fn.exportName, type: "worker" });
+    return undefined;
+  });
 
-    manifest.sort((a, b) => a.name.localeCompare(b.name));
-    const logComplete = createLiveProgress(manifest, input.silent);
-    const ctx: DeployTaskCtx = {
-      input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap, logComplete,
-    };
+// ---- Phase 5: Deploy all resources ----
+
+const buildManifest = (discovered: DiscoveredHandlers, noSites?: boolean): HandlerManifest => {
+  const manifest: HandlerManifest = [];
+  const groups: [keyof DiscoveredHandlers, string][] = [
+    ["tableHandlers", "table"],
+    ["appHandlers", "app"],
+    ...(!noSites ? [["staticSiteHandlers", "site"] as [keyof DiscoveredHandlers, string]] : []),
+    ["fifoQueueHandlers", "queue"],
+    ["bucketHandlers", "bucket"],
+    ["mailerHandlers", "mailer"],
+    ["apiHandlers", "api"],
+    ["cronHandlers", "cron"],
+    ["workerHandlers", "worker"],
+  ];
+  for (const [key, type] of groups) {
+    for (const { exports } of discovered[key]) {
+      for (const fn of exports) {
+        manifest.push({ name: fn.exportName, type });
+      }
+    }
+  }
+  manifest.sort((a, b) => a.name.localeCompare(b.name));
+  return manifest;
+};
+
+const deployResources = (input: {
+  ctx: DeployTaskCtx;
+  discovered: DiscoveredHandlers;
+  counts: HandlerCounts;
+}) =>
+  Effect.gen(function* () {
+    const { ctx, discovered, counts } = input;
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = discovered;
+    const noSites = ctx.input.noSites;
 
     const tableResults: DeployTableResult[] = [];
     const appResults: DeployAppResult[] = [];
@@ -947,14 +1167,16 @@ export const deployProject = (input: DeployProjectInput) =>
     const workerResults: DeployWorkerResult[] = [];
     const apiResults: DeployResult[] = [];
 
-    // Check if app/site handlers need API origin (for CloudFront proxying)
-    const staticSitesNeedApi = !input.noSites && staticSiteHandlers.some(
+    const staticSitesNeedApi = !noSites && staticSiteHandlers.some(
       ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
+    );
+    const staticSitesNeedBuckets = !noSites && staticSiteHandlers.some(
+      ({ exports }) => exports.some(fn => fn.bucketRoutes.length > 0)
     );
     const appsNeedApi = appHandlers.some(
       ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
     );
-    const needsTwoPhase = (staticSitesNeedApi || appsNeedApi) && totalApiHandlers > 0;
+    const needsTwoPhase = ((staticSitesNeedApi || appsNeedApi) && counts.api > 0) || (staticSitesNeedBuckets && counts.bucket > 0);
 
     if (needsTwoPhase) {
       // Phase 1: Deploy everything except app/site (need Function URL from API handlers)
@@ -970,16 +1192,16 @@ export const deployProject = (input: DeployProjectInput) =>
 
       yield* Effect.all(phase1Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
 
-      // Extract API origin domain from first API handler's Function URL
-      const firstApiUrl = apiResults[0]?.url;
-      const apiOriginDomain = firstApiUrl
-        ? firstApiUrl.replace("https://", "").replace(/\/$/, "")
-        : undefined;
+      // Build map: API export name → Lambda Function URL domain
+      const apiUrlMap = new Map<string, string>();
+      for (const r of apiResults) {
+        apiUrlMap.set(r.exportName, r.url.replace("https://", "").replace(/\/$/, ""));
+      }
 
-      // Phase 2: Deploy app/site handlers with API origin
+      // Phase 2: Deploy app/site handlers with API origin map
       const phase2Tasks = [
-        ...buildAppTasks(ctx, appHandlers, appResults, apiOriginDomain),
-        ...(input.noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiOriginDomain)),
+        ...buildAppTasks(ctx, appHandlers, appResults, apiUrlMap),
+        ...(noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiUrlMap)),
       ];
 
       if (phase2Tasks.length > 0) {
@@ -991,7 +1213,7 @@ export const deployProject = (input: DeployProjectInput) =>
         ...buildApiTasks(ctx, apiHandlers, apiResults),
         ...buildTableTasks(ctx, tableHandlers, tableResults),
         ...buildAppTasks(ctx, appHandlers, appResults),
-        ...(input.noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults)),
+        ...(noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults)),
         ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
@@ -1002,9 +1224,9 @@ export const deployProject = (input: DeployProjectInput) =>
       yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
     }
 
-    // Clean up orphaned CloudFront Functions (e.g. after rename or config change)
-    if ((!input.noSites && staticSiteResults.length > 0) || appResults.length > 0) {
-      yield* cleanupOrphanedFunctions(input.project, stage).pipe(
+    // Clean up orphaned CloudFront Functions
+    if ((!noSites && staticSiteResults.length > 0) || appResults.length > 0) {
+      yield* cleanupOrphanedFunctions(ctx.input.project, ctx.stage).pipe(
         Effect.provide(Aws.makeClients({
           cloudfront: { region: "us-east-1" },
           resource_groups_tagging_api: { region: "us-east-1" },
@@ -1021,4 +1243,38 @@ export const deployProject = (input: DeployProjectInput) =>
     }
 
     return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, cronResults, apiResults };
+  });
+
+// ---- Orchestrator ----
+
+export const deployProject = (input: DeployProjectInput) =>
+  Effect.gen(function* () {
+    const { stage, files, discovered, counts, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap } =
+      yield* discoverAndValidate(input);
+
+    const { cfSigningInfo } = yield* prepareSecrets({
+      discovered, project: input.project, stage, region: input.region, noSites: input.noSites,
+    });
+
+    const needsLambda = counts.table + counts.app + counts.queue + counts.bucket + counts.mailer + counts.api + counts.cron > 0;
+    const { layerArn, external } = yield* prepareLambdaLayer({
+      project: input.project, stage, region: input.region, files, projectDir: input.projectDir, needsLambda,
+    });
+
+    yield* Console.log("");
+
+    const manifest = buildManifest(discovered, input.noSites);
+    const logComplete = createLiveProgress(manifest, input.silent);
+
+    const cfDomain = cfSigningInfo
+      ? yield* resolveCfDomain({ staticSiteHandlers: discovered.staticSiteHandlers, project: input.project, stage })
+      : undefined;
+
+    const ctx: DeployTaskCtx = {
+      input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap, logComplete,
+      ...(cfSigningInfo ? { cfSigningInfo } : {}),
+      ...(cfDomain ? { cfDomain } : {}),
+    };
+
+    return yield* deployResources({ ctx, discovered, counts });
   });

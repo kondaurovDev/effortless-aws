@@ -20,11 +20,12 @@ export { toSeconds } from "./handlers/handler-options"
 export type { HttpRequest, HttpResponse, HttpMethod, ContentType } from "./handlers/shared"
 export type { TableConfig, TableRecord, StreamView } from "./handlers/define-table"
 export type { AppConfig, AppHandler } from "./handlers/define-app"
-export type { StaticSiteConfig, StaticSiteSeo, StaticSiteHandler, MiddlewareRequest, MiddlewareResult, MiddlewareRedirect, MiddlewareDeny, MiddlewareHandler } from "./handlers/define-static-site"
+export type { StaticSiteConfig, StaticSiteSeo, StaticSiteHandler, MiddlewareRequest, MiddlewareResult, MiddlewareRedirect, MiddlewareDeny, MiddlewareHandler, BucketRouteConfig } from "./handlers/define-static-site"
+export { isBucketRoute } from "./handlers/define-static-site"
 export type { FifoQueueConfig, FifoQueueMessage } from "./handlers/define-fifo-queue"
-export type { BucketConfig, BucketEvent } from "./handlers/define-bucket"
+export type { BucketConfig, BucketEvent, BucketEntityConfig } from "./handlers/define-bucket"
 export type { MailerConfig, MailerHandler } from "./handlers/define-mailer"
-export type { ApiAuthConfig, ApiConfig, ApiHandler, ApiRoutes } from "./handlers/define-api"
+export type { ApiAuthConfig, ApiConfig, ApiHandler, ApiRoutes, CacheOptions } from "./handlers/define-api"
 export type { CronConfig } from "./handlers/define-cron"
 export type { WorkerConfig } from "./handlers/define-worker"
 export type { McpConfig, McpToolDef, McpToolContent, McpToolResult, McpInputSchema } from "./handlers/define-mcp"
@@ -38,13 +39,13 @@ import type { WorkerHandler as _WorkerHandler } from "./handlers/define-worker"
 import type { McpHandler as _McpHandler } from "./handlers/define-mcp"
 export type TableHandler<T = Record<string, unknown>> = _TableHandler<T, any>
 export type FifoQueueHandler<T = unknown> = _FifoQueueHandler<T, any>
-export type BucketHandler = _BucketHandler<any>
+export type BucketHandler<Entities extends Record<string, any> = {}> = _BucketHandler<any, Entities>
 export type CronHandler = _CronHandler<any>
 export type WorkerHandler<T = any> = _WorkerHandler<T, any>
 export type McpHandler = _McpHandler<any>
 export type { Timezone } from "./handlers/timezone"
 export type { TableClient, QueryParams, QueryByTagParams, SkCondition, UpdateActions, PutOptions } from "./runtime/table-client"
-export type { BucketClient } from "./runtime/bucket-client"
+export type { BucketClient, BucketClientWithEntities, StoreEntityClient } from "./runtime/bucket-client"
 export type { QueueClient, SendMessageInput } from "./runtime/queue-client"
 export type { EmailClient, SendEmailOptions } from "./runtime/email-client"
 export type { WorkerClient, WorkerSendOptions } from "./runtime/worker-client"
@@ -53,4 +54,4 @@ export type { StaticFiles, ResponseStream } from "./handlers/shared"
 
 // Shared types
 export type { LogLevel, Permission } from "./handlers/handler-options"
-export type { AuthHelpers } from "./handlers/auth"
+export type { AuthHelpers, CdnPolicyOptions } from "./handlers/auth"

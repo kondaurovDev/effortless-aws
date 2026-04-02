@@ -2,6 +2,69 @@ import * as crypto from "crypto";
 import type { Duration } from "./handler-options";
 import { toSeconds } from "./handler-options";
 
+// ============ CDN Policy (CloudFront Signed Cookies) ============
+
+/** Options for CloudFront signed cookie policy */
+export type CdnPolicyOptions = {
+  /** Path pattern to grant access to (e.g., "/files/users/123/*"). Supports `*` and `?` wildcards. */
+  path: string;
+  /** How long the CDN access is valid (e.g., "1h", "30m") */
+  ttl: Duration;
+};
+
+/**
+ * CloudFront signing configuration, populated at cold start from environment/SSM.
+ * @internal
+ */
+export type CfSigningConfig = {
+  /** RSA private key PEM for signing CF cookies */
+  privateKey: string;
+  /** CloudFront public key ID */
+  keyPairId: string;
+  /** CloudFront domain (e.g., "d123.cloudfront.net" or "cdn.example.com"), or "*" for wildcard */
+  domain: string;
+};
+
+/** CloudFront custom base64 encoding: replace characters that are invalid in cookies */
+const cfBase64Encode = (buffer: Buffer): string =>
+  buffer.toString("base64").replace(/\+/g, "-").replace(/=/g, "_").replace(/\//g, "~");
+
+/**
+ * Generate the 3 CloudFront signed cookie values for a custom policy.
+ * @internal
+ */
+export const signCfCookies = (
+  policy: CdnPolicyOptions,
+  config: CfSigningConfig,
+): string[] => {
+  const ttlSeconds = toSeconds(policy.ttl);
+  const expireTime = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const resource = config.domain === "*"
+    ? `https://*${policy.path}`
+    : `https://${config.domain}${policy.path}`;
+
+  const policyJson = JSON.stringify({
+    Statement: [{
+      Resource: resource,
+      Condition: {
+        DateLessThan: { "AWS:EpochTime": expireTime },
+      },
+    }],
+  });
+
+  const policyBase64 = cfBase64Encode(Buffer.from(policyJson, "utf-8"));
+  const signature = cfBase64Encode(
+    crypto.sign("sha1", Buffer.from(policyJson, "utf-8"), config.privateKey),
+  );
+
+  const cookieAttrs = `; Secure; SameSite=Lax; Path=/; Max-Age=${ttlSeconds}`;
+  return [
+    `CloudFront-Policy=${policyBase64}${cookieAttrs}`,
+    `CloudFront-Signature=${signature}${cookieAttrs}`,
+    `CloudFront-Key-Pair-Id=${config.keyPairId}${cookieAttrs}`,
+  ];
+};
+
 // ============ Cookie name ============
 
 export const AUTH_COOKIE_NAME = "__eff_session";
@@ -56,9 +119,13 @@ export const auth = <T = unknown>(options?: {
 // ============ Runtime helpers (API Lambda) ============
 
 /** Options for creating a session */
-type SessionOptions = { expiresIn?: Duration };
-/** Session response with Set-Cookie header */
-type SessionResponse = { status: 200; body: { ok: true }; headers: Record<string, string> };
+type SessionOptions = {
+  expiresIn?: Duration;
+  /** CloudFront signed cookie policy for CDN-level access control */
+  cdnPolicy?: CdnPolicyOptions;
+};
+/** Session response with Set-Cookie headers */
+type SessionResponse = { status: 200; body: { ok: true }; headers: Record<string, string>; cookies?: string[] };
 
 /**
  * Auth helpers injected into API handler callback args when `auth` is configured.
@@ -97,6 +164,7 @@ export const createAuthRuntime = (
   apiTokenVerify?: (args: { value: string }) => unknown | Promise<unknown>,
   apiTokenHeader?: string,
   apiTokenCacheTtlSeconds?: number,
+  cfSigningConfig?: CfSigningConfig,
 ): AuthRuntime => {
   // Token verification cache: token → { session, expiresAt }
   const tokenCache = apiTokenCacheTtlSeconds
@@ -138,12 +206,20 @@ export const createAuthRuntime = (
       const exp = Math.floor(Date.now() / 1000) + seconds;
       const payload = Buffer.from(JSON.stringify({ exp, ...data }), "utf-8").toString("base64url");
       const sig = sign(payload);
+      const sessionCookie = `${cookieBase}${payload}.${sig}${cookieAttrs}; Max-Age=${seconds}`;
+
+      // Generate CloudFront signed cookies if cdnPolicy is provided and CF signing is configured
+      const cfCookies = options?.cdnPolicy && cfSigningConfig
+        ? signCfCookies(options.cdnPolicy, cfSigningConfig)
+        : undefined;
+
       return {
         status: 200 as const,
         body: { ok: true as const },
         headers: {
-          "set-cookie": `${cookieBase}${payload}.${sig}${cookieAttrs}; Max-Age=${seconds}`,
+          "set-cookie": sessionCookie,
         },
+        ...(cfCookies ? { cookies: [sessionCookie, ...cfCookies] } : {}),
       };
     },
     clearSession() {

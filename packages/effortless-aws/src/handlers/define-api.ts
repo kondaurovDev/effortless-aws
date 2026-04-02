@@ -1,5 +1,5 @@
 import type { LambdaWithPermissions, AnySecretRef, ResolveConfig, Duration, ConfigFactory, LambdaOptions } from "./handler-options";
-import { resolveConfigFactory } from "./handler-options";
+import { resolveConfigFactory, toSeconds } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
 import type { StaticFiles, ResponseStream } from "./shared";
 import type { HttpRequest, HttpResponse } from "./shared";
@@ -51,12 +51,41 @@ export type FailHelper = (message: string, status?: number) => HttpResponse;
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+/** Cache options for a GET route. Duration shorthand (e.g. "30s", "5m") or object for fine-grained control. */
+export type CacheOptions = Duration | {
+  ttl: Duration;
+  swr?: Duration;
+  scope?: "public" | "private";
+};
+
+/** Resolved cache config with numeric seconds */
+type ResolvedCache =
+  | { private?: false; ttl: number; swr: number }
+  | { private: true; ttl: number };
+
+/** Resolve CacheOptions into numeric seconds. Shorthand = public with swr = ttl * 2. */
+const resolveCache = (cache: CacheOptions): ResolvedCache => {
+  if (typeof cache === "number" || typeof cache === "string") {
+    const ttl = toSeconds(cache);
+    return { ttl, swr: ttl * 2 };
+  }
+  const ttl = toSeconds(cache.ttl);
+  if (cache.scope === "private") {
+    return { private: true, ttl };
+  }
+  return {
+    ttl,
+    swr: cache.swr != null ? toSeconds(cache.swr) : ttl * 2,
+  };
+};
+
 /** Parsed route definition stored at runtime */
 export type RouteEntry = {
   method: HttpMethod;
   path: string;
   onRequest: (...args: any[]) => any;
   public?: boolean;
+  cache?: ResolvedCache;
 };
 
 /** Spread ctx into route args: Omit auth config, add AuthHelpers if present */
@@ -73,8 +102,10 @@ type RouteArgs<C, ST> =
 /** Route handler function */
 type RouteHandler<C, ST> = (args: RouteArgs<C, ST>) => Promise<HttpResponse | void> | HttpResponse | void;
 
-/** Route options (e.g. public) */
+/** Route options for all methods */
 type RouteOptions = { public?: boolean };
+/** Route options for GET — supports caching */
+type GetRouteOptions = RouteOptions & { cache?: CacheOptions };
 
 // ============ Setup args ============
 
@@ -132,7 +163,7 @@ type ApiOptions = {
  * Has `__brand` so CLI discovers it. Each `.get()/.post()` adds a route and returns self.
  */
 export interface ApiRoutes<C = undefined, ST extends boolean = false> extends ApiHandler<C> {
-  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: GetRouteOptions): ApiRoutes<C, ST>;
   post(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
   put(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
   patch(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
@@ -190,7 +221,7 @@ interface ApiBuilder<
   ): ApiBuilder<D, P, C, ST, HasFiles>;
 
   /** Add a GET route (terminal — returns finalized handler with route methods) */
-  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: GetRouteOptions): ApiRoutes<C, ST>;
   /** Add a POST route (terminal) */
   post(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
   /** Add a PUT route (terminal) */
@@ -247,12 +278,17 @@ export function defineApi(
     routes: [],
   };
 
-  const addRoute = (method: HttpMethod, path: string, handler: Function, opts?: RouteOptions) => {
+  const addRoute = (method: HttpMethod, path: string, handler: Function, opts?: GetRouteOptions) => {
+    const routeCache = opts?.cache != null
+      ? resolveCache(opts.cache)
+      : undefined;
+
     state.routes.push({
       method,
       path,
       onRequest: handler as any,
       ...(opts?.public ? { public: true } : {}),
+      ...(routeCache ? { cache: routeCache } : {}),
     });
   };
 
