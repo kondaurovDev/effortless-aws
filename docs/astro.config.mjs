@@ -73,6 +73,7 @@ export default defineConfig({
             { label: "Queue", slug: "use-cases/queue" },
             { label: "Storage", slug: "use-cases/storage" },
             { label: "Email", slug: "use-cases/email" },
+            { label: "MCP Server", slug: "use-cases/mcp-server" },
           ],
         },
         {

@@ -19,6 +19,7 @@ Some definitions include a Lambda handler (a callback like `onRecord`, `onMessag
 | [defineCron](#definecron) | Scheduled Lambda (cron / rate) |
 | [defineBucket](#definebucket) | S3 bucket with optional event handlers |
 | [defineMailer](#definemailer) | SES email identity for sending emails |
+| [defineMcp](#definemcp) | MCP server with tools, resources, and prompts |
 
 Resource-only definitions are useful when you need the infrastructure but handle it from elsewhere. For example, a `defineTable` without stream callbacks creates a DynamoDB table, a `defineBucket` without event callbacks creates an S3 bucket, and a `defineMailer` creates an SES email identity — all referenceable via `deps`:
 
