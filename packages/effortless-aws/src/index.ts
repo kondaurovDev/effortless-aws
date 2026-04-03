@@ -28,7 +28,7 @@ export type { MailerConfig, MailerHandler } from "./handlers/define-mailer"
 export type { ApiAuthConfig, ApiConfig, ApiHandler, ApiRoutes, CacheOptions } from "./handlers/define-api"
 export type { CronConfig } from "./handlers/define-cron"
 export type { WorkerConfig } from "./handlers/define-worker"
-export type { McpConfig, McpToolContent, McpToolResult, McpInputSchema, McpResourceContent, McpPromptArgument, McpPromptContent, McpPromptMessage, McpPromptResult } from "./handlers/define-mcp"
+export type { McpConfig, McpToolContent, McpToolResult, McpInputSchema, McpResourceContent, McpPromptArgument, McpPromptContent, McpPromptMessage, McpPromptResult, McpEntries } from "./handlers/define-mcp"
 
 // MCP definition types — re-exported without internal generic C
 import type { McpToolDef as _McpToolDef, McpResourceDef as _McpResourceDef, McpResourceTemplateDef as _McpResourceTemplateDef, McpResourceMap as _McpResourceMap, McpPromptDef as _McpPromptDef } from "./handlers/define-mcp"

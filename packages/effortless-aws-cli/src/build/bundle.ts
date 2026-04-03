@@ -62,7 +62,7 @@ const HANDLER_PROPS: Record<HandlerType, readonly string[]> = {
   cron: ["onTick"],
   api: ["routes"],
   worker: ["onMessage"],
-  mcp: ["tools"],
+  mcp: ["tools", "resources", "prompts"],
 };
 
 /** Extract SecretEntry[] from a handler's resolved config object */
@@ -553,6 +553,7 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
             : typeof v.onObjectCreated === "function" ? ".onObjectCreated() or .onObjectRemoved()"
             : typeof v.onTick === "function" ? ".onTick()"
             : typeof v.handler === "function" ? ".onMessage()"
+            : typeof v.tool === "function" ? ".tool() or .tools()"
             : ".build()";
           console.warn(`⚠ ${shortFile}: "${exportName}" is missing a handler — did you forget ${hint}?`);
           continue;

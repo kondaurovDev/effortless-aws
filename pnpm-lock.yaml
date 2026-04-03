@@ -60,6 +60,9 @@ catalogs:
     '@modelcontextprotocol/sdk':
       specifier: ^1.29.0
       version: 1.29.0
+    '@standard-schema/spec':
+      specifier: ^1.1.0
+      version: 1.1.0
     '@types/node':
       specifier: 22.19.9
       version: 22.19.9
@@ -78,6 +81,9 @@ catalogs:
     vitest:
       specifier: ^4.0.18
       version: 4.0.18
+    zod:
+      specifier: ^4.3.0
+      version: 4.3.6
 
 importers:
 
@@ -95,6 +101,9 @@ importers:
       effortless-aws:
         specifier: workspace:*
         version: link:../packages/effortless-aws
+      zod:
+        specifier: 'catalog:'
+        version: 4.3.6
     devDependencies:
       '@effortless-aws/cli':
         specifier: workspace:*
@@ -135,6 +144,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.29.0(zod@4.3.6)
+      '@standard-schema/spec':
+        specifier: 'catalog:'
+        version: 1.1.0
       '@types/aws-lambda':
         specifier: ^8.10.144
         version: 8.10.160

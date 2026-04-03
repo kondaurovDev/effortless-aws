@@ -1,4 +1,5 @@
 import { defineApi } from "effortless-aws";
+import { z } from "zod/v4";
 import { db } from "./table";
 
 // ── Session type ───────────────────────────────────────────────
@@ -35,10 +36,13 @@ export const api = defineApi({ basePath: "/api" })
   )
 
   // Auth: login (public)
-  .post("/login", async ({ input, auth }) => {
-    const { userId } = input as { userId: string };
-    return auth.createSession({ userId });
-  }, { public: true })
+  .post({
+    path: "/login",
+    input: z.object({ userId: z.string() }),
+    public: true,
+  }, async ({ input, auth }) => {
+    return auth.createSession({ userId: input.userId });
+  })
 
   // Auth: get current session (requires auth)
   .get("/me", async ({ auth, ok }) =>
@@ -51,11 +55,14 @@ export const api = defineApi({ basePath: "/api" })
   )
 
   // Table CRUD: create note (public for easy testing)
-  .post("/notes", async ({ input, notes, ok }) => {
-    const { pk, sk, title, content } = input as { pk: string; sk: string; title: string; content: string };
-    await notes.put({ pk, sk, data: { tag: "note" as const, title, content } });
+  .post({
+    path: "/notes",
+    input: z.object({ pk: z.string(), sk: z.string(), title: z.string(), content: z.string() }),
+    public: true,
+  }, async ({ input, notes, ok }) => {
+    await notes.put({ pk: input.pk, sk: input.sk, data: { tag: "note" as const, title: input.title, content: input.content } });
     return ok({ created: true }, 201);
-  }, { public: true })
+  })
 
   // Table CRUD: get note by pk + sk
   .get("/notes/{pk}/{sk}", async ({ req, notes, ok, fail }) => {

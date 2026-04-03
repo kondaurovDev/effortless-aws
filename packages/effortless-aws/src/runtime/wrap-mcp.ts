@@ -1,4 +1,7 @@
-import type { McpHandler, McpToolDef, McpResourceDef, McpResourceTemplateDef, McpResourceMap, McpPromptDef, McpToolResult, McpResourceContent, McpPromptResult } from "../handlers/define-mcp";
+import type { McpHandler, McpResourceDef, McpResourceTemplateDef, McpResourceMap, McpPromptDef, McpToolResult, McpResourceContent, McpPromptResult } from "../handlers/define-mcp";
+
+/** Internal tool entry shape: definition fields + handler */
+type McpToolEntry = { description: string; input: unknown; handler: (...args: any[]) => any };
 import type { JSONRPCRequest, JSONRPCResponse } from "@modelcontextprotocol/sdk/types.js";
 import { createHandlerRuntime } from "./handler-utils";
 
@@ -60,6 +63,59 @@ const jsonResponse = (body: JSONRPCResponse, status = 200) => ({
 
 const RESOURCE_NOT_FOUND = -32002;
 
+// ============ Standard Schema helpers ============
+
+/** Check if a tool input implements StandardJSONSchemaV1 (~standard.jsonSchema) */
+const isStandardSchema = (input: unknown): input is { "~standard": { jsonSchema: { input: Function }; validate?: Function } } =>
+  input != null && typeof input === "object" && "~standard" in input &&
+  typeof (input as any)["~standard"]?.jsonSchema?.input === "function";
+
+/** Validate input using Standard Schema ~standard.validate() if available */
+const validateInput = async (
+  schema: { "~standard": { validate?: Function } },
+  rawArgs: unknown,
+  toolName: string,
+): Promise<unknown> => {
+  const validate = schema["~standard"].validate;
+  if (typeof validate !== "function") return rawArgs;
+  const result = await validate(rawArgs);
+  if (result.issues) {
+    const messages = (result.issues as { message: string; path?: any[] }[]).map(i => {
+      const path = i.path?.map((p: any) => typeof p === "object" ? p.key : p).join(".");
+      return path ? `${path}: ${i.message}` : i.message;
+    });
+    throw new Error(`Validation failed for tool "${toolName}": ${messages.join("; ")}`);
+  }
+  return result.value;
+};
+
+/** Wrap a resource handler's return value into McpResourceContent[] */
+const wrapResourceResult = (raw: unknown, uri: string): McpResourceContent[] => {
+  if (raw == null) return [{ uri, text: "null" }];
+  // Already a full McpResourceContent or array of them
+  if (Array.isArray(raw)) {
+    if (raw.length > 0 && typeof raw[0] === "object" && raw[0] !== null && "uri" in raw[0]) return raw;
+    return [{ uri, text: JSON.stringify(raw) }];
+  }
+  if (typeof raw === "object" && "uri" in (raw as any) && ("text" in (raw as any) || "blob" in (raw as any))) {
+    return [raw as McpResourceContent];
+  }
+  // Plain data — auto-serialize
+  const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+  return [{ uri, text }];
+};
+
+/** Wrap a tool handler's return value into McpToolResult */
+const wrapToolResult = (raw: unknown): McpToolResult => {
+  // Already a full McpToolResult
+  if (raw != null && typeof raw === "object" && "content" in raw && Array.isArray((raw as any).content)) {
+    return raw as McpToolResult;
+  }
+  // Plain data — auto-serialize
+  const text = typeof raw === "string" ? raw : JSON.stringify(raw ?? null);
+  return { content: [{ type: "text", text }] };
+};
+
 // ============ Wrapper ============
 
 export const wrapMcp = <C>(handler: McpHandler<C>) => {
@@ -111,7 +167,7 @@ export const wrapMcp = <C>(handler: McpHandler<C>) => {
       }
 
       // Resolve tools, resources, prompts from factories
-      const tools: Record<string, McpToolDef<C>> = handler.tools ? (handler.tools as any)(ctxProps) : {};
+      const tools: Record<string, McpToolEntry> = handler.tools ? (handler.tools as any)(ctxProps) : {};
       const resourceMap: McpResourceMap<C> = handler.resources ? (handler.resources as any)(ctxProps) : {};
       const prompts: Record<string, McpPromptDef<C>> = handler.prompts ? (handler.prompts as any)(ctxProps) : {};
 
@@ -141,7 +197,7 @@ export const wrapMcp = <C>(handler: McpHandler<C>) => {
 async function handleMethod<C>(
   req: JSONRPCRequest,
   ctx: Record<string, unknown>,
-  tools: Record<string, McpToolDef<C>>,
+  tools: Record<string, McpToolEntry>,
   resourceMap: McpResourceMap<C>,
   prompts: Record<string, McpPromptDef<C>>,
   serverName: string,
@@ -189,7 +245,9 @@ async function handleMethod<C>(
           tools: Object.entries(tools).map(([name, def]) => ({
             name,
             description: def.description,
-            inputSchema: def.input,
+            inputSchema: isStandardSchema(def.input)
+              ? def.input["~standard"].jsonSchema.input({ target: "draft-07" })
+              : def.input,
           })),
         },
       };
@@ -201,8 +259,12 @@ async function handleMethod<C>(
       }
       const tool = tools[toolName]!;
       try {
-        const result: McpToolResult = await tool.handler(req.params?.arguments ?? {}, ctx as any);
-        return { jsonrpc: "2.0", id: req.id, result };
+        const rawArgs = req.params?.arguments ?? {};
+        const input = isStandardSchema(tool.input)
+          ? await validateInput(tool.input, rawArgs, toolName)
+          : rawArgs;
+        const raw = await tool.handler(input, ctx as any);
+        return { jsonrpc: "2.0", id: req.id, result: wrapToolResult(raw) };
       } catch (error) {
         return {
           jsonrpc: "2.0",
@@ -250,19 +312,22 @@ async function handleMethod<C>(
       // Try exact match first (static resource)
       const staticDef = resourceMap[uri];
       if (staticDef && !isTemplate(uri)) {
-        const result: McpResourceContent | McpResourceContent[] = await (staticDef as McpResourceDef<C>).handler(ctx as any);
-        const contents = Array.isArray(result) ? result : [result];
-        return { jsonrpc: "2.0", id: req.id, result: { contents } };
+        const raw = await (staticDef as McpResourceDef<C>).handler(ctx as any);
+        return { jsonrpc: "2.0", id: req.id, result: { contents: wrapResourceResult(raw, uri) } };
       }
 
       // Try template match
       for (const [template, def] of Object.entries(resourceMap)) {
         if (!isTemplate(template)) continue;
-        const params = matchTemplate(template, uri);
-        if (params) {
-          const result: McpResourceContent | McpResourceContent[] = await (def as McpResourceTemplateDef<C>).handler(params, ctx as any);
-          const contents = Array.isArray(result) ? result : [result];
-          return { jsonrpc: "2.0", id: req.id, result: { contents } };
+        const rawParams = matchTemplate(template, uri);
+        if (rawParams) {
+          // Validate params if schema is present
+          const defAny = def as any;
+          const params = defAny.params && typeof defAny.params === "object" && "~standard" in defAny.params
+            ? await validateInput(defAny.params, rawParams, `resource ${template}`)
+            : rawParams;
+          const raw = await (def as McpResourceTemplateDef<C>).handler(params as any, ctx as any);
+          return { jsonrpc: "2.0", id: req.id, result: { contents: wrapResourceResult(raw, uri) } };
         }
       }
 
@@ -272,11 +337,32 @@ async function handleMethod<C>(
     // ── Prompts ──
 
     case "prompts/list": {
-      const promptList = Object.entries(prompts).map(([name, def]) => ({
-        name,
-        ...(def.description ? { description: def.description } : {}),
-        ...(def.arguments ? { arguments: def.arguments } : {}),
-      }));
+      const promptList = Object.entries(prompts).map(([name, def]) => {
+        const defAny = def as any;
+        // Convert schema args to MCP argument list
+        let args: { name: string; description?: string; required?: boolean }[] | undefined;
+        if (defAny.args && typeof defAny.args === "object" && "~standard" in defAny.args) {
+          // Schema — extract properties from JSON Schema
+          const jsonSchema = defAny.args["~standard"].jsonSchema?.input?.({ target: "draft-07" });
+          if (jsonSchema?.properties) {
+            const required = new Set(jsonSchema.required ?? []);
+            args = Object.entries(jsonSchema.properties as Record<string, any>).map(([key, prop]) => ({
+              name: key,
+              ...(prop.description ? { description: prop.description } : {}),
+              ...(required.has(key) ? { required: true } : {}),
+            }));
+          }
+        } else if (Array.isArray(defAny.args)) {
+          args = defAny.args;
+        } else if (defAny.arguments) {
+          args = defAny.arguments;
+        }
+        return {
+          name,
+          ...(def.description ? { description: def.description } : {}),
+          ...(args ? { arguments: args } : {}),
+        };
+      });
       return { jsonrpc: "2.0", id: req.id, result: { prompts: promptList } };
     }
 
@@ -286,9 +372,18 @@ async function handleMethod<C>(
         return { jsonrpc: "2.0", id: req.id, error: { code: ErrorCode.InvalidParams, message: `Unknown prompt: ${promptName}` } };
       }
       const prompt = prompts[promptName]!;
-      const args = (req.params?.arguments ?? {}) as Record<string, string>;
+      const rawArgs = (req.params?.arguments ?? {}) as Record<string, string>;
       try {
-        const result: McpPromptResult = await prompt.handler(args, ctx as any);
+        // Validate args if schema is present
+        const defAny = prompt as any;
+        const args = defAny.args && typeof defAny.args === "object" && "~standard" in defAny.args
+          ? await validateInput(defAny.args, rawArgs, `prompt ${promptName}`)
+          : rawArgs;
+        const raw = await (prompt as any).handler(args, ctx as any);
+        // Auto-wrap string return as user message
+        const result: McpPromptResult = typeof raw === "string"
+          ? { messages: [{ role: "user", content: { type: "text", text: raw } }] }
+          : raw;
         return { jsonrpc: "2.0", id: req.id, result };
       } catch (error) {
         return { jsonrpc: "2.0", id: req.id, error: { code: ErrorCode.InternalError, message: error instanceof Error ? error.message : String(error) } };

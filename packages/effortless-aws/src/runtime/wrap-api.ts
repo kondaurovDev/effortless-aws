@@ -218,11 +218,29 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
         }
       }
 
+      // Validate input if route has a schema
+      let validatedInput: unknown = merged;
+      if (entry.schema && typeof entry.schema === "object" && "~standard" in entry.schema) {
+        const schema = entry.schema as { "~standard": { validate?: (value: unknown) => any } };
+        if (typeof schema["~standard"].validate === "function") {
+          const result = await schema["~standard"].validate(merged);
+          if (result.issues) {
+            const issues = (result.issues as { message: string; path?: any[] }[]).map(i => {
+              const path = i.path?.map((p: any) => typeof p === "object" ? p.key : p).join(".");
+              return path ? `${path}: ${i.message}` : i.message;
+            });
+            rt.logExecution(startTime, logInput, { status: 400 });
+            return { statusCode: 400, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Validation failed", issues }) };
+          }
+          validatedInput = result.value;
+        }
+      }
+
       // Spread ctx into route args (strip auth config, replaced by AuthHelpers)
       const { ctx, auth, ...rest } = sharedArgs;
       ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
       delete ctxProps.auth;
-      const args: Record<string, unknown> = { ...ctxProps, req, input: merged, ok, fail, ...rest };
+      const args: Record<string, unknown> = { ...ctxProps, req, input: validatedInput, ok, fail, ...rest };
       if (auth) args.auth = auth;
       if (streamCtx) args.stream = streamCtx.stream;
 
