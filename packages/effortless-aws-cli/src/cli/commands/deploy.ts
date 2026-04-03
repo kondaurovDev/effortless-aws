@@ -5,7 +5,7 @@ import { Effect, Console, Option } from "effect";
 import { deploy, deployTable, deployAllTables, deployProject, type DeployTableResult, type DeployProjectResult } from "~/deploy/deploy";
 import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
 import { Aws } from "../../aws";
-import { projectOption, stageOption, regionOption, verboseOption, noSitesOption, getPatternsFromConfig } from "~/cli/config";
+import { projectOption, stageOption, regionOption, verboseOption, noSitesOption, dryRunOption, getPatternsFromConfig } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
 
@@ -21,7 +21,7 @@ const isFilePath = (target: string): boolean => {
 // ============ Output formatting ============
 
 const formatDeploySummary = (results: DeployProjectResult): string[] => {
-  const total = results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length + results.cronResults.length;
+  const total = results.tableResults.length + results.appResults.length + results.staticSiteResults.length + results.apiResults.length + results.cronResults.length + results.mcpResults.length;
   const lines: string[] = [`\n${c.green(`Deployed ${total} handler(s):`)}`];
 
   const summaryLines: { name: string; line: string }[] = [];
@@ -33,6 +33,9 @@ const formatDeploySummary = (results: DeployProjectResult): string[] => {
   }
   for (const r of results.apiResults) {
     summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[api]")}   ${c.bold(r.exportName)}  ${c.dim(r.url)}` });
+  }
+  for (const r of results.mcpResults) {
+    summaryLines.push({ name: r.exportName, line: `  ${c.cyan("[mcp]")}   ${c.bold(r.exportName)}  ${c.dim(r.url)}` });
   }
   for (const r of results.cronResults) {
     const tz = r.timezone ? ` ${c.dim(r.timezone)}` : "";
@@ -68,7 +71,7 @@ const formatDeploySummary = (results: DeployProjectResult): string[] => {
 
 // ============ Deploy handlers ============
 
-const deployAll = (deployOpts: { noSites: boolean; verbose: boolean }) =>
+const deployAll = (deployOpts: { noSites: boolean; verbose: boolean; dryRun: boolean }) =>
   Effect.gen(function* () {
     const { project, stage, region, patterns, projectDir } = yield* CliContext;
 
@@ -85,10 +88,13 @@ const deployAll = (deployOpts: { noSites: boolean; verbose: boolean }) =>
       region,
       noSites: deployOpts.noSites,
       verbose: deployOpts.verbose,
+      dryRun: deployOpts.dryRun,
     });
 
-    for (const line of formatDeploySummary(results)) {
-      yield* Console.log(line);
+    if (!deployOpts.dryRun) {
+      for (const line of formatDeploySummary(results)) {
+        yield* Console.log(line);
+      }
     }
   });
 
@@ -172,14 +178,14 @@ const deployByName = (targetValue: string) =>
 
 export const deployCommand = Command.make(
   "deploy",
-  { target: deployTargetArg, project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption, noSites: noSitesOption },
-  ({ target, noSites, ...opts }) =>
+  { target: deployTargetArg, project: projectOption, stage: stageOption, region: regionOption, verbose: verboseOption, noSites: noSitesOption, dryRun: dryRunOption },
+  ({ target, noSites, dryRun, ...opts }) =>
     Option.match(target, {
-      onNone: () => deployAll({ noSites, verbose: opts.verbose }),
+      onNone: () => deployAll({ noSites, verbose: opts.verbose, dryRun }),
       onSome: (targetValue) =>
         isFilePath(targetValue) ? deployByFilePath(targetValue) : deployByName(targetValue),
     }).pipe(
-      withCliContext(opts, (region) => Aws.makeClients({
+      withCliContext(opts, dryRun ? undefined : (region) => Aws.makeClients({
         lambda: { region },
         iam: { region },
         dynamodb: { region },

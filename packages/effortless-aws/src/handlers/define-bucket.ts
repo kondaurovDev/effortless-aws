@@ -24,6 +24,10 @@ export type BucketConfig = {
   suffix?: string;
   /** Typed JSON entity definitions for key-value storage */
   entities?: Record<string, BucketEntityConfig>;
+  /** Local directory to seed into bucket on deploy (only uploads files that don't already exist) */
+  seed?: string;
+  /** Local directory to sync into bucket on every deploy (uploads new/changed, deletes removed) */
+  sync?: string;
 };
 
 /**
@@ -99,6 +103,10 @@ type BucketOptions = {
   prefix?: string;
   /** S3 key suffix filter for event notifications (e.g., ".jpg") */
   suffix?: string;
+  /** Local directory to seed into bucket on deploy (only uploads files that don't already exist) */
+  seed?: string;
+  /** Local directory to sync into bucket on every deploy (uploads new/changed, deletes removed) */
+  sync?: string;
 };
 
 // ============ Builder ============

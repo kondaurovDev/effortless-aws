@@ -6,7 +6,7 @@ import * as os from "os";
 import archiver from "archiver";
 import { globSync } from "glob";
 import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry, type ApiRouteEntry, type BucketRouteEntry } from "./handler-registry";
-import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig } from "effortless-aws";
+import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig, McpConfig } from "effortless-aws";
 
 /** Check if a route value is a bucket route config (local copy to avoid build dependency) */
 const isBucketRoute = (v: unknown): boolean =>
@@ -31,6 +31,7 @@ export type ExtractedMailerFunction = ExtractedConfig<MailerConfig>;
 export type ExtractedApiFunction = ExtractedConfig<ApiConfig>;
 export type ExtractedCronFunction = ExtractedConfig<CronConfig>;
 export type ExtractedWorkerFunction = ExtractedConfig<WorkerConfig>;
+export type ExtractedMcpFunction = ExtractedConfig<McpConfig>;
 
 /** Convert camelCase to kebab-case for SSM key derivation. */
 const toKebabCase = (str: string): string =>
@@ -47,6 +48,7 @@ const BRAND_TO_TYPE: Record<string, HandlerType> = {
   "effortless-api": "api",
   "effortless-cron": "cron",
   "effortless-worker": "worker",
+  "effortless-mcp": "mcp",
 };
 
 /** Properties that indicate a handler has an active Lambda function */
@@ -60,6 +62,7 @@ const HANDLER_PROPS: Record<HandlerType, readonly string[]> = {
   cron: ["onTick"],
   api: ["routes"],
   worker: ["onMessage"],
+  mcp: ["tools"],
 };
 
 /** Extract SecretEntry[] from a handler's resolved config object */
@@ -509,6 +512,7 @@ export type DiscoveredHandlers = {
   apiHandlers: { file: string; exports: ExtractedApiFunction[] }[];
   cronHandlers: { file: string; exports: ExtractedCronFunction[] }[];
   workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[];
+  mcpHandlers: { file: string; exports: ExtractedMcpFunction[] }[];
 };
 
 export const discoverHandlers = (files: string[], projectDir: string) =>
@@ -524,6 +528,7 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
     const apiHandlers: { file: string; exports: ExtractedApiFunction[] }[] = [];
     const cronHandlers: { file: string; exports: ExtractedCronFunction[] }[] = [];
     const workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[] = [];
+    const mcpHandlers: { file: string; exports: ExtractedMcpFunction[] }[] = [];
 
     for (const file of files) {
       const stat = yield* fileSystem.stat(file);
@@ -532,7 +537,7 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
       const mod = yield* importHandlerModule(file, projectDir);
 
       const byType: Record<HandlerType, ExtractedConfig<any>[]> = {
-        table: [], app: [], staticSite: [], fifoQueue: [], bucket: [], mailer: [], cron: [], api: [], worker: [],
+        table: [], app: [], staticSite: [], fifoQueue: [], bucket: [], mailer: [], cron: [], api: [], worker: [], mcp: [],
       };
 
       for (const [exportName, value] of Object.entries(mod)) {
@@ -568,9 +573,10 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
       if (byType.api.length > 0) apiHandlers.push({ file, exports: byType.api });
       if (byType.cron.length > 0) cronHandlers.push({ file, exports: byType.cron });
       if (byType.worker.length > 0) workerHandlers.push({ file, exports: byType.worker });
+      if (byType.mcp.length > 0) mcpHandlers.push({ file, exports: byType.mcp });
     }
 
-    return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } as DiscoveredHandlers;
+    return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } as DiscoveredHandlers;
   });
 
 /** Flatten all discovered handlers into a list of { exportName, file, type } */
@@ -590,5 +596,6 @@ export const flattenHandlers = (discovered: DiscoveredHandlers) => {
     ...entries("api", discovered.apiHandlers),
     ...entries("cron", discovered.cronHandlers),
     ...entries("worker", discovered.workerHandlers),
+    ...entries("mcp", discovered.mcpHandlers),
   ];
 };

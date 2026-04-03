@@ -1,10 +1,13 @@
 import { Effect } from "effect";
+import { Path } from "@effect/platform";
 import { toSeconds } from "effortless-aws";
 import type { ExtractedBucketFunction } from "~/build/bundle";
 import {
   ensureBucket,
   ensureBucketNotification,
   addS3LambdaPermission,
+  syncFiles,
+  seedFiles,
   makeTags,
   resolveStage,
   type TagContext,
@@ -17,7 +20,7 @@ import {
 export type DeployBucketResult = {
   exportName: string;
   functionArn?: string;
-  status: import("~/aws/lambda").LambdaStatus | "resource-only";
+  status: import("~/aws/lambda").LambdaStatus;
   bundleSize?: number;
   bucketName: string;
   bucketArn: string;
@@ -50,18 +53,30 @@ export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, d
     // Create S3 bucket
     yield* Effect.logDebug("Creating S3 bucket...");
     const bucketName = `${input.project}-${tagCtx.stage}-${handlerName}`;
-    const { bucketArn } = yield* ensureBucket({
+    const { bucketArn, created } = yield* ensureBucket({
       name: bucketName,
       region: input.region,
       tags: makeTags(tagCtx),
     });
+
+    // Seed/sync files into bucket
+    const p = yield* Path.Path;
+    const handlerDir = p.dirname(input.file);
+    if (config.seed) {
+      const sourceDir = p.resolve(handlerDir, config.seed);
+      yield* seedFiles({ bucketName, sourceDir });
+    }
+    if (config.sync) {
+      const sourceDir = p.resolve(handlerDir, config.sync);
+      yield* syncFiles({ bucketName, sourceDir });
+    }
 
     // Resource-only mode: no Lambda, just the bucket
     if (!hasHandler) {
       yield* Effect.logDebug(`Bucket deployment complete (resource-only)! Bucket: ${bucketName}`);
       return {
         exportName,
-        status: "resource-only" as const,
+        status: created ? "created" as const : "unchanged" as const,
         bucketName,
         bucketArn,
       };

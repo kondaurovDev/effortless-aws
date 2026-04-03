@@ -53,6 +53,7 @@
     "type-fest": "catalog:",
     "typescript": "catalog:",
     "vite-tsconfig-paths": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:",
     "vitest": "catalog:"
   }
 }

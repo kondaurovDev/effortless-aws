@@ -2,5 +2,8 @@ node_modules
 dist
 packages/effortless-aws-cli/src/aws/clients
 .temp-*
+.effortless
 integration/.env
 integration/deploy.local.json
+.mcp.json
+.claude/settings.local.json

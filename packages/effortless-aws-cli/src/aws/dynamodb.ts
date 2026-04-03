@@ -86,6 +86,7 @@ export const ensureTable = (input: EnsureTableInput) =>
       )
     );
 
+    const created = !existingTable;
     let result: EnsureTableResult;
 
     if (!existingTable) {
@@ -178,7 +179,7 @@ export const ensureTable = (input: EnsureTableInput) =>
     // Always enable TTL on the "ttl" attribute (zero-cost when unused)
     yield* ensureTimeToLive(name, "ttl");
 
-    return result;
+    return { ...result, created };
   });
 
 export type EnsureEventSourceMappingInput = {

@@ -33,7 +33,7 @@ const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*"] as const;
 /** @internal */
 export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployTableFunctionInput) =>
   Effect.gen(function* () {
-    const { exportName, config } = fn;
+    const { exportName, config, hasHandler } = fn;
     const handlerName = exportName;
 
     const tagCtx: TagContext = {
@@ -44,12 +44,22 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
 
     yield* Effect.logDebug("Creating DynamoDB table...");
     const tableName = `${input.project}-${tagCtx.stage}-${handlerName}`;
-    const { tableArn, streamArn } = yield* ensureTable({
+    const { tableArn, streamArn, created } = yield* ensureTable({
       name: tableName,
       billingMode: config.billingMode ?? "PAY_PER_REQUEST",
       streamView: config.streamView ?? "NEW_AND_OLD_IMAGES",
       tags: makeTags(tagCtx)
     });
+
+    // Resource-only mode: no Lambda, just the table
+    if (!hasHandler) {
+      yield* Effect.logDebug(`Table deployment complete (resource-only)! Table: ${tableArn}`);
+      return {
+        exportName,
+        status: (created ? "created" : "unchanged") as "created" | "unchanged",
+        tableArn,
+      };
+    }
 
     // Merge EFF_DEP_SELF (own table name) into deps env vars
     const selfEnv: Record<string, string> = { EFF_DEP_SELF: `table:${tableName}`, ...depsEnv };

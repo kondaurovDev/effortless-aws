@@ -11,6 +11,8 @@ export type McpConfig = {
   name: string;
   /** MCP server version (default: "1.0.0") */
   version?: string;
+  /** Human-readable description — sent to clients in initialize response as system prompt context */
+  instructions?: string;
   /** Lambda function settings (memory, timeout, permissions, etc.) */
   lambda?: LambdaWithPermissions;
 };
@@ -36,6 +38,83 @@ export type McpToolResult = {
   isError?: boolean;
 };
 
+// ============ MCP resource types ============
+
+/** Content returned when reading a resource */
+export type McpResourceContent =
+  | { uri: string; mimeType?: string; text: string }
+  | { uri: string; mimeType?: string; blob: string };
+
+/** A static resource definition */
+export type McpResourceDef<C = undefined> = {
+  /** Human-readable name */
+  name: string;
+  /** Optional description */
+  description?: string;
+  /** Optional MIME type */
+  mimeType?: string;
+  /** Handler called on resources/read */
+  handler: (ctx: SpreadCtx<C>) => McpResourceContent | McpResourceContent[] | Promise<McpResourceContent | McpResourceContent[]>;
+};
+
+/** A parameterized resource template (URI template RFC 6570) */
+export type McpResourceTemplateDef<C = undefined> = {
+  /** Human-readable name */
+  name: string;
+  /** Optional description */
+  description?: string;
+  /** Optional MIME type */
+  mimeType?: string;
+  /** Handler called on resources/read — receives matched URI params */
+  handler: (params: Record<string, string>, ctx: SpreadCtx<C>) => McpResourceContent | McpResourceContent[] | Promise<McpResourceContent | McpResourceContent[]>;
+};
+
+/** Map of uri → resource definition, or uriTemplate → template definition */
+export type McpResourceMap<C = undefined> = {
+  [uriOrTemplate: string]: McpResourceDef<C> | McpResourceTemplateDef<C>;
+};
+
+// ============ MCP prompt types ============
+
+/** An argument accepted by a prompt */
+export type McpPromptArgument = {
+  /** Argument name */
+  name: string;
+  /** Optional description */
+  description?: string;
+  /** Whether the argument is required (default: false) */
+  required?: boolean;
+};
+
+/** Content block inside a prompt message */
+export type McpPromptContent =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string }
+  | { type: "audio"; data: string; mimeType: string }
+  | { type: "resource"; resource: { uri: string; mimeType?: string; text?: string; blob?: string } };
+
+/** A single message returned by a prompt */
+export type McpPromptMessage = {
+  role: "user" | "assistant";
+  content: McpPromptContent;
+};
+
+/** Result returned by a prompt handler */
+export type McpPromptResult = {
+  description?: string;
+  messages: McpPromptMessage[];
+};
+
+/** A single prompt definition */
+export type McpPromptDef<C = undefined> = {
+  /** Human-readable description */
+  description?: string;
+  /** Arguments this prompt accepts */
+  arguments?: McpPromptArgument[];
+  /** Handler called on prompts/get — receives argument values */
+  handler: (args: Record<string, string>, ctx: SpreadCtx<C>) => McpPromptResult | Promise<McpPromptResult>;
+};
+
 /** A single MCP tool definition */
 export type McpToolDef<C = undefined> = {
   /** Human-readable description of the tool */
@@ -48,8 +127,9 @@ export type McpToolDef<C = undefined> = {
 
 // ============ Setup args ============
 
-/** Setup factory — receives deps/config/files based on what was declared */
+/** Setup factory — receives deps/config/files/enableAuth based on what was declared */
 type SetupArgs<D, P, HasFiles extends boolean> =
+  & { enableAuth: import("./define-api").EnableAuth }
   & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
   & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
   & (HasFiles extends true ? { files: StaticFiles } : {});
@@ -72,6 +152,8 @@ export type McpHandler<C = any> = {
   readonly deps?: Record<string, unknown> | (() => Record<string, unknown>);
   readonly config?: Record<string, unknown>;
   readonly static?: string[];
+  readonly resources?: (...args: any[]) => any;
+  readonly prompts?: (...args: any[]) => any;
   readonly tools?: (...args: any[]) => any;
 };
 
@@ -83,6 +165,8 @@ type McpOptions = {
   name: string;
   /** MCP server version (default: "1.0.0") */
   version?: string;
+  /** Human-readable description — sent to clients in initialize response as system prompt context */
+  instructions?: string;
 };
 
 // ============ Builder ============
@@ -130,6 +214,16 @@ interface McpBuilder<
     fn: (args: SpreadCtx<C>) => void | Promise<void>
   ): McpBuilder<D, P, C, HasFiles>;
 
+  /** Define MCP resources (chainable) */
+  resources(
+    fn: (ctx: SpreadCtx<C>) => McpResourceMap<C>
+  ): McpBuilder<D, P, C, HasFiles>;
+
+  /** Define MCP prompts (chainable) */
+  prompts(
+    fn: (ctx: SpreadCtx<C>) => Record<string, McpPromptDef<C>>
+  ): McpBuilder<D, P, C, HasFiles>;
+
   /** Define MCP tools (terminal) */
   tools(
     fn: (ctx: SpreadCtx<C>) => Record<string, McpToolDef<C>>
@@ -141,29 +235,17 @@ interface McpBuilder<
 /**
  * Define an MCP (Model Context Protocol) server endpoint.
  *
- * Creates a Lambda-backed MCP server that exposes tools for AI models
- * and MCP-compatible clients to discover and invoke.
+ * Creates a Lambda-backed MCP server that exposes tools, resources, and prompts
+ * for AI models and MCP-compatible clients via Streamable HTTP (JSON-RPC over POST).
  *
- * @example
- * ```typescript
- * export const mcp = defineMcp({ name: "my-tools" })
- *   .deps(() => ({ users: usersTable }))
- *   .setup(({ deps }) => ({ db: deps.users }))
- *   .tools(({ db }) => ({
- *     get_user: {
- *       description: "Get a user by ID",
- *       input: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
- *       handler: async (input) => ({
- *         content: [{ type: "text", text: JSON.stringify(await db.get({ pk: input.id, sk: "profile" })) }]
- *       })
- *     }
- *   }))
- * ```
+ * @see https://modelcontextprotocol.io/specification/2025-03-26 — MCP specification
+ * @see https://effortless-aws.com/use-cases/mcp-server/ — full documentation with examples
  */
 export function defineMcp(options: McpOptions): McpBuilder {
   const spec: McpConfig = {
     name: options.name,
     ...(options.version ? { version: options.version } : {}),
+    ...(options.instructions ? { instructions: options.instructions } : {}),
   };
 
   const state: {
@@ -174,6 +256,8 @@ export function defineMcp(options: McpOptions): McpBuilder {
     setup?: (...args: any[]) => any;
     onError?: (...args: any[]) => any;
     onCleanup?: (...args: any[]) => any;
+    resources?: (...args: any[]) => any;
+    prompts?: (...args: any[]) => any;
     tools?: (...args: any[]) => any;
   } = { spec };
 
@@ -192,6 +276,8 @@ export function defineMcp(options: McpOptions): McpBuilder {
     ...(state.deps ? { deps: state.deps } : {}),
     ...(state.config ? { config: state.config } : {}),
     ...(state.static ? { static: state.static } : {}),
+    ...(state.resources ? { resources: state.resources } : {}),
+    ...(state.prompts ? { prompts: state.prompts } : {}),
     ...(state.tools ? { tools: state.tools } : {}),
   }) as McpHandler;
 
@@ -223,6 +309,14 @@ export function defineMcp(options: McpOptions): McpBuilder {
     },
     onCleanup(fn) {
       state.onCleanup = fn as any;
+      return builder as any;
+    },
+    resources(fn) {
+      state.resources = fn as any;
+      return builder as any;
+    },
+    prompts(fn) {
+      state.prompts = fn as any;
       return builder as any;
     },
     tools(fn) {

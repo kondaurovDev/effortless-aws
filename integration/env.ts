@@ -27,6 +27,10 @@ export const env = {
   apiDepsUrl: strip(process.env.API_DEPS_URL ?? local.api ?? ""),
   /** CloudFront URL for handlers/static-site.ts (no trailing slash) */
   siteUrl: strip(process.env.SITE_URL ?? local.site ?? ""),
+  /** Lambda Function URL for handlers/mcp.ts (no trailing slash) */
+  mcpUrl: strip(process.env.MCP_URL ?? local.mcp ?? ""),
+  /** Bearer token for MCP auth */
+  mcpToken: process.env.MCP_TOKEN ?? local.mcpToken ?? "",
 };
 
 function strip(url: string) {

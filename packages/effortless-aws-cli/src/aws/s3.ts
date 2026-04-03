@@ -89,7 +89,7 @@ export const ensureBucket = (input: EnsureBucketInput) =>
       Tagging: { TagSet: toAwsTagList(tags) },
     });
 
-    return { bucketName: name, bucketArn: `arn:aws:s3:::${name}` };
+    return { bucketName: name, bucketArn: `arn:aws:s3:::${name}`, created: !exists };
   });
 
 export type SyncFilesInput = {
@@ -199,6 +199,76 @@ export const syncFiles = (input: SyncFilesInput) =>
 
     yield* Effect.logDebug(`S3 sync: ${uploaded} uploaded, ${deleted} deleted, ${unchanged} unchanged`);
     return { uploaded, deleted, unchanged, uploadedKeys } satisfies SyncFilesResult;
+  });
+
+export type SeedFilesResult = {
+  uploaded: number;
+  skipped: number;
+};
+
+/** Upload files from a local directory only if they don't already exist in the bucket. */
+export const seedFiles = (input: SyncFilesInput) =>
+  Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const { bucketName, sourceDir } = input;
+
+    // List existing keys
+    const existingKeys = new Set<string>();
+    let continuationToken: string | undefined;
+    do {
+      const result = yield* s3.make("list_objects_v2", {
+        Bucket: bucketName,
+        ContinuationToken: continuationToken,
+      });
+      for (const obj of result.Contents ?? []) {
+        if (obj.Key) existingKeys.add(obj.Key);
+      }
+      continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    // Walk local directory
+    const localFiles = new Map<string, string>();
+    const walkDir = (dir: string, prefix: string): Effect.Effect<void, any> =>
+      Effect.gen(function* () {
+        const entries = yield* fileSystem.readDirectory(dir);
+        for (const name of entries) {
+          const fullPath = p.join(dir, name);
+          const key = prefix ? `${prefix}/${name}` : name;
+          const stat = yield* fileSystem.stat(fullPath);
+          if (stat.type === "Directory") {
+            yield* walkDir(fullPath, key);
+          } else {
+            localFiles.set(key, fullPath);
+          }
+        }
+      });
+    yield* walkDir(sourceDir, "");
+
+    let uploaded = 0;
+    let skipped = 0;
+
+    for (const [key, filePath] of localFiles) {
+      if (existingKeys.has(key)) {
+        skipped++;
+        continue;
+      }
+
+      const content = yield* fileSystem.readFile(filePath);
+      const ext = p.extname(key).toLowerCase();
+      const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
+
+      yield* s3.make("put_object", {
+        Bucket: bucketName,
+        Key: key,
+        Body: content,
+        ContentType: contentType,
+      });
+      uploaded++;
+    }
+
+    yield* Effect.logDebug(`S3 seed: ${uploaded} uploaded, ${skipped} skipped (already exist)`);
+    return { uploaded, skipped } satisfies SeedFilesResult;
   });
 
 export type PutObjectInput = {

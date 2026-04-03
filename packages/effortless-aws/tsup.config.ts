@@ -21,6 +21,7 @@ export default defineConfig([
       "runtime/wrap-api": "src/runtime/wrap-api.ts",
       "runtime/wrap-cron": "src/runtime/wrap-cron.ts",
       "runtime/wrap-worker": "src/runtime/wrap-worker.ts",
+      "runtime/wrap-mcp": "src/runtime/wrap-mcp.ts",
     },
     format: ["esm"],
     dts: false,

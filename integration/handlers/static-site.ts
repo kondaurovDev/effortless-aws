@@ -28,7 +28,7 @@ export const siteApi = defineApi({ basePath: "/api" })
 
 // ── Private file storage (served via CloudFront signed cookies) ─
 
-export const storage = defineBucket().build();
+export const storage = defineBucket({ seed: "../fixtures/storage" }).build();
 
 // ── Static site with SPA + API + private bucket routing ─────────
 

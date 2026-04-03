@@ -149,6 +149,7 @@ const DEV_ONLY_PACKAGES = new Set([
   "concurrently",
   "rimraf",
   "@effortless-aws/cli",
+  "effortless-aws",
 ]);
 
 /** Prefixes that indicate dev-only packages */

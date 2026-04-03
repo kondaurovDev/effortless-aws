@@ -157,6 +157,7 @@ export const handleDeploy = async (args: {
         queues: results.fifoQueueResults.map(r => ({ name: r.exportName })),
         buckets: results.bucketResults.map(r => ({ name: r.exportName })),
         mailers: results.mailerResults.map(r => ({ name: r.exportName })),
+        mcpServers: (results.mcpResults ?? []).map(r => ({ name: r.exportName, url: r.url })),
       };
 
       const total = Object.values(summary).reduce((acc, arr) => acc + arr.length, 0);

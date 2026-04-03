@@ -1,26 +1,5 @@
-import { defineApi, defineTable } from "effortless-aws";
-
-// ── Single table: notes + audit events (discriminated by tag) ──
-
-type NoteData = { tag: "note"; title: string; content: string };
-type AuditData = { tag: "audit"; type: string; notePk: string; noteSk: string };
-type Data = NoteData | AuditData;
-
-export const notes = defineTable<Data>({
-  streamView: "NEW_AND_OLD_IMAGES",
-})
-  .setup(({ table }) => ({ table }))
-  .onRecord(async ({ record, table }) => {
-    // Skip audit events to prevent infinite stream loop
-    const data = record.new?.data ?? record.old?.data;
-    if (data?.tag === "audit") return;
-
-    await table.put({
-      pk: record.keys.pk,
-      sk: `audit#${record.eventName}#${record.keys.sk}#${Date.now()}`,
-      data: { tag: "audit", type: record.eventName, notePk: record.keys.pk, noteSk: record.keys.sk },
-    });
-  });
+import { defineApi } from "effortless-aws";
+import { db } from "./table";
 
 // ── Session type ───────────────────────────────────────────────
 
@@ -29,12 +8,12 @@ type Session = { userId: string };
 // ── API with deps + config + auth ──────────────────────────────
 
 export const api = defineApi({ basePath: "/api" })
-  .deps(() => ({ notes }))
+  .deps(() => ({ db }))
   .config(({ defineSecret }) => ({
     authSecret: defineSecret({ key: "integration-test/auth-secret" }),
   }))
   .setup(({ deps, config, enableAuth }) => ({
-    notes: deps.notes,
+    notes: deps.db,
     auth: enableAuth<Session>({
       secret: config.authSecret,
       expiresIn: "1h",

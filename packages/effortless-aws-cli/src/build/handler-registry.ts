@@ -69,6 +69,12 @@ export const handlerRegistry = {
     wrapperFn: "wrapWorker",
     wrapperPath: "~/runtime/wrap-worker",
   },
+  mcp: {
+    defineFn: "defineMcp",
+    handlerProps: ["tools"],
+    wrapperFn: "wrapMcp",
+    wrapperPath: "~/runtime/wrap-mcp",
+  },
 } as const;
 
 export type HandlerType = keyof typeof handlerRegistry;

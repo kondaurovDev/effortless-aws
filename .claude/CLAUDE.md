@@ -21,6 +21,9 @@ Write all code, comments, commit messages, and documentation in English.
 - Do NOT modify `CHANGELOG.md` files — they contain release history and are managed by changesets.
 
 ## Agents
-- Public API rules → `public-api-guardian` agent
-- AWS SDK usage rules → `aws-sdk-enforcer` agent
-- Test running → `test-runner` agent
+- Running tests and typechecks → `test-runner`
+- Writing missing tests after code changes → `test-writer`
+- Scaffolding new `define*` handler types → `handler-scaffold`
+- Creating changeset files for releases → `release`
+- Reviewing branch diff against main → `review`
+- Fixing typecheck errors + tests + changeset before merge → `prepare-release`

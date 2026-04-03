@@ -16,7 +16,8 @@ import {
   ensureKeyGroup,
   findDistributionByTags,
 } from "../aws";
-import { findHandlerFiles, discoverHandlers, type DiscoveredHandlers } from "~/build/bundle";
+import { findHandlerFiles, discoverHandlers, flattenHandlers, type DiscoveredHandlers, bundle } from "~/build/bundle";
+import type { HandlerType } from "~/build/handler-registry";
 import { toSeconds } from "effortless-aws";
 import type { SecretEntry } from "~/build/handler-registry";
 import * as crypto from "crypto";
@@ -39,7 +40,7 @@ export { deployTable, deployAllTables } from "./deploy-table";
 export { deploy } from "./deploy-api";
 
 // Import for internal use
-import { type DeployInput, type DeployResult, type DeployTableResult, flushDeferredWarnings } from "./shared";
+import { type DeployInput, type DeployResult, type DeployTableResult, flushDeferredWarnings, startBundleCollector, flushBundleCollector, collectBundle, startDeployLog, flushDeployLog, logDeploy, formatBytes } from "./shared";
 import { deployTableFunction } from "./deploy-table";
 import { deployApp, type DeployAppResult } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
@@ -49,6 +50,8 @@ import { deployMailer, type DeployMailerResult } from "./deploy-mailer";
 import { deployCronFunction, type DeployCronResult } from "./deploy-cron";
 import { deployWorkerFunction, type DeployWorkerResult } from "./deploy-worker";
 import { deployApiFunction } from "./deploy-api";
+import { deployMcpFunction } from "./deploy-mcp";
+import { writeDeployState } from "./state";
 
 // ============ Progress tracking ============
 
@@ -327,6 +330,7 @@ const validateHandlerNames = (discovered: DiscoveredHandlers): string[] => {
     { type: "api", handlers: discovered.apiHandlers },
     { type: "cron", handlers: discovered.cronHandlers },
     { type: "worker", handlers: discovered.workerHandlers },
+    { type: "mcp", handlers: discovered.mcpHandlers },
   ];
   for (const { type, handlers } of allGroups) {
     for (const h of handlers) {
@@ -368,6 +372,7 @@ const validateDeps = (
     ...discovered.mailerHandlers,
     ...discovered.cronHandlers,
     ...discovered.workerHandlers,
+    ...discovered.mcpHandlers,
   ];
   for (const { exports } of allGroups) {
     for (const fn of exports) {
@@ -710,8 +715,7 @@ const buildBucketTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, s3: { region } })));
           results.push(result);
-          const status = result.status === "resource-only" ? "created" : result.status;
-          yield* ctx.logComplete(fn.exportName, "bucket", status, result.bundleSize);
+          yield* ctx.logComplete(fn.exportName, "bucket", result.status, result.bundleSize);
         })
       );
     }
@@ -852,6 +856,45 @@ const buildWorkerTasks = (
   return tasks;
 };
 
+const buildMcpTasks = (
+  ctx: DeployTaskCtx,
+  handlers: DiscoveredHandlers["mcpHandlers"],
+  results: DeployResult[],
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
+  const { region } = ctx.input;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
+
+          const { exportName, functionArn, status, bundleSize, handlerName } = yield* deployMcpFunction({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
+
+          // Setup Function URL
+          const lambdaName = `${ctx.input.project}-${ctx.stage}-${handlerName}`;
+          const { functionUrl } = yield* ensureFunctionUrl(lambdaName).pipe(
+            Effect.provide(Aws.makeClients({ lambda: { region } }))
+          );
+          yield* addFunctionUrlPublicAccess(lambdaName).pipe(
+            Effect.provide(Aws.makeClients({ lambda: { region } }))
+          );
+
+          results.push({ exportName, url: functionUrl, functionArn });
+          yield* ctx.logComplete(exportName, "mcp", status, bundleSize);
+        })
+      );
+    }
+  }
+  return tasks;
+};
+
 // ============ Project deployment ============
 
 export type DeployProjectInput = {
@@ -864,6 +907,8 @@ export type DeployProjectInput = {
   verbose?: boolean;
   /** Suppress all stdout output (for MCP server where stdout is the transport). */
   silent?: boolean;
+  /** Bundle and validate without deploying to AWS. */
+  dryRun?: boolean;
 };
 
 export type DeployProjectResult = {
@@ -875,11 +920,12 @@ export type DeployProjectResult = {
   mailerResults: DeployMailerResult[];
   cronResults: DeployCronResult[];
   apiResults: DeployResult[];
+  mcpResults: DeployResult[];
 };
 
 type HandlerCounts = {
   table: number; app: number; site: number; queue: number;
-  bucket: number; mailer: number; api: number; cron: number; worker: number;
+  bucket: number; mailer: number; api: number; cron: number; worker: number; mcp: number;
 };
 
 // ---- Phase 1: Discover handlers and validate ----
@@ -896,7 +942,7 @@ const discoverAndValidate = (input: DeployProjectInput) =>
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
     const discovered = yield* discoverHandlers(files, input.projectDir);
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = discovered;
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
 
     const counts: HandlerCounts = {
       table: tableHandlers.reduce((acc, h) => acc + h.exports.length, 0),
@@ -908,6 +954,7 @@ const discoverAndValidate = (input: DeployProjectInput) =>
       api: apiHandlers.reduce((acc, h) => acc + h.exports.length, 0),
       cron: cronHandlers.reduce((acc, h) => acc + h.exports.length, 0),
       worker: workerHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      mcp: mcpHandlers.reduce((acc, h) => acc + h.exports.length, 0),
     };
     const countValues = Object.values(counts) as number[];
     const totalAll = countValues.reduce((a, b) => a + b, 0);
@@ -1135,6 +1182,7 @@ const buildManifest = (discovered: DiscoveredHandlers, noSites?: boolean): Handl
     ["apiHandlers", "api"],
     ["cronHandlers", "cron"],
     ["workerHandlers", "worker"],
+    ["mcpHandlers", "mcp"],
   ];
   for (const [key, type] of groups) {
     for (const { exports } of discovered[key]) {
@@ -1154,7 +1202,7 @@ const deployResources = (input: {
 }) =>
   Effect.gen(function* () {
     const { ctx, discovered, counts } = input;
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers } = discovered;
+    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
     const noSites = ctx.input.noSites;
 
     const tableResults: DeployTableResult[] = [];
@@ -1166,6 +1214,7 @@ const deployResources = (input: {
     const cronResults: DeployCronResult[] = [];
     const workerResults: DeployWorkerResult[] = [];
     const apiResults: DeployResult[] = [];
+    const mcpResults: DeployResult[] = [];
 
     const staticSitesNeedApi = !noSites && staticSiteHandlers.some(
       ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
@@ -1188,6 +1237,7 @@ const deployResources = (input: {
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
         ...buildCronTasks(ctx, cronHandlers, cronResults),
         ...buildWorkerTasks(ctx, workerHandlers, workerResults),
+        ...buildMcpTasks(ctx, mcpHandlers, mcpResults),
       ];
 
       yield* Effect.all(phase1Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -1219,6 +1269,7 @@ const deployResources = (input: {
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
         ...buildCronTasks(ctx, cronHandlers, cronResults),
         ...buildWorkerTasks(ctx, workerHandlers, workerResults),
+        ...buildMcpTasks(ctx, mcpHandlers, mcpResults),
       ];
 
       yield* Effect.all(tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
@@ -1242,24 +1293,123 @@ const deployResources = (input: {
       yield* Effect.logWarning(warning);
     }
 
-    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, cronResults, apiResults };
+    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, cronResults, apiResults, mcpResults };
   });
 
 // ---- Orchestrator ----
 
+// ---- Dry-run: discover + bundle + validate, no AWS ----
+
+const dryRunProject = (input: DeployProjectInput) =>
+  Effect.gen(function* () {
+    startDeployLog();
+    startBundleCollector();
+    const stage = resolveStage(input.stage);
+    logDeploy(`[dry-run] Starting for ${input.project} (stage: ${stage}, region: ${input.region})`);
+
+    const { files, discovered, counts } = yield* discoverAndValidate(input);
+
+    const countParts = (Object.entries(counts) as [string, number][])
+      .filter(([, n]) => n > 0)
+      .map(([type, n]) => `${n} ${type}`);
+    logDeploy(`[dry-run] Discovered ${countParts.join(", ")} in ${files.length} file(s)`);
+
+    // Map flattenHandlers type names to HandlerType (handlerRegistry keys)
+    const bundleTypeMap: Record<string, HandlerType> = {
+      table: "table", api: "api", cron: "cron", bucket: "bucket",
+      mcp: "mcp", site: "staticSite", queue: "fifoQueue", worker: "worker",
+    };
+    // These handler types have no Lambda bundle
+    const skipBundle = new Set(["app", "mailer"]);
+
+    // Bundle all handlers (validates that code compiles)
+    const allHandlers = flattenHandlers(discovered);
+    const bundleResults: { name: string; type: string; size: number }[] = [];
+
+    for (const h of allHandlers) {
+      if (skipBundle.has(h.type)) {
+        bundleResults.push({ name: h.exportName, type: h.type, size: 0 });
+        logDeploy(`[dry-run] ${h.exportName} (${h.type}): skipped (no Lambda)`);
+        continue;
+      }
+      const bundleType = bundleTypeMap[h.type];
+      if (!bundleType) {
+        logDeploy(`[dry-run] ${h.exportName} (${h.type}): skipped (unknown type)`);
+        continue;
+      }
+      const result = yield* bundle({
+        projectDir: input.projectDir,
+        file: h.file,
+        exportName: h.exportName,
+        type: bundleType,
+      });
+      const size = Buffer.byteLength(result.code, "utf-8");
+      bundleResults.push({ name: h.exportName, type: h.type, size });
+      collectBundle(h.exportName, result.code);
+      logDeploy(`[dry-run] ${h.exportName} (${h.type}): bundled ${formatBytes(size)}`);
+    }
+
+    // Print summary
+    yield* Console.log(`\n${c.green(`Dry run: ${bundleResults.length} handler(s) validated`)}`);
+    for (const r of bundleResults) {
+      const sizeStr = r.size > 0 ? c.dim(formatBytes(r.size)) : c.dim("no bundle");
+      yield* Console.log(`  ${c.cyan(`[${r.type}]`.padEnd(9))} ${c.bold(r.name)}  ${sizeStr}`);
+    }
+
+    logDeploy(`[dry-run] Complete: ${bundleResults.length} handler(s) bundled`);
+
+    // Write state (bundles + log only, no deploy results)
+    yield* writeDeployState({
+      project: input.project,
+      stage,
+      region: input.region,
+      projectDir: input.projectDir,
+      results: {
+        tableResults: [], appResults: [], staticSiteResults: [],
+        fifoQueueResults: [], bucketResults: [], mailerResults: [],
+        cronResults: [], apiResults: [], mcpResults: [],
+      },
+      logLines: flushDeployLog(),
+      bundles: flushBundleCollector(),
+    });
+
+    return {
+      tableResults: [], appResults: [], staticSiteResults: [],
+      fifoQueueResults: [], bucketResults: [], mailerResults: [],
+      cronResults: [], apiResults: [], mcpResults: [],
+    } satisfies DeployProjectResult;
+  });
+
 export const deployProject = (input: DeployProjectInput) =>
   Effect.gen(function* () {
+    if (input.dryRun) {
+      return yield* dryRunProject(input);
+    }
+
+    startDeployLog();
+    startBundleCollector();
+    logDeploy(`[deploy] Starting deploy for ${input.project} (region: ${input.region})`);
+
     const { stage, files, discovered, counts, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap } =
       yield* discoverAndValidate(input);
+
+    const countParts = (Object.entries(counts) as [string, number][])
+      .filter(([, n]) => n > 0)
+      .map(([type, n]) => `${n} ${type}`);
+    logDeploy(`[deploy] Discovered ${countParts.join(", ")} in ${files.length} file(s)`);
 
     const { cfSigningInfo } = yield* prepareSecrets({
       discovered, project: input.project, stage, region: input.region, noSites: input.noSites,
     });
 
-    const needsLambda = counts.table + counts.app + counts.queue + counts.bucket + counts.mailer + counts.api + counts.cron > 0;
-    const { layerArn, external } = yield* prepareLambdaLayer({
+    const needsLambda = counts.table + counts.app + counts.queue + counts.bucket + counts.mailer + counts.api + counts.cron + counts.mcp > 0;
+    const { layerArn, layerVersion, external } = yield* prepareLambdaLayer({
       project: input.project, stage, region: input.region, files, projectDir: input.projectDir, needsLambda,
     });
+
+    if (layerArn) {
+      logDeploy(`[layer] v${layerVersion} (${external.length} packages)`);
+    }
 
     yield* Console.log("");
 
@@ -1276,5 +1426,25 @@ export const deployProject = (input: DeployProjectInput) =>
       ...(cfDomain ? { cfDomain } : {}),
     };
 
-    return yield* deployResources({ ctx, discovered, counts });
+    const results = yield* deployResources({ ctx, discovered, counts });
+
+    // Write deploy state to ~/.effortless-aws/<project>-<stage>/
+    const totalHandlers = Object.keys(results).reduce(
+      (sum, key) => sum + (results as any)[key].length, 0
+    );
+    logDeploy(`[deploy] Complete: ${totalHandlers} handler(s) deployed`);
+
+    yield* writeDeployState({
+      project: input.project,
+      stage,
+      region: input.region,
+      projectDir: input.projectDir,
+      results,
+      layerArn,
+      layerVersion,
+      logLines: flushDeployLog(),
+      bundles: flushBundleCollector(),
+    });
+
+    return results;
   });

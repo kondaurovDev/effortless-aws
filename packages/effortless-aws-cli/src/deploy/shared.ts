@@ -30,6 +30,46 @@ export const flushDeferredWarnings = (): string[] => {
   return warnings;
 };
 
+// ============ Bundle collector ============
+
+let _bundleCollector: Map<string, string> | undefined;
+
+/** Start collecting handler bundle code during deploy. */
+export const startBundleCollector = () => { _bundleCollector = new Map(); };
+
+/** Store a bundle in the collector (no-op if collector not started). */
+export const collectBundle = (name: string, code: string) => {
+  if (_bundleCollector) _bundleCollector.set(name, code);
+};
+
+/** Flush and return all collected bundles, resetting the collector. */
+export const flushBundleCollector = (): Map<string, string> => {
+  const bundles = _bundleCollector ?? new Map();
+  _bundleCollector = undefined;
+  return bundles;
+};
+
+// ============ Deploy log collector ============
+
+let _deployLog: string[] | undefined;
+
+/** Start collecting deploy log lines. */
+export const startDeployLog = () => { _deployLog = []; };
+
+/** Append a line to the deploy log (no-op if collector not started). */
+export const logDeploy = (message: string) => {
+  if (_deployLog) {
+    _deployLog.push(`${new Date().toISOString()} ${message}`);
+  }
+};
+
+/** Flush and return all collected log lines, resetting the collector. */
+export const flushDeployLog = (): string[] => {
+  const lines = _deployLog ?? [];
+  _deployLog = undefined;
+  return lines;
+};
+
 // ============ Common types ============
 
 export type DeployResult = {
@@ -41,11 +81,11 @@ export type DeployResult = {
 
 export type DeployTableResult = {
   exportName: string;
-  functionArn: string;
+  functionArn?: string;
   status: LambdaStatus;
   bundleSize?: number;
   tableArn: string;
-  streamArn: string;
+  streamArn?: string;
 };
 
 export type DeployAllResult = {
@@ -61,7 +101,7 @@ export type DeployInput = BundleInput & {
   exportName?: string;
 };
 
-const formatBytes = (bytes: number): string => {
+export const formatBytes = (bytes: number): string => {
   if (bytes < 1024) return `${bytes}B`;
   const kb = bytes / 1024;
   if (kb < 1024) return `${kb.toFixed(1)}KB`;
@@ -135,7 +175,7 @@ export type DeployCoreLambdaInput = {
   defaultPermissions?: readonly string[];
   memory?: number;
   timeout?: number;
-  bundleType?: "table" | "app" | "fifoQueue" | "bucket" | "api" | "cron";
+  bundleType?: "table" | "app" | "fifoQueue" | "bucket" | "api" | "cron" | "mcp";
   layerArn?: string;
   external?: string[];
   /** Environment variables to set on the Lambda (e.g., for deps) */
@@ -169,9 +209,11 @@ export const deployCoreLambda = ({
     };
 
     yield* Effect.logDebug(`Deploying Lambda: ${handlerName}`);
+    logDeploy(`[${bundleType ?? "lambda"}] ${handlerName}: starting deploy`);
 
     if (external && external.length > 0) {
       yield* Effect.logDebug(`Using ${external.length} external packages: ${external.join(", ")}`);
+      logDeploy(`[${bundleType ?? "lambda"}] ${handlerName}: ${external.length} external packages`);
     }
 
     const mergedPermissions = [
@@ -233,6 +275,10 @@ export const deployCoreLambda = ({
       ...(layerArn ? { layers: [layerArn] } : {}),
       environment
     });
+
+    collectBundle(handlerName, bundleResult.code);
+
+    logDeploy(`[${bundleType ?? "lambda"}] ${handlerName}: ${status} (${formatBytes(bundleSize)})`);
 
     return { functionArn, status, tagCtx, bundleSize };
   });

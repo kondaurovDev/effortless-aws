@@ -47,6 +47,9 @@ export const collectRequiredSecrets = (
   collect(handlers.fifoQueueHandlers);
   collect(handlers.bucketHandlers);
   collect(handlers.apiHandlers);
+  collect(handlers.cronHandlers);
+  collect(handlers.workerHandlers);
+  collect(handlers.mcpHandlers);
 
   return Array.from(seen.values());
 };
