@@ -1,5 +1,14 @@
 # effortless-aws
 
+## 0.34.0
+
+### Minor Changes
+
+- [`f683d8c`](https://github.com/kondaurovDev/effortless-aws/commit/f683d8ce0e8025571d66740fa9673062000703d9) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - - Add `defineMcp` handler for building MCP (Model Context Protocol) servers with tools, resources, and prompts
+  - Add deployment support for MCP handlers via Lambda-backed Streamable HTTP endpoints
+  - Add `seed` and `sync` options to `defineBucket` for uploading local files to S3 on deploy
+  - Fix `effortless-aws` being incorrectly placed in Lambda layer instead of inlined in the bundle
+
 ## 0.33.1
 
 ### Patch Changes
