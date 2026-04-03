@@ -13,7 +13,7 @@ describe("deps extraction", () => {
 
         export const createOrder = defineApi({ basePath: "/orders" })
           .deps(() => ({ orders }))
-          .post("/create", async ({ req }) => ({ status: 201 }));
+          .post({ path: "/create" }, async ({ req }) => ({ status: 201 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -30,7 +30,7 @@ describe("deps extraction", () => {
 
         export const api = defineApi({ basePath: "/api" })
           .deps(() => ({ orders, users }))
-          .post("/create", async ({ req }) => ({ status: 200 }));
+          .post({ path: "/create" }, async ({ req }) => ({ status: 200 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -46,7 +46,7 @@ describe("deps extraction", () => {
 
         export const api = defineApi({ basePath: "/api" })
           .deps(() => ({ orders: orders }))
-          .post("/create", async ({ req }) => ({ status: 200 }));
+          .post({ path: "/create" }, async ({ req }) => ({ status: 200 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -60,7 +60,7 @@ describe("deps extraction", () => {
         import { defineApi } from "effortless-aws";
 
         export const hello = defineApi({ basePath: "/hello" })
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -76,7 +76,7 @@ describe("deps extraction", () => {
 
         export default defineApi({ basePath: "/orders" })
           .deps(() => ({ orders }))
-          .post("/create", async ({ req }) => ({ status: 201 }));
+          .post({ path: "/create" }, async ({ req }) => ({ status: 201 }));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -93,7 +93,7 @@ describe("deps extraction", () => {
 
         export const api = defineApi({ basePath: "/orders" })
           .deps(() => ({ orders }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);

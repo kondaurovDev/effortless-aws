@@ -31,8 +31,8 @@ export type { WorkerConfig } from "./handlers/define-worker"
 export type { McpConfig, McpToolContent, McpToolResult, McpInputSchema, McpResourceContent, McpPromptArgument, McpPromptContent, McpPromptMessage, McpPromptResult, McpEntries } from "./handlers/define-mcp"
 
 // MCP definition types — re-exported without internal generic C
-import type { McpToolDef as _McpToolDef, McpResourceDef as _McpResourceDef, McpResourceTemplateDef as _McpResourceTemplateDef, McpResourceMap as _McpResourceMap, McpPromptDef as _McpPromptDef } from "./handlers/define-mcp"
-export type McpToolDef = _McpToolDef
+import type { McpToolDefInput as _McpToolDefInput, McpResourceDef as _McpResourceDef, McpResourceTemplateDef as _McpResourceTemplateDef, McpResourceMap as _McpResourceMap, McpPromptDef as _McpPromptDef } from "./handlers/define-mcp"
+export type McpToolDef = _McpToolDefInput
 export type McpResourceDef = _McpResourceDef
 export type McpResourceTemplateDef = _McpResourceTemplateDef
 export type McpResourceMap = _McpResourceMap

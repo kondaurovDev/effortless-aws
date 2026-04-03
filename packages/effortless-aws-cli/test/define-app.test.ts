@@ -168,7 +168,7 @@ describe("defineApp extraction", () => {
       import { defineApi } from "effortless-aws";
 
       export const api = defineApi({ basePath: "/api" })
-        .get("/", async ({ req }) => ({ status: 200 }));
+        .get({ path: "/" }, async ({ req }) => ({ status: 200 }));
     `;
 
     const configs = await extractAppConfigs(source);

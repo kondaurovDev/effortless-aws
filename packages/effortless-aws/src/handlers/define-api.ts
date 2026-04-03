@@ -95,43 +95,25 @@ type SpreadCtx<C> =
   & ([C] extends [undefined] ? {} : Omit<C & {}, 'auth'>)
   & ([ExtractAuth<C>] extends [undefined] ? {} : { auth: AuthHelpers<ExtractAuth<C>> });
 
+/** Infer validated output type from a Standard Schema, or fall back to unknown */
+type InferInput<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : unknown;
+
 /** Callback args available inside each route — ctx is spread into args */
-type RouteArgs<C, ST> =
+type RouteArgs<C, ST, S = undefined> =
   & SpreadCtx<C>
-  & { req: HttpRequest; input: unknown; ok: OkHelper; fail: FailHelper }
+  & { req: HttpRequest; input: InferInput<S>; ok: OkHelper; fail: FailHelper }
   & ([ST] extends [true] ? { stream: ResponseStream } : {});
 
 /** Route handler function */
-type RouteHandler<C, ST> = (args: RouteArgs<C, ST>) => Promise<HttpResponse | void> | HttpResponse | void;
+type RouteHandler<C, ST, S = undefined> = (args: RouteArgs<C, ST, S>) => Promise<HttpResponse | void> | HttpResponse | void;
 
-/** Callback args with typed input from schema validation */
-type TypedRouteArgs<C, ST, S extends StandardSchemaV1> =
-  & SpreadCtx<C>
-  & { req: HttpRequest; input: StandardSchemaV1.InferOutput<S>; ok: OkHelper; fail: FailHelper }
-  & ([ST] extends [true] ? { stream: ResponseStream } : {});
-
-/** Route handler function with typed input */
-type TypedRouteHandler<C, ST, S extends StandardSchemaV1> = (args: TypedRouteArgs<C, ST, S>) => Promise<HttpResponse | void> | HttpResponse | void;
-
-/** Route definition with typed schema input */
-type TypedRouteDef<S extends StandardSchemaV1 = StandardSchemaV1> = {
+/** Route definition — pass `input` for typed schema validation */
+type RouteDef<S extends StandardSchemaV1 | undefined = undefined> = {
   path: `/${string}`;
-  input: S;
+  input?: S;
   public?: boolean;
   cache?: CacheOptions;
 };
-
-/** Route definition without schema */
-type RouteDef = {
-  path: `/${string}`;
-  public?: boolean;
-  cache?: CacheOptions;
-};
-
-/** Route options for all methods */
-type RouteOptions = { public?: boolean };
-/** Route options for GET — supports caching */
-type GetRouteOptions = RouteOptions & { cache?: CacheOptions };
 
 // ============ Setup args ============
 
@@ -189,25 +171,11 @@ type ApiOptions = {
  * Has `__brand` so CLI discovers it. Each `.get()/.post()` adds a route and returns self.
  */
 export interface ApiRoutes<C = undefined, ST extends boolean = false> extends ApiHandler<C> {
-  get<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  get(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: GetRouteOptions): ApiRoutes<C, ST>;
-
-  post<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  post(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  post(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
-
-  put<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  put(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  put(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
-
-  patch<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  patch(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  patch(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
-
-  delete<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  delete(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  delete(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  get<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  post<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  put<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  patch<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  delete<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
 }
 
 // ============ Builder ============
@@ -260,25 +228,11 @@ interface ApiBuilder<
     fn: (args: SpreadCtx<C>) => void | Promise<void>
   ): ApiBuilder<D, P, C, ST, HasFiles>;
 
-  get<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  get(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  get(path: `/${string}`, handler: RouteHandler<C, ST>, options?: GetRouteOptions): ApiRoutes<C, ST>;
-
-  post<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  post(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  post(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
-
-  put<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  put(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  put(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
-
-  patch<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  patch(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  patch(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
-
-  delete<S extends StandardSchemaV1>(def: TypedRouteDef<S>, handler: TypedRouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  delete(def: RouteDef, handler: RouteHandler<C, ST>): ApiRoutes<C, ST>;
-  delete(path: `/${string}`, handler: RouteHandler<C, ST>, options?: RouteOptions): ApiRoutes<C, ST>;
+  get<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  post<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  put<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  patch<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  delete<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
 }
 
 // ============ Implementation ============
@@ -298,8 +252,8 @@ interface ApiBuilder<
  *     auth: enableAuth<Session>({ secret: config.dbUrl }),
  *   }))
  *   .onError(({ error, fail }) => fail(String(error), 500))
- *   .get("/me", async ({ users, auth, ok }) => ok(auth.session))
- *   .post("/login", async ({ auth, ok }) => ok(await auth.createSession()), { public: true })
+ *   .get({ path: "/me" }, async ({ users, auth, ok }) => ok(auth.session))
+ *   .post({ path: "/login", public: true }, async ({ auth, ok }) => ok(await auth.createSession()))
  * ```
  */
 export function defineApi<const O extends ApiOptions>(
@@ -327,17 +281,17 @@ export function defineApi(
     routes: [],
   };
 
-  const addRoute = (method: HttpMethod, path: string, handler: Function, opts?: GetRouteOptions, schema?: unknown) => {
-    const routeCache = opts?.cache != null
-      ? resolveCache(opts.cache)
+  const addRoute = (method: HttpMethod, def: { path: string; input?: unknown; public?: boolean; cache?: CacheOptions }, handler: Function) => {
+    const routeCache = def.cache != null
+      ? resolveCache(def.cache)
       : undefined;
 
     state.routes.push({
       method,
-      path,
+      path: def.path,
       onRequest: handler as any,
-      ...(schema ? { schema } : {}),
-      ...(opts?.public ? { public: true } : {}),
+      ...(def.input ? { schema: def.input } : {}),
+      ...(def.public ? { public: true } : {}),
       ...(routeCache ? { cache: routeCache } : {}),
     });
   };
@@ -363,15 +317,8 @@ export function defineApi(
 
     // Add route methods to the finalized handler
     for (const m of ["get", "post", "put", "patch", "delete"] as const) {
-      handler[m] = (pathOrDef: any, handlerOrFn: any, opts?: any) => {
-        if (typeof pathOrDef === "string") {
-          // Old: .post("/path", handler, opts?)
-          addRoute(m.toUpperCase() as HttpMethod, pathOrDef, handlerOrFn, opts);
-        } else {
-          // New: .post({ path, input?, public?, cache? }, handler)
-          const def = pathOrDef;
-          addRoute(m.toUpperCase() as HttpMethod, def.path, handlerOrFn, { ...(def.public ? { public: def.public } : {}), ...(def.cache ? { cache: def.cache } : {}) }, def.input);
-        }
+      handler[m] = (def: any, fn: any) => {
+        addRoute(m.toUpperCase() as HttpMethod, def, fn);
         handler.routes = state.routes;
         return handler;
       };
@@ -410,31 +357,11 @@ export function defineApi(
       state.onCleanup = fn as any;
       return builder as any;
     },
-    get(pathOrDef: any, handlerOrFn: any, opts?: any) {
-      if (typeof pathOrDef === "string") { addRoute("GET", pathOrDef, handlerOrFn, opts); }
-      else { addRoute("GET", pathOrDef.path, handlerOrFn, { ...(pathOrDef.public ? { public: pathOrDef.public } : {}), ...(pathOrDef.cache ? { cache: pathOrDef.cache } : {}) }, pathOrDef.input); }
-      return finalize() as any;
-    },
-    post(pathOrDef: any, handlerOrFn: any, opts?: any) {
-      if (typeof pathOrDef === "string") { addRoute("POST", pathOrDef, handlerOrFn, opts); }
-      else { addRoute("POST", pathOrDef.path, handlerOrFn, { ...(pathOrDef.public ? { public: pathOrDef.public } : {}), ...(pathOrDef.cache ? { cache: pathOrDef.cache } : {}) }, pathOrDef.input); }
-      return finalize() as any;
-    },
-    put(pathOrDef: any, handlerOrFn: any, opts?: any) {
-      if (typeof pathOrDef === "string") { addRoute("PUT", pathOrDef, handlerOrFn, opts); }
-      else { addRoute("PUT", pathOrDef.path, handlerOrFn, { ...(pathOrDef.public ? { public: pathOrDef.public } : {}), ...(pathOrDef.cache ? { cache: pathOrDef.cache } : {}) }, pathOrDef.input); }
-      return finalize() as any;
-    },
-    patch(pathOrDef: any, handlerOrFn: any, opts?: any) {
-      if (typeof pathOrDef === "string") { addRoute("PATCH", pathOrDef, handlerOrFn, opts); }
-      else { addRoute("PATCH", pathOrDef.path, handlerOrFn, { ...(pathOrDef.public ? { public: pathOrDef.public } : {}), ...(pathOrDef.cache ? { cache: pathOrDef.cache } : {}) }, pathOrDef.input); }
-      return finalize() as any;
-    },
-    delete(pathOrDef: any, handlerOrFn: any, opts?: any) {
-      if (typeof pathOrDef === "string") { addRoute("DELETE", pathOrDef, handlerOrFn, opts); }
-      else { addRoute("DELETE", pathOrDef.path, handlerOrFn, { ...(pathOrDef.public ? { public: pathOrDef.public } : {}), ...(pathOrDef.cache ? { cache: pathOrDef.cache } : {}) }, pathOrDef.input); }
-      return finalize() as any;
-    },
+    get(def: any, fn: any) { addRoute("GET", def, fn); return finalize() as any; },
+    post(def: any, fn: any) { addRoute("POST", def, fn); return finalize() as any; },
+    put(def: any, fn: any) { addRoute("PUT", def, fn); return finalize() as any; },
+    patch(def: any, fn: any) { addRoute("PATCH", def, fn); return finalize() as any; },
+    delete(def: any, fn: any) { addRoute("DELETE", def, fn); return finalize() as any; },
   };
 
   return builder;

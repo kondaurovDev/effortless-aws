@@ -23,7 +23,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").get("/", () => ({}));
+        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -36,7 +36,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").include("src/assets/*.css").get("/", () => ({}));
+        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").include("src/assets/*.css").get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -49,7 +49,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const hello = defineApi({ basePath: "/hello" }).get("/", () => ({}));
+        export const hello = defineApi({ basePath: "/hello" }).get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -62,7 +62,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export default defineApi({ basePath: "/widget" }).include("templates/*.ejs").get("/", () => ({}));
+        export default defineApi({ basePath: "/widget" }).include("templates/*.ejs").get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -76,7 +76,7 @@ describe("static extraction", () => {
       const source = `
         import { defineApi } from "effortless-aws";
 
-        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").get("/", () => ({}));
+        export const widget = defineApi({ basePath: "/widget" }).include("src/templates/*.ejs").get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -218,7 +218,7 @@ describe("static files runtime", () => {
       export default defineApi({ basePath: "/widget" })
           .include("test/fixtures/hello.txt")
           .setup(({ files }) => ({ files }))
-          .get("/index", async ({ files }) => ({
+          .get({ path: "/index" }, async ({ files }) => ({
             status: 200,
             body: { content: files.read("test/fixtures/hello.txt") }
           }));

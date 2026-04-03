@@ -12,19 +12,18 @@ export const siteApi = defineApi({ basePath: "/api" })
       expiresIn: "1h",
     }),
   }))
-  .get("/health", async ({ ok }) => ok({ status: "ok" }), { public: true })
-  .get("/echo", async ({ req, ok }) =>
+  .get({ path: "/health", public: true }, async ({ ok }) => ok({ status: "ok" }))
+  .get({ path: "/echo", public: true }, async ({ req, ok }) =>
     ok({ query: req.query }),
-    { public: true },
   )
   // Login: creates session + CloudFront signed cookies for /files/*
-  .post("/login", async ({ input, auth }) => {
+  .post({ path: "/login", public: true }, async ({ input, auth }) => {
     const { userId } = input as { userId: string };
     return auth.createSession({ userId }, {
       cdnPolicy: { path: "/files/*", ttl: "1h" },
     });
-  }, { public: true })
-  .get("/me", async ({ auth, ok }) => ok({ session: auth.session }));
+  })
+  .get({ path: "/me" }, async ({ auth, ok }) => ok({ session: auth.session }));
 
 // ── Private file storage (served via CloudFront signed cookies) ─
 

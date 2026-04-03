@@ -49,38 +49,17 @@ export type McpResourceContent =
 /** Legacy resource content result type used by runtime internals */
 type McpResourceResult = McpResourceContent | McpResourceContent[] | Promise<McpResourceContent | McpResourceContent[]>;
 
-/** Static resource definition (no URI template params) */
-export type McpStaticResourceDef = {
-  /** Resource URI */
+/** Infer resource params type from schema, or fall back to Record<string, string> */
+type InferResourceParams<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : Record<string, string>;
+
+/** Resource definition — pass `params` for typed schema validation on URI template params */
+export type McpResourceDefInput<S extends StandardSchemaV1 | undefined = undefined> = {
+  /** Resource URI or URI template (e.g. "resource://contacts/{id}") */
   uri: string;
   /** Human-readable name */
   name: string;
-  /** Optional description */
-  description?: string;
-  /** Optional MIME type */
-  mimeType?: string;
-};
-
-/** Template resource definition with typed params via Standard Schema */
-export type McpTypedResourceDef<S extends StandardSchemaV1 = StandardSchemaV1> = {
-  /** Resource URI template (e.g. "resource://contacts/{id}") */
-  uri: `${string}{${string}}${string}`;
-  /** Human-readable name */
-  name: string;
   /** Schema for URI template params — provides type inference + validation */
-  params: S;
-  /** Optional description */
-  description?: string;
-  /** Optional MIME type */
-  mimeType?: string;
-};
-
-/** Template resource definition without typed params */
-export type McpTemplateResourceDef = {
-  /** Resource URI template (e.g. "resource://contacts/{id}") */
-  uri: `${string}{${string}}${string}`;
-  /** Human-readable name */
-  name: string;
+  params?: S;
   /** Optional description */
   description?: string;
   /** Optional MIME type */
@@ -90,14 +69,8 @@ export type McpTemplateResourceDef = {
 /** What resource handlers can return — plain data is auto-wrapped by the runtime */
 type McpResourceReturn = unknown | Promise<unknown>;
 
-/** Handler for static resource */
-type McpStaticResourceHandler<C> = (ctx: SpreadCtx<C>) => McpResourceReturn;
-
-/** Handler for template resource with typed params */
-type McpTypedResourceHandler<C, S extends StandardSchemaV1> = (params: StandardSchemaV1.InferOutput<S>, ctx: SpreadCtx<C>) => McpResourceReturn;
-
-/** Handler for template resource with untyped params */
-type McpTemplateResourceHandler<C> = (params: Record<string, string>, ctx: SpreadCtx<C>) => McpResourceReturn;
+/** Resource handler — receives params (typed or Record<string, string>) and ctx */
+type McpResourceHandler<C, S = undefined> = (params: InferResourceParams<S>, ctx: SpreadCtx<C>) => McpResourceReturn;
 
 // Legacy types used by wrap-mcp runtime
 /** @internal */
@@ -159,60 +132,40 @@ export type McpPromptDef<C = undefined> = {
   handler: (args: Record<string, string>, ctx: SpreadCtx<C>) => McpPromptResult | Promise<McpPromptResult>;
 };
 
-/** Prompt definition with typed args via Standard Schema */
-export type McpTypedPromptDef<S extends StandardSchemaV1 = StandardSchemaV1> = {
-  /** Prompt name */
-  name: string;
-  /** Human-readable description */
-  description?: string;
-  /** Args schema — provides type inference + validation */
-  args: S;
-};
+/** Infer prompt args type from schema, or fall back to Record<string, string> */
+type InferPromptArgs<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : Record<string, string>;
 
-/** Prompt definition with untyped args */
-export type McpUntypedPromptDef = {
+/** Prompt definition — pass a Standard Schema for `args` for typed validation, or McpPromptArgument[] for untyped */
+export type McpPromptDefInput<S extends StandardSchemaV1 | McpPromptArgument[] | undefined = undefined> = {
   /** Prompt name */
   name: string;
   /** Human-readable description */
   description?: string;
-  /** Arguments this prompt accepts */
-  args?: McpPromptArgument[];
+  /** Args: Standard Schema for typed validation, or McpPromptArgument[] for untyped */
+  args?: S;
 };
 
 /** Handler return: string auto-wraps as user message, or return full McpPromptResult */
 type McpPromptReturn = string | McpPromptResult | Promise<string | McpPromptResult>;
 
-/** Handler for prompt with typed args */
-type McpTypedPromptHandler<C, S extends StandardSchemaV1> = (args: StandardSchemaV1.InferOutput<S>, ctx: SpreadCtx<C>) => McpPromptReturn;
+/** Prompt handler — receives args (typed or Record<string, string>) and ctx */
+type McpPromptHandler<C, S = undefined> = (args: InferPromptArgs<S>, ctx: SpreadCtx<C>) => McpPromptReturn;
 
-/** Handler for prompt with untyped args */
-type McpUntypedPromptHandler<C> = (args: Record<string, string>, ctx: SpreadCtx<C>) => McpPromptReturn;
+/** Infer tool input type from schema, or fall back to any */
+type InferToolInput<S> = S extends StandardJSONSchemaV1 ? StandardJSONSchemaV1.InferOutput<S> : any;
 
-/** Tool definition with raw JSON Schema input */
-export type McpToolDef = {
+/** Tool definition — pass a StandardJSONSchemaV1 for `input` for typed validation, or McpInputSchema for raw JSON Schema */
+export type McpToolDefInput<S extends StandardJSONSchemaV1 | McpInputSchema = McpInputSchema> = {
   /** Tool name */
   name: string;
   /** Human-readable description of the tool */
   description: string;
-  /** JSON Schema describing the tool's input parameters */
-  input: McpInputSchema;
-};
-
-/** Tool definition with typed Standard JSON Schema input */
-export type McpTypedToolDef<S extends StandardJSONSchemaV1 = StandardJSONSchemaV1> = {
-  /** Tool name */
-  name: string;
-  /** Human-readable description of the tool */
-  description: string;
-  /** Schema object implementing StandardJSONSchemaV1 (e.g. z.object({...})) */
+  /** Schema for tool input: StandardJSONSchemaV1 (e.g. z.object({...})) or raw McpInputSchema */
   input: S;
 };
 
-/** Handler function for a tool with raw JSON Schema input — return plain data, framework wraps it */
-type McpToolHandler<C> = (input: any, ctx: SpreadCtx<C>) => unknown | Promise<unknown>;
-
-/** Handler function for a tool with typed schema input — return plain data, framework wraps it */
-type McpTypedToolHandler<C, S extends StandardJSONSchemaV1> = (input: StandardJSONSchemaV1.InferOutput<S>, ctx: SpreadCtx<C>) => unknown | Promise<unknown>;
+/** Tool handler — receives input (typed or any) and ctx */
+type McpToolHandler<C, S = McpInputSchema> = (input: InferToolInput<S>, ctx: SpreadCtx<C>) => unknown | Promise<unknown>;
 
 // ============ Setup args ============
 
@@ -253,20 +206,12 @@ export type McpHandler<C = any> = {
  * Has `__brand` so CLI discovers it. Each `.tool()/.resource()/.prompt()` adds an entry and returns self.
  */
 export interface McpEntries<C = undefined> extends McpHandler<C> {
-  /** Register a tool with typed Standard JSON Schema input */
-  tool<S extends StandardJSONSchemaV1>(def: McpTypedToolDef<S>, handler: McpTypedToolHandler<C, S>): McpEntries<C>;
-  /** Register a tool with raw JSON Schema input */
-  tool(def: McpToolDef, handler: McpToolHandler<C>): McpEntries<C>;
-  /** Register a template resource with typed params */
-  resource<S extends StandardSchemaV1>(def: McpTypedResourceDef<S>, handler: McpTypedResourceHandler<C, S>): McpEntries<C>;
-  /** Register a template resource with untyped params */
-  resource(def: McpTemplateResourceDef, handler: McpTemplateResourceHandler<C>): McpEntries<C>;
-  /** Register a static resource */
-  resource(def: McpStaticResourceDef, handler: McpStaticResourceHandler<C>): McpEntries<C>;
-  /** Register a prompt with typed args via Standard Schema */
-  prompt<S extends StandardSchemaV1>(def: McpTypedPromptDef<S>, handler: McpTypedPromptHandler<C, S>): McpEntries<C>;
-  /** Register a prompt with untyped args */
-  prompt(def: McpUntypedPromptDef, handler: McpUntypedPromptHandler<C>): McpEntries<C>;
+  /** Register a tool */
+  tool<S extends StandardJSONSchemaV1 | McpInputSchema = McpInputSchema>(def: McpToolDefInput<S>, handler: McpToolHandler<C, S>): McpEntries<C>;
+  /** Register a resource */
+  resource<S extends StandardSchemaV1 | undefined = undefined>(def: McpResourceDefInput<S>, handler: McpResourceHandler<C, S>): McpEntries<C>;
+  /** Register a prompt */
+  prompt<S extends StandardSchemaV1 | McpPromptArgument[] | undefined = undefined>(def: McpPromptDefInput<S>, handler: McpPromptHandler<C, S>): McpEntries<C>;
 }
 
 // ============ Options ============
@@ -326,22 +271,12 @@ interface McpBuilder<
     fn: (args: SpreadCtx<C>) => void | Promise<void>
   ): McpBuilder<D, P, C, HasFiles>;
 
-  /** Register a tool with typed Standard JSON Schema input */
-  tool<S extends StandardJSONSchemaV1>(def: McpTypedToolDef<S>, handler: McpTypedToolHandler<C, S>): McpEntries<C>;
-  /** Register a tool with raw JSON Schema input */
-  tool(def: McpToolDef, handler: McpToolHandler<C>): McpEntries<C>;
-
-  /** Register a template resource with typed params */
-  resource<S extends StandardSchemaV1>(def: McpTypedResourceDef<S>, handler: McpTypedResourceHandler<C, S>): McpEntries<C>;
-  /** Register a template resource with untyped params */
-  resource(def: McpTemplateResourceDef, handler: McpTemplateResourceHandler<C>): McpEntries<C>;
-  /** Register a static resource */
-  resource(def: McpStaticResourceDef, handler: McpStaticResourceHandler<C>): McpEntries<C>;
-
-  /** Register a prompt with typed args via Standard Schema */
-  prompt<S extends StandardSchemaV1>(def: McpTypedPromptDef<S>, handler: McpTypedPromptHandler<C, S>): McpEntries<C>;
-  /** Register a prompt with untyped args */
-  prompt(def: McpUntypedPromptDef, handler: McpUntypedPromptHandler<C>): McpEntries<C>;
+  /** Register a tool */
+  tool<S extends StandardJSONSchemaV1 | McpInputSchema = McpInputSchema>(def: McpToolDefInput<S>, handler: McpToolHandler<C, S>): McpEntries<C>;
+  /** Register a resource */
+  resource<S extends StandardSchemaV1 | undefined = undefined>(def: McpResourceDefInput<S>, handler: McpResourceHandler<C, S>): McpEntries<C>;
+  /** Register a prompt */
+  prompt<S extends StandardSchemaV1 | McpPromptArgument[] | undefined = undefined>(def: McpPromptDefInput<S>, handler: McpPromptHandler<C, S>): McpEntries<C>;
 
   /** Finalize the handler without adding more entries */
   build(): McpHandler<C>;

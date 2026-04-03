@@ -162,7 +162,7 @@ describe("defineMcp singular methods", () => {
       .resource({
         uri: "data://config",
         name: "Config",
-      }, () => ({ uri: "data://config", text: "{}" }));
+      }, (_params) => ({ uri: "data://config", text: "{}" }));
 
     expect(m.__brand).toBe("effortless-mcp");
     expect(m.resources).toBeTypeOf("function");
@@ -175,11 +175,11 @@ describe("defineMcp singular methods", () => {
       .resource({
         uri: "data://a",
         name: "A",
-      }, () => ({ uri: "data://a", text: "a" }))
+      }, (_params) => ({ uri: "data://a", text: "a" }))
       .resource({
         uri: "data://b",
         name: "B",
-      }, () => ({ uri: "data://b", text: "b" }));
+      }, (_params) => ({ uri: "data://b", text: "b" }));
 
     const resources = (m.resources as any)();
     expect(Object.keys(resources).sort()).toEqual(["data://a", "data://b"]);
@@ -221,7 +221,7 @@ describe("defineMcp singular methods", () => {
       .resource({
         uri: "resource://users",
         name: "All users",
-      }, async () => ({ uri: "resource://users", text: "[]" }))
+      }, async (_params) => ({ uri: "resource://users", text: "[]" }))
       .prompt({
         name: "lookup",
         description: "Look up a user",
@@ -277,7 +277,7 @@ describe("defineMcp type inference", () => {
       .resource({
         uri: "data://x",
         name: "X",
-      }, ({ db }) => {
+      }, (_params, { db }) => {
         type _db = Expect<Equal<typeof db, "pg">>;
         return { uri: "data://x", text: "ok" };
       });
