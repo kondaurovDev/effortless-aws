@@ -1,5 +1,16 @@
 # @effortless-aws/cli
 
+## 0.18.1
+
+### Patch Changes
+
+- [`60663ff`](https://github.com/kondaurovDev/effortless-aws/commit/60663ff6efe0d7cdb91ec5137157c2601e931051) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - - Add Standard Schema support to `defineApi` routes via an optional `schema` field for input validation
+  - Add Standard Schema support to `defineMcp` tools for typed input validation
+  - Export new `McpEntries` type and rename `McpToolDef` to use `McpToolDefInput` internally
+  - Fix lint errors (unused imports/variables) and remove outdated MCP tests
+- Updated dependencies [[`60663ff`](https://github.com/kondaurovDev/effortless-aws/commit/60663ff6efe0d7cdb91ec5137157c2601e931051)]:
+  - effortless-aws@0.35.0
+
 ## 0.18.0
 
 ### Minor Changes
