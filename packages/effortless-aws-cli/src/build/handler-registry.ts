@@ -28,7 +28,7 @@ export const handlerRegistry = {
     wrapperPath: "",
   },
   staticSite: {
-    defineFn: "defineDistribution",
+    defineFn: "defineStaticSite",
     handlerProps: ["middleware"],
     wrapperFn: "wrapMiddleware",
     wrapperPath: "~/runtime/wrap-middleware",
@@ -173,15 +173,15 @@ const findMiddlewareInChain = (node: Node): string | undefined => {
   return undefined;
 };
 
-/** List of define function names that can produce a distribution */
-const distributionDefineFns: Set<string> = new Set([handlerRegistry.staticSite.defineFn]);
+/** List of define function names that can produce a static site with middleware */
+const staticSiteDefineFns: Set<string> = new Set([handlerRegistry.staticSite.defineFn]);
 
-/** Check if an expression chain contains a defineDistribution call */
+/** Check if an expression chain contains a defineStaticSite call */
 const chainContainsDefineFn = (node: Node): boolean => {
   if (node.getKind() === SyntaxKind.CallExpression) {
     const call = node as CallExpression;
     const exprText = bareName(call.getExpression().getText());
-    if (distributionDefineFns.has(exprText)) return true;
+    if (staticSiteDefineFns.has(exprText)) return true;
     // Recurse: .method() chains
     const expr = call.getExpression();
     if (expr.getKind() === SyntaxKind.PropertyAccessExpression) {
@@ -205,7 +205,7 @@ export const generateMiddlewareEntryPoint = (
   let middlewareFnText: string | undefined;
   let exportName: string | undefined;
 
-  // Search exported variable declarations for a distribution chain with .middleware()
+  // Search exported variable declarations for a defineStaticSite chain with .middleware()
   for (const stmt of sourceFile.getVariableStatements()) {
     if (!stmt.isExported()) continue;
     for (const decl of stmt.getDeclarations()) {

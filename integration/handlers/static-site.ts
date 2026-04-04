@@ -1,4 +1,4 @@
-import { defineApi, defineBucket, defineDistribution } from "effortless-aws";
+import { defineApi, defineBucket, defineStaticSite } from "effortless-aws";
 
 // ── API backend (proxied via CloudFront /api/*) ────────────────
 
@@ -31,8 +31,7 @@ export const storage = defineBucket({ seed: "../fixtures/storage" }).build();
 
 // ── Static site with SPA + API + private bucket routing ─────────
 
-export const site = defineDistribution()
-  .route("/*", { dir: "site", spa: true })
+export const site = defineStaticSite({ dir: "site", errorPage: "index.html" })
   .route("/api/*", siteApi)
   .route("/files/*", storage, { access: "private" })
   .build();

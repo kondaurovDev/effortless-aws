@@ -21,7 +21,7 @@ export type CfSigningConfig = {
   privateKey: string;
   /** CloudFront public key ID */
   keyPairId: string;
-  /** CloudFront domain (e.g., "d123.cloudfront.net" or "cdn.example.com"), or "*" for wildcard */
+  /** CloudFront domain2 (e.g., "d123.cloudfront.net" or "cdn.example.com"), or "*" for wildcard */
   domain: string;
 };
 

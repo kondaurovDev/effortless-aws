@@ -149,12 +149,11 @@ describe("defineApp extraction", () => {
     expect(configs[0]!.staticGlobs).toEqual([]);
   });
 
-  it("should not match defineDistribution calls", async () => {
+  it("should not match defineStaticSite calls", async () => {
     const source = `
-      import { defineDistribution } from "effortless-aws";
+      import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineDistribution()
-        .route("/*", { dir: "dist", build: "npm run build" })
+      export const docs = defineStaticSite({ dir: "dist", build: "npm run build" })
         .build();
     `;
 

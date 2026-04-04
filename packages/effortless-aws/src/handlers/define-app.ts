@@ -40,7 +40,7 @@ export type AppHandler = {
  * Server-rendered pages are handled by a Lambda function using the framework's
  * built output from the `server` directory.
  *
- * For static-only sites (no SSR), use {@link defineDistribution} instead.
+ * For static-only sites (no SSR), use {@link defineStaticSite} instead.
  *
  * @see {@link https://effortless-aws.website/use-cases/web-app | Web app guide}
  *

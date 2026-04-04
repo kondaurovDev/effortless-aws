@@ -250,7 +250,8 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     }
 
     // 4. Viewer request: either Lambda@Edge (middleware) or CloudFront Function (URL rewrite)
-    const isSpa = config.spa ?? false;
+    const index = config.index ?? "index.html";
+    const isSpa = config.errorPage === index;
     let urlRewriteFunctionArn: string | undefined;
     let lambdaEdgeArn: string | undefined;
 
@@ -310,7 +311,6 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     });
 
     // 8. Ensure CloudFront distribution
-    const index = config.index ?? "index.html";
     const { distributionId, distributionArn, domainName } = yield* ensureDistribution({
       project,
       stage,
@@ -318,7 +318,6 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
       bucketName,
       bucketRegion: region,
       oacId,
-      spa: isSpa,
       index,
       tags: makeTags(tagCtx),
       urlRewriteFunctionArn,

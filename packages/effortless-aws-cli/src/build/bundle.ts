@@ -6,7 +6,7 @@ import * as os from "os";
 import archiver from "archiver";
 import { globSync } from "glob";
 import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry, type ApiRouteEntry, type BucketRouteEntry } from "./handler-registry";
-import type { TableConfig, AppConfig, DistributionConfig, StaticOriginConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig, McpConfig } from "effortless-aws";
+import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig, McpConfig } from "effortless-aws";
 
 export type BundleInput = {
   projectDir: string;
@@ -18,7 +18,7 @@ export type BundleInput = {
 
 export type ExtractedTableFunction = ExtractedConfig<TableConfig>;
 export type ExtractedAppFunction = ExtractedConfig<AppConfig>;
-export type ExtractedStaticSiteFunction = ExtractedConfig<DistributionConfig & StaticOriginConfig>;
+export type ExtractedStaticSiteFunction = ExtractedConfig<StaticSiteConfig>;
 export type ExtractedFifoQueueFunction = ExtractedConfig<FifoQueueConfig>;
 export type ExtractedBucketFunction = ExtractedConfig<BucketConfig>;
 export type ExtractedMailerFunction = ExtractedConfig<MailerConfig>;
@@ -89,12 +89,8 @@ const extractRoutePatternsFromRoutes = (routes: unknown): string[] => {
     .filter((p): p is string => !!p);
 };
 
-/** Check if a route origin is an inline static config (has dir property) */
-const isStaticOrigin = (origin: unknown): boolean =>
-  origin != null && typeof origin === "object" && "dir" in (origin as any);
-
-/** Extract route entries from a distribution handler's routes array */
-const extractDistributionRoutes = (handler: any, allExports: Record<string, unknown>) => {
+/** Extract route entries from a static site handler's routes array */
+const extractStaticSiteRoutes = (handler: any, allExports: Record<string, unknown>) => {
   const routes: Array<{ pattern: string; origin: any; access?: string }> = handler.routes;
   if (!Array.isArray(routes)) return { apiRoutes: [] as ApiRouteEntry[], bucketRoutes: [] as BucketRouteEntry[], routePatterns: [] as string[] };
 
@@ -103,8 +99,6 @@ const extractDistributionRoutes = (handler: any, allExports: Record<string, unkn
   const routePatterns: string[] = [];
 
   for (const entry of routes) {
-    if (isStaticOrigin(entry.origin)) continue; // skip inline static origins
-
     const brand = (entry.origin as any).__brand as string;
 
     if (brand === "effortless-bucket") {
@@ -146,19 +140,13 @@ const extractFromHandler = (exportName: string, handler: any, type: HandlerType,
     ? Object.fromEntries(Object.entries(rawSpec).filter(([k]) => !stripProps.includes(k)))
     : rawSpec;
 
-  // For distribution/staticSite, extract routes from handler.routes array
+  // For staticSite, extract routes from handler.routes array
   if (type === "staticSite") {
-    const { apiRoutes, bucketRoutes, routePatterns } = extractDistributionRoutes(handler, allExports ?? {});
-
-    // Merge inline static origin config (dir, spa, build, etc.) into the spec config
-    const staticOrigin = Array.isArray(handler.routes)
-      ? handler.routes.find((r: any) => isStaticOrigin(r.origin))
-      : undefined;
-    const mergedConfig = staticOrigin ? { ...config, ...staticOrigin.origin } : config;
+    const { apiRoutes, bucketRoutes, routePatterns } = extractStaticSiteRoutes(handler, allExports ?? {});
 
     return {
       exportName,
-      config: mergedConfig,
+      config,
       hasHandler: handler.middleware != null,
       depsKeys: extractDepsKeysFromHandler(handler.deps),
       secretEntries: extractSecretEntriesFromConfig(handler.config),

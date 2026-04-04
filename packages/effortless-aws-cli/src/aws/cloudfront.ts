@@ -269,7 +269,6 @@ export type EnsureDistributionInput = {
   bucketName: string;
   bucketRegion: string;
   oacId: string;
-  spa: boolean;
   index: string;
   tags: Record<string, string>;
   urlRewriteFunctionArn?: string;

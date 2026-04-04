@@ -39,70 +39,63 @@ export type StaticSiteSeo = {
   googleIndexing?: string;
 };
 
-/** Inline static origin config for a CloudFront route */
-export type StaticOriginConfig = {
+/**
+ * Configuration for a static site (S3 + CloudFront)
+ */
+export type StaticSiteConfig = {
   /** Directory containing the static site files, relative to project root */
   dir: string;
   /** Default file for directory requests (default: "index.html") */
   index?: string;
-  /** SPA mode: serve index.html for all paths that don't match a file (default: false) */
-  spa?: boolean;
   /** Shell command to run before deploy to generate site content (e.g., "npx astro build") */
   build?: string;
-  /** Custom 404 error page path relative to `dir` (e.g. "404.html").
-   * For non-SPA sites only. If not set, a default page is generated automatically. */
+  /** Path to a custom error page relative to `dir`.
+   * - If set to the same value as `index` (e.g. "index.html"), enables SPA mode:
+   *   all paths that don't match a file are served with `index.html` (HTTP 200), letting the client-side router handle them.
+   * - If set to a different file (e.g. "404.html"), that file is served with HTTP 404 for missing paths.
+   * - If omitted, a default 404 page is auto-generated. */
   errorPage?: string;
+  /** Custom domain name. Accepts a string (same domain for all stages) or a Record mapping stage names to domains (e.g., `{ prod: "example.com", dev: "dev.example.com" }`). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
+  domain?: string | Record<string, string>;
   /** SEO: auto-generate sitemap.xml and robots.txt at deploy time, optionally submit URLs to Google Indexing API */
   seo?: StaticSiteSeo;
 };
 
-/** Route origin: a handler (API, MCP, bucket) or inline static site config */
-type RouteOrigin = AnyRoutableHandler | StaticOriginConfig;
-
-/** Route entry stored on the distribution handler */
-type DistributionRouteEntry = {
+/** Route entry stored on the static site handler */
+type StaticSiteRouteEntry = {
   pattern: string;
-  origin: RouteOrigin;
+  origin: AnyRoutableHandler;
   access?: "private" | "public";
 };
 
 /**
- * Distribution-level config (CloudFront settings, not per-origin)
- */
-export type DistributionConfig = {
-  /** Custom domain name. Accepts a string (same domain for all stages) or a Record mapping stage names to domains (e.g., `{ prod: "example.com", dev: "dev.example.com" }`). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
-  domain?: string | Record<string, string>;
-};
-
-/**
- * Internal handler object created by defineDistribution
+ * Internal handler object created by defineStaticSite
  * @internal
  */
-export type DistributionHandler = {
+export type StaticSiteHandler = {
   readonly __brand: "effortless-static-site";
-  readonly __spec: DistributionConfig;
-  readonly routes: DistributionRouteEntry[];
+  readonly __spec: StaticSiteConfig;
+  readonly routes: StaticSiteRouteEntry[];
   readonly middleware?: MiddlewareHandler;
 };
 
-
 /**
- * Deploy a CloudFront distribution with static site, API, and bucket origins.
+ * Deploy a static site via S3 + CloudFront CDN, with optional API and bucket route overrides.
  *
  * @see {@link https://effortless-aws.website/use-cases/web-app | Web app guide}
  *
- * @param options - Distribution configuration: name, domain
+ * @param options - Static site configuration: directory, optional SPA mode, build command, domain
  * @returns Builder with `.route()`, `.middleware()`, and `.build()` methods
  */
-export function defineDistribution(options?: DistributionConfig) {
+export function defineStaticSite(options: StaticSiteConfig) {
   const state = {
     spec: { ...options },
-    routes: [] as DistributionRouteEntry[],
+    routes: [] as StaticSiteRouteEntry[],
     middleware: undefined as MiddlewareHandler | undefined,
   };
 
   const builder = {
-    route(pattern: string, origin: RouteOrigin, opts?: { access?: "private" | "public" }) {
+    route(pattern: string, origin: AnyRoutableHandler, opts?: { access?: "private" | "public" }) {
       state.routes.push({ pattern, origin, ...(opts?.access ? { access: opts.access } : {}) });
       return builder;
     },
@@ -110,7 +103,7 @@ export function defineDistribution(options?: DistributionConfig) {
       state.middleware = fn;
       return builder;
     },
-    build(): DistributionHandler {
+    build(): StaticSiteHandler {
       return {
         __brand: "effortless-static-site",
         __spec: state.spec,
@@ -122,4 +115,3 @@ export function defineDistribution(options?: DistributionConfig) {
 
   return builder;
 }
-
