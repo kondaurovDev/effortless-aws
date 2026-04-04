@@ -25,19 +25,6 @@ export type AuthOptions<A = unknown> = {
   };
 };
 
-/** Branded auth config — created by `enableAuth<A>()` helper, carries session type A */
-export type ApiAuthConfig<A = unknown> = AuthOptions<A> & { readonly __sessionType: A };
-
-/** Type of the `enableAuth` helper injected into setup args */
-export type EnableAuth = <A = unknown>(options: AuthOptions<A>) => ApiAuthConfig<A>;
-
-/** Runtime implementation of enableAuth — identity function with branded return type */
-export const enableAuth: EnableAuth = <A = unknown>(options: AuthOptions<A>): ApiAuthConfig<A> =>
-  options as ApiAuthConfig<A>;
-
-/** Extract session type A from ctx.auth if present */
-type ExtractAuth<C> = C extends { auth: ApiAuthConfig<infer A> } ? A : undefined;
-
 /** Property names reserved by the framework — cannot be used in setup return */
 type ReservedKeys = 'req' | 'input' | 'stream' | 'ok' | 'fail';
 
@@ -90,22 +77,22 @@ export type RouteEntry = {
   cache?: ResolvedCache;
 };
 
-/** Spread ctx into route args: Omit auth config, add AuthHelpers if present */
-type SpreadCtx<C> =
-  & ([C] extends [undefined] ? {} : Omit<C & {}, 'auth'>)
-  & ([ExtractAuth<C>] extends [undefined] ? {} : { auth: AuthHelpers<ExtractAuth<C>> });
+/** Spread ctx into route args, add AuthHelpers if A is set */
+type SpreadCtx<C, A = undefined> =
+  & ([C] extends [undefined] ? {} : C & {})
+  & ([A] extends [undefined] ? {} : { auth: AuthHelpers<A> });
 
 /** Infer validated output type from a Standard Schema, or fall back to unknown */
 type InferInput<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : unknown;
 
 /** Callback args available inside each route — ctx is spread into args */
-type RouteArgs<C, ST, S = undefined> =
-  & SpreadCtx<C>
+type RouteArgs<C, ST, A = undefined, S = undefined> =
+  & SpreadCtx<C, A>
   & { req: HttpRequest; input: InferInput<S>; ok: OkHelper; fail: FailHelper }
   & ([ST] extends [true] ? { stream: ResponseStream } : {});
 
 /** Route handler function */
-type RouteHandler<C, ST, S = undefined> = (args: RouteArgs<C, ST, S>) => Promise<HttpResponse | void> | HttpResponse | void;
+type RouteHandler<C, ST, A = undefined, S = undefined> = (args: RouteArgs<C, ST, A, S>) => Promise<HttpResponse | void> | HttpResponse | void;
 
 /** Route definition — pass `input` for typed schema validation */
 type RouteDef<S extends StandardSchemaV1 | undefined = undefined> = {
@@ -117,12 +104,17 @@ type RouteDef<S extends StandardSchemaV1 | undefined = undefined> = {
 
 // ============ Setup args ============
 
-/** Setup factory — receives deps/config/files/enableAuth based on what was declared */
+/** Setup factory — receives deps/config/files based on what was declared */
 type SetupArgs<D, P, HasFiles extends boolean> =
-  & { enableAuth: EnableAuth; ok: OkHelper; fail: FailHelper }
+  & { ok: OkHelper; fail: FailHelper }
   & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
   & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
   & (HasFiles extends true ? { files: StaticFiles } : {});
+
+/** Auth factory args — receives config/deps based on what was declared */
+type AuthArgs<D, P> =
+  & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+  & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> });
 
 /** Validate that setup return type does not use reserved property names */
 type ValidateSetupReturn<C> = C & { [K in ReservedKeys]?: never };
@@ -170,12 +162,12 @@ type ApiOptions = {
  * Finalized API handler with route-adding methods.
  * Has `__brand` so CLI discovers it. Each `.get()/.post()` adds a route and returns self.
  */
-export interface ApiRoutes<C = undefined, ST extends boolean = false> extends ApiHandler<C> {
-  get<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  post<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  put<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  patch<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  delete<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+export interface ApiRoutes<C = undefined, ST extends boolean = false, A = undefined> extends ApiHandler<C> {
+  get<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  post<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  put<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  patch<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  delete<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
 }
 
 // ============ Builder ============
@@ -192,47 +184,53 @@ interface ApiBuilder<
   C = undefined,
   ST extends boolean = false,
   HasFiles extends boolean = false,
+  A = undefined,
 > {
   /** Declare handler dependencies (tables, queues, buckets, mailers) */
   deps<D2 extends Record<string, AnyDepHandler>>(
     fn: () => D2
-  ): ApiBuilder<D2, P, C, ST, HasFiles>;
+  ): ApiBuilder<D2, P, C, ST, HasFiles, A>;
 
   /** Declare SSM secrets */
   config<P2 extends Record<string, AnySecretRef>>(
     fn: ConfigFactory<P2>
-  ): ApiBuilder<D, P2, C, ST, HasFiles>;
+  ): ApiBuilder<D, P2, C, ST, HasFiles, A>;
 
   /** Include static files by glob pattern */
-  include(glob: string): ApiBuilder<D, P, C, ST, true>;
+  include(glob: string): ApiBuilder<D, P, C, ST, true, A>;
+
+  /** Configure session-based authentication. Receives resolved config/deps. */
+  auth<A2>(
+    fn: (args: AuthArgs<D, P>) => AuthOptions<A2> | Promise<AuthOptions<A2>>
+  ): ApiBuilder<D, P, C, ST, HasFiles, A2>;
 
   /** Configure Lambda settings only (no init function) */
-  setup(lambda: LambdaOptions): ApiBuilder<D, P, C, ST, HasFiles>;
+  setup(lambda: LambdaOptions): ApiBuilder<D, P, C, ST, HasFiles, A>;
   /** Initialize shared state on cold start. Receives deps/config/files based on what was declared. */
   setup<C2>(
     fn: (args: SetupArgs<D, P, HasFiles>) => ValidateSetupReturn<C2> | Promise<ValidateSetupReturn<C2>>
-  ): ApiBuilder<D, P, C2, ST, HasFiles>;
+  ): ApiBuilder<D, P, C2, ST, HasFiles, A>;
   /** Initialize shared state on cold start with Lambda config. */
   setup<C2>(
     fn: (args: SetupArgs<D, P, HasFiles>) => ValidateSetupReturn<C2> | Promise<ValidateSetupReturn<C2>>,
     lambda: LambdaOptions,
-  ): ApiBuilder<D, P, C2, ST, HasFiles>;
+  ): ApiBuilder<D, P, C2, ST, HasFiles, A>;
 
   /** Handle errors thrown by routes */
   onError(
-    fn: (args: { error: unknown; req: HttpRequest; ok: OkHelper; fail: FailHelper } & SpreadCtx<C>) => HttpResponse | Promise<HttpResponse>
-  ): ApiBuilder<D, P, C, ST, HasFiles>;
+    fn: (args: { error: unknown; req: HttpRequest; ok: OkHelper; fail: FailHelper } & SpreadCtx<C, A>) => HttpResponse | Promise<HttpResponse>
+  ): ApiBuilder<D, P, C, ST, HasFiles, A>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */
   onCleanup(
-    fn: (args: SpreadCtx<C>) => void | Promise<void>
-  ): ApiBuilder<D, P, C, ST, HasFiles>;
+    fn: (args: SpreadCtx<C, A>) => void | Promise<void>
+  ): ApiBuilder<D, P, C, ST, HasFiles, A>;
 
-  get<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  post<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  put<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  patch<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
-  delete<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, S>): ApiRoutes<C, ST>;
+  get<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  post<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  put<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  patch<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
+  delete<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
 }
 
 // ============ Implementation ============
@@ -244,14 +242,10 @@ interface ApiBuilder<
  *
  * @example
  * ```typescript
- * export const api = defineApi({ basePath: "/api", timeout: "30s" })
+ * export const api = defineApi({ basePath: "/api" })
  *   .deps(() => ({ users }))
- *   .config(({ defineSecret }) => ({ dbUrl: defineSecret() }))
- *   .setup(async ({ deps, config, enableAuth }) => ({
- *     users: deps.users,
- *     auth: enableAuth<Session>({ secret: config.dbUrl }),
- *   }))
- *   .onError(({ error, fail }) => fail(String(error), 500))
+ *   .config(({ defineSecret }) => ({ authSecret: defineSecret() }))
+ *   .auth<Session>(({ config }) => ({ secret: config.authSecret, expiresIn: "1h" }))
  *   .get({ path: "/me" }, async ({ users, auth, ok }) => ok(auth.session))
  *   .post({ path: "/login", public: true }, async ({ auth, ok }) => ok(await auth.createSession()))
  * ```
@@ -270,6 +264,7 @@ export function defineApi(
     config?: Record<string, unknown>;
     static?: string[];
     setup?: (...args: any[]) => any;
+    authFn?: (...args: any[]) => any;
     onError?: (...args: any[]) => any;
     onCleanup?: (...args: any[]) => any;
     routes: RouteEntry[];
@@ -310,6 +305,7 @@ export function defineApi(
       ...(state.onError ? { onError: state.onError } : {}),
       ...(state.onCleanup ? { onCleanup: state.onCleanup } : {}),
       ...(state.setup ? { setup: state.setup } : {}),
+      ...(state.authFn ? { authFn: state.authFn } : {}),
       ...(state.deps ? { deps: state.deps } : {}),
       ...(state.config ? { config: state.config } : {}),
       ...(state.static ? { static: state.static } : {}),
@@ -338,6 +334,10 @@ export function defineApi(
     },
     include(glob: string) {
       state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    auth(fn: any) {
+      state.authFn = fn;
       return builder as any;
     },
     setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {

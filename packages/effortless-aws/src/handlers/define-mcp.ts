@@ -169,12 +169,16 @@ type McpToolHandler<C, S = McpInputSchema> = (input: InferToolInput<S>, ctx: Spr
 
 // ============ Setup args ============
 
-/** Setup factory — receives deps/config/files/enableAuth based on what was declared */
+/** Setup factory — receives deps/config/files based on what was declared */
 type SetupArgs<D, P, HasFiles extends boolean> =
-  & { enableAuth: import("./define-api").EnableAuth }
   & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
   & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> })
   & (HasFiles extends true ? { files: StaticFiles } : {});
+
+/** Auth factory args — receives config/deps based on what was declared */
+type AuthArgs<D, P> =
+  & ([D] extends [undefined] ? {} : { deps: ResolveDeps<D> })
+  & ([P] extends [undefined] ? {} : { config: ResolveConfig<P & {}> });
 
 /** Spread ctx into callback args (empty when no setup) */
 type SpreadCtx<C> = [C] extends [undefined] ? {} : C & {};
@@ -247,6 +251,11 @@ interface McpBuilder<
   /** Include static files in the bundle. Chainable — call multiple times. */
   include(glob: string): McpBuilder<D, P, C, true>;
 
+  /** Configure session-based authentication. Receives resolved config/deps. All requests require a valid session. */
+  auth<A2>(
+    fn: (args: AuthArgs<D, P>) => import("./define-api").AuthOptions<A2> | Promise<import("./define-api").AuthOptions<A2>>
+  ): McpBuilder<D, P, C, HasFiles>;
+
   /** Configure Lambda settings only (memory, timeout, permissions, logLevel) */
   setup(lambda: LambdaOptions): McpBuilder<D, P, C, HasFiles>;
 
@@ -306,6 +315,7 @@ export function defineMcp(options: McpOptions): McpBuilder {
     config?: Record<string, unknown>;
     static?: string[];
     setup?: (...args: any[]) => any;
+    authFn?: (...args: any[]) => any;
     onError?: (...args: any[]) => any;
     onCleanup?: (...args: any[]) => any;
     toolEntries: [string, any][];
@@ -345,6 +355,7 @@ export function defineMcp(options: McpOptions): McpBuilder {
       ...(state.onError ? { onError: state.onError } : {}),
       ...(state.onCleanup ? { onCleanup: state.onCleanup } : {}),
       ...(state.setup ? { setup: state.setup } : {}),
+      ...(state.authFn ? { authFn: state.authFn } : {}),
       ...(state.deps ? { deps: state.deps } : {}),
       ...(state.config ? { config: state.config } : {}),
       ...(state.static ? { static: state.static } : {}),
@@ -391,6 +402,10 @@ export function defineMcp(options: McpOptions): McpBuilder {
     },
     include(glob) {
       state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    auth(fn: any) {
+      state.authFn = fn;
       return builder as any;
     },
     setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {

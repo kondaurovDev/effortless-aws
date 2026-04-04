@@ -6,11 +6,9 @@ export const siteApi = defineApi({ basePath: "/api" })
   .config(({ defineSecret }) => ({
     authSecret: defineSecret({ key: "integration-test/auth-secret" }),
   }))
-  .setup(({ config, enableAuth }) => ({
-    auth: enableAuth<{ userId: string }>({
-      secret: config.authSecret,
-      expiresIn: "1h",
-    }),
+  .auth<{ userId: string }>(({ config }) => ({
+    secret: config.authSecret,
+    expiresIn: "1h",
   }))
   .get({ path: "/health", public: true }, async ({ ok }) => ok({ status: "ok" }))
   .get({ path: "/echo", public: true }, async ({ req, ok }) =>

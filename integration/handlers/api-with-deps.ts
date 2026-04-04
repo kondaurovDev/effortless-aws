@@ -13,20 +13,20 @@ export const api = defineApi({ basePath: "/api" })
   .config(({ defineSecret }) => ({
     authSecret: defineSecret({ key: "integration-test/auth-secret" }),
   }))
-  .setup(({ deps, config, enableAuth }) => ({
-    notes: deps.db,
-    auth: enableAuth<Session>({
-      secret: config.authSecret,
-      expiresIn: "1h",
-      apiToken: {
-        header: "x-api-key",
-        verify: async (value: string) => {
-          if (value === "test-api-token-42") return { userId: "api-token-user" };
-          return null;
-        },
-        cacheTtl: "5m",
+  .auth<Session>(({ config }) => ({
+    secret: config.authSecret,
+    expiresIn: "1h",
+    apiToken: {
+      header: "x-api-key",
+      verify: async (value: string) => {
+        if (value === "test-api-token-42") return { userId: "api-token-user" };
+        return null;
       },
-    }),
+      cacheTtl: "5m",
+    },
+  }))
+  .setup(({ deps }) => ({
+    notes: deps.db,
   }))
 
   // Health: proves setup ran, deps resolved, config loaded

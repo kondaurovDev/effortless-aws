@@ -13,17 +13,17 @@ export const mcp = defineMcp({
   .config(({ defineSecret }) => ({
     mcpToken: defineSecret({ key: "mcp-token", generate: "hex:32" }),
   }))
-  .setup(({ deps, config, enableAuth }) => ({
-    db: deps.db,
-    auth: enableAuth({
-      secret: config.mcpToken,
-      apiToken: {
-        verify: async (token: string) => {
-          if (token === config.mcpToken) return { role: "mcp-client" };
-          return null;
-        },
+  .auth(({ config }) => ({
+    secret: config.mcpToken,
+    apiToken: {
+      verify: async (token: string) => {
+        if (token === config.mcpToken) return { role: "mcp-client" };
+        return null;
       },
-    }),
+    },
+  }))
+  .setup(({ deps }) => ({
+    db: deps.db,
   }))
   .resource({
     uri: "resource://contacts/{id}",
