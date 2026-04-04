@@ -1,4 +1,4 @@
-import type { StaticSiteHandler, MiddlewareRequest, MiddlewareRedirect, MiddlewareResult } from "../handlers/define-static-site";
+import type { DistributionHandler, MiddlewareRequest, MiddlewareRedirect, MiddlewareResult } from "../handlers/define-distribution";
 
 type CfHeader = { key?: string; value: string };
 type CfHeaders = Record<string, CfHeader[]>;
@@ -109,8 +109,8 @@ export const wrapMiddlewareFn = (
   };
 };
 
-export const wrapMiddleware = (handler: StaticSiteHandler) => {
-  const middleware = (handler as any).__spec.middleware as (
+export const wrapMiddleware = (handler: DistributionHandler) => {
+  const middleware = (handler as any).middleware as (
     request: MiddlewareRequest
   ) => Promise<MiddlewareResult> | MiddlewareResult;
   return wrapMiddlewareFn(middleware);

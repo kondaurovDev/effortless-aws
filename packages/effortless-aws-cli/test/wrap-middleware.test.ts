@@ -1,15 +1,17 @@
 import { describe, it, expect } from "vitest"
 import { wrapMiddleware, wrapMiddlewareFn } from "~aws/runtime/wrap-middleware"
-import type { StaticSiteHandler, MiddlewareRequest, MiddlewareResult } from "~aws/handlers/define-static-site"
+import type { DistributionHandler, MiddlewareRequest, MiddlewareResult } from "~aws/handlers/define-distribution"
 import { generateMiddlewareEntryPoint } from "~cli/build/handler-registry"
 
 const makeHandler = (
   middleware: (req: MiddlewareRequest) => Promise<MiddlewareResult> | MiddlewareResult
-): StaticSiteHandler =>
+): DistributionHandler =>
   ({
     __brand: "effortless-static-site",
-    __spec: { dir: "dist", middleware },
-  }) as StaticSiteHandler;
+    __spec: {},
+    routes: [{ pattern: "/*", origin: { dir: "dist" } }],
+    middleware,
+  }) as DistributionHandler;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const makeCfEvent = (overrides: {
@@ -242,15 +244,15 @@ describe("generateMiddlewareEntryPoint", () => {
 
   it("should extract middleware from named export", () => {
     const source = `
-      import { defineStaticSite } from "effortless-aws";
+      import { defineDistribution } from "effortless-aws";
       import { Auth } from "../core";
-      export const webapp = defineStaticSite({
-        dir: "dist",
-        middleware: (request) => {
+      export const webapp = defineDistribution()
+        .route("/*", { dir: "dist" })
+        .middleware((request) => {
           if (request.cookies[Auth.COOKIE] === Auth.TOKEN) return;
           return { redirect: "/login" };
-        },
-      });
+        })
+        .build();
     `;
     const { entryPoint, exportName } = generateMiddlewareEntryPoint(source, "/fake/runtime");
     expect(exportName).toBe("webapp");
@@ -259,20 +261,20 @@ describe("generateMiddlewareEntryPoint", () => {
     expect(entryPoint).toContain("Auth.COOKIE");
     expect(entryPoint).toContain("Auth.TOKEN");
     // Should NOT contain unused imports or handler config
-    expect(entryPoint).not.toContain("defineStaticSite");
+    expect(entryPoint).not.toContain("defineDistribution");
     expect(entryPoint).not.toContain('dir: "dist"');
   });
 
   it("should extract middleware from default export", () => {
     const source = `
-      import { defineStaticSite } from "effortless-aws";
-      export default defineStaticSite({
-        dir: "dist",
-        middleware: (req) => {
+      import { defineDistribution } from "effortless-aws";
+      export default defineDistribution()
+        .route("/*", { dir: "dist" })
+        .middleware((req) => {
           if (req.uri === "/health") return;
           return { redirect: "/login" };
-        },
-      });
+        })
+        .build();
     `;
     const { entryPoint, exportName } = generateMiddlewareEntryPoint(source, "/fake/runtime");
     expect(exportName).toBe("default");
@@ -282,30 +284,32 @@ describe("generateMiddlewareEntryPoint", () => {
 
   it("should only include imports referenced by middleware", () => {
     const source = `
-      import { defineStaticSite } from "effortless-aws";
+      import { defineDistribution } from "effortless-aws";
       import { Auth } from "../core/auth";
       import { Config } from "../config";
       import { HttpClient } from "../core/services";
-      export const site = defineStaticSite({
-        dir: "dist",
-        middleware: (req) => {
+      export const site = defineDistribution()
+        .route("/*", { dir: "dist" })
+        .middleware((req) => {
           if (req.cookies[Auth.NAME] === Config.TOKEN) return;
           return { redirect: "/login" };
-        },
-      });
+        })
+        .build();
     `;
     const { entryPoint } = generateMiddlewareEntryPoint(source, "/fake/runtime");
     expect(entryPoint).toContain('import { Auth } from "../core/auth"');
     expect(entryPoint).toContain('import { Config } from "../config"');
     // Unused imports should be excluded
-    expect(entryPoint).not.toContain("defineStaticSite");
+    expect(entryPoint).not.toContain("defineDistribution");
     expect(entryPoint).not.toContain("HttpClient");
   });
 
   it("should throw when no middleware found", () => {
     const source = `
-      import { defineStaticSite } from "effortless-aws";
-      export const site = defineStaticSite({ dir: "dist" });
+      import { defineDistribution } from "effortless-aws";
+      export const site = defineDistribution()
+        .route("/*", { dir: "dist" })
+        .build();
     `;
     expect(() => generateMiddlewareEntryPoint(source, "/fake/runtime")).toThrow(
       "Could not extract middleware function"
