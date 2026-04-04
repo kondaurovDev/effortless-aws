@@ -8,7 +8,9 @@
     "deploy": "eff deploy"
   },
   "dependencies": {
-    "effortless-aws": "workspace:*"
+    "effortless-aws": "workspace:*",
+    "effect": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@effortless-aws/cli": "workspace:*",

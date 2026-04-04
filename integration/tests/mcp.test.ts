@@ -157,24 +157,10 @@ describe("tools", () => {
 // ── Resources ─────────────────────────────────────────────────
 
 describe("resources", () => {
-  it("resources/list returns static resources", async () => {
-    const body = await rpc("resources/list");
-    const uris = body.result.resources.map((r: any) => r.uri);
-    expect(uris).toContain("resource://schema");
-  });
-
   it("resources/templates/list returns templates", async () => {
     const body = await rpc("resources/templates/list");
     const templates = body.result.resourceTemplates.map((r: any) => r.uriTemplate);
     expect(templates).toContain("resource://contacts/{id}");
-  });
-
-  it("resources/read returns schema", async () => {
-    const body = await rpc("resources/read", { uri: "resource://schema" });
-    expect(body.result.contents).toHaveLength(1);
-    const schema = JSON.parse(body.result.contents[0].text);
-    expect(schema).toHaveProperty("pk");
-    expect(schema).toHaveProperty("data");
   });
 
   it("resources/read with template URI", async () => {

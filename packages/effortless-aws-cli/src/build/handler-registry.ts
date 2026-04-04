@@ -71,7 +71,7 @@ export const handlerRegistry = {
   },
   mcp: {
     defineFn: "defineMcp",
-    handlerProps: ["tools"],
+    handlerProps: ["tools", "resources", "prompts"],
     wrapperFn: "wrapMcp",
     wrapperPath: "~/runtime/wrap-mcp",
   },

@@ -75,7 +75,7 @@ export const checkForUpdate = (currentVersion: string) =>
       const border = "┌─────────────────────────────────────────┐";
       const bottom = "└─────────────────────────────────────────┘";
       const pad = (line: string, width: number) => {
-        const visible = line.replace(/\x1b\[[0-9;]*m/g, "");
+        const visible = line.replace(new RegExp(String.fromCharCode(27) + "\\[[0-9;]*m", "g"), "");
         return line + " ".repeat(Math.max(0, width - visible.length));
       };
       const W = 39;

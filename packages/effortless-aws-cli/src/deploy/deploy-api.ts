@@ -5,7 +5,6 @@ import {
   Aws,
   ensureFunctionUrl,
   addFunctionUrlPublicAccess,
-  makeTags,
   resolveStage,
   type TagContext
 } from "../aws";

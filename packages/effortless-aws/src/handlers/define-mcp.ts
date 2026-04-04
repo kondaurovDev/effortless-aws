@@ -1,3 +1,4 @@
+import type { StandardSchemaV1, StandardJSONSchemaV1 } from "@standard-schema/spec";
 import type { AnySecretRef, ResolveConfig, LambdaWithPermissions, ConfigFactory, LambdaOptions } from "./handler-options";
 import { resolveConfigFactory } from "./handler-options";
 import type { AnyDepHandler, ResolveDeps } from "./handler-deps";
@@ -45,31 +46,50 @@ export type McpResourceContent =
   | { uri: string; mimeType?: string; text: string }
   | { uri: string; mimeType?: string; blob: string };
 
-/** A static resource definition */
+/** Legacy resource content result type used by runtime internals */
+type McpResourceResult = McpResourceContent | McpResourceContent[] | Promise<McpResourceContent | McpResourceContent[]>;
+
+/** Infer resource params type from schema, or fall back to Record<string, string> */
+type InferResourceParams<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : Record<string, string>;
+
+/** Resource definition — pass `params` for typed schema validation on URI template params */
+export type McpResourceDefInput<S extends StandardSchemaV1 | undefined = undefined> = {
+  /** Resource URI or URI template (e.g. "resource://contacts/{id}") */
+  uri: string;
+  /** Human-readable name */
+  name: string;
+  /** Schema for URI template params — provides type inference + validation */
+  params?: S;
+  /** Optional description */
+  description?: string;
+  /** Optional MIME type */
+  mimeType?: string;
+};
+
+/** What resource handlers can return — plain data is auto-wrapped by the runtime */
+type McpResourceReturn = unknown | Promise<unknown>;
+
+/** Resource handler — receives params (typed or Record<string, string>) and ctx */
+type McpResourceHandler<C, S = undefined> = (params: InferResourceParams<S>, ctx: SpreadCtx<C>) => McpResourceReturn;
+
+// Legacy types used by wrap-mcp runtime
+/** @internal */
 export type McpResourceDef<C = undefined> = {
-  /** Human-readable name */
   name: string;
-  /** Optional description */
   description?: string;
-  /** Optional MIME type */
   mimeType?: string;
-  /** Handler called on resources/read */
-  handler: (ctx: SpreadCtx<C>) => McpResourceContent | McpResourceContent[] | Promise<McpResourceContent | McpResourceContent[]>;
+  handler: (ctx: SpreadCtx<C>) => McpResourceResult;
 };
 
-/** A parameterized resource template (URI template RFC 6570) */
+/** @internal */
 export type McpResourceTemplateDef<C = undefined> = {
-  /** Human-readable name */
   name: string;
-  /** Optional description */
   description?: string;
-  /** Optional MIME type */
   mimeType?: string;
-  /** Handler called on resources/read — receives matched URI params */
-  handler: (params: Record<string, string>, ctx: SpreadCtx<C>) => McpResourceContent | McpResourceContent[] | Promise<McpResourceContent | McpResourceContent[]>;
+  handler: (params: Record<string, string>, ctx: SpreadCtx<C>) => McpResourceResult;
 };
 
-/** Map of uri → resource definition, or uriTemplate → template definition */
+/** @internal */
 export type McpResourceMap<C = undefined> = {
   [uriOrTemplate: string]: McpResourceDef<C> | McpResourceTemplateDef<C>;
 };
@@ -105,25 +125,47 @@ export type McpPromptResult = {
   messages: McpPromptMessage[];
 };
 
-/** A single prompt definition */
+/** @internal Legacy prompt definition used by runtime */
 export type McpPromptDef<C = undefined> = {
-  /** Human-readable description */
   description?: string;
-  /** Arguments this prompt accepts */
   arguments?: McpPromptArgument[];
-  /** Handler called on prompts/get — receives argument values */
   handler: (args: Record<string, string>, ctx: SpreadCtx<C>) => McpPromptResult | Promise<McpPromptResult>;
 };
 
-/** A single MCP tool definition */
-export type McpToolDef<C = undefined> = {
+/** Infer prompt args type from schema, or fall back to Record<string, string> */
+type InferPromptArgs<S> = S extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<S> : Record<string, string>;
+
+/** Prompt definition — pass a Standard Schema for `args` for typed validation, or McpPromptArgument[] for untyped */
+export type McpPromptDefInput<S extends StandardSchemaV1 | McpPromptArgument[] | undefined = undefined> = {
+  /** Prompt name */
+  name: string;
+  /** Human-readable description */
+  description?: string;
+  /** Args: Standard Schema for typed validation, or McpPromptArgument[] for untyped */
+  args?: S;
+};
+
+/** Handler return: string auto-wraps as user message, or return full McpPromptResult */
+type McpPromptReturn = string | McpPromptResult | Promise<string | McpPromptResult>;
+
+/** Prompt handler — receives args (typed or Record<string, string>) and ctx */
+type McpPromptHandler<C, S = undefined> = (args: InferPromptArgs<S>, ctx: SpreadCtx<C>) => McpPromptReturn;
+
+/** Infer tool input type from schema, or fall back to any */
+type InferToolInput<S> = S extends StandardJSONSchemaV1 ? StandardJSONSchemaV1.InferOutput<S> : any;
+
+/** Tool definition — pass a StandardJSONSchemaV1 for `input` for typed validation, or McpInputSchema for raw JSON Schema */
+export type McpToolDefInput<S extends StandardJSONSchemaV1 | McpInputSchema = McpInputSchema> = {
+  /** Tool name */
+  name: string;
   /** Human-readable description of the tool */
   description: string;
-  /** JSON Schema describing the tool's input parameters */
-  input: McpInputSchema;
-  /** Handler function called when the tool is invoked */
-  handler: (input: any, ctx: SpreadCtx<C>) => McpToolResult | Promise<McpToolResult>;
+  /** Schema for tool input: StandardJSONSchemaV1 (e.g. z.object({...})) or raw McpInputSchema */
+  input: S;
 };
+
+/** Tool handler — receives input (typed or any) and ctx */
+type McpToolHandler<C, S = McpInputSchema> = (input: InferToolInput<S>, ctx: SpreadCtx<C>) => unknown | Promise<unknown>;
 
 // ============ Setup args ============
 
@@ -156,6 +198,21 @@ export type McpHandler<C = any> = {
   readonly prompts?: (...args: any[]) => any;
   readonly tools?: (...args: any[]) => any;
 };
+
+// ============ McpEntries — returned after first singular method ============
+
+/**
+ * Finalized MCP handler with chainable registration methods.
+ * Has `__brand` so CLI discovers it. Each `.tool()/.resource()/.prompt()` adds an entry and returns self.
+ */
+export interface McpEntries<C = undefined> extends McpHandler<C> {
+  /** Register a tool */
+  tool<S extends StandardJSONSchemaV1 | McpInputSchema = McpInputSchema>(def: McpToolDefInput<S>, handler: McpToolHandler<C, S>): McpEntries<C>;
+  /** Register a resource */
+  resource<S extends StandardSchemaV1 | undefined = undefined>(def: McpResourceDefInput<S>, handler: McpResourceHandler<C, S>): McpEntries<C>;
+  /** Register a prompt */
+  prompt<S extends StandardSchemaV1 | McpPromptArgument[] | undefined = undefined>(def: McpPromptDefInput<S>, handler: McpPromptHandler<C, S>): McpEntries<C>;
+}
 
 // ============ Options ============
 
@@ -214,20 +271,15 @@ interface McpBuilder<
     fn: (args: SpreadCtx<C>) => void | Promise<void>
   ): McpBuilder<D, P, C, HasFiles>;
 
-  /** Define MCP resources (chainable) */
-  resources(
-    fn: (ctx: SpreadCtx<C>) => McpResourceMap<C>
-  ): McpBuilder<D, P, C, HasFiles>;
+  /** Register a tool */
+  tool<S extends StandardJSONSchemaV1 | McpInputSchema = McpInputSchema>(def: McpToolDefInput<S>, handler: McpToolHandler<C, S>): McpEntries<C>;
+  /** Register a resource */
+  resource<S extends StandardSchemaV1 | undefined = undefined>(def: McpResourceDefInput<S>, handler: McpResourceHandler<C, S>): McpEntries<C>;
+  /** Register a prompt */
+  prompt<S extends StandardSchemaV1 | McpPromptArgument[] | undefined = undefined>(def: McpPromptDefInput<S>, handler: McpPromptHandler<C, S>): McpEntries<C>;
 
-  /** Define MCP prompts (chainable) */
-  prompts(
-    fn: (ctx: SpreadCtx<C>) => Record<string, McpPromptDef<C>>
-  ): McpBuilder<D, P, C, HasFiles>;
-
-  /** Define MCP tools (terminal) */
-  tools(
-    fn: (ctx: SpreadCtx<C>) => Record<string, McpToolDef<C>>
-  ): McpHandler<C>;
+  /** Finalize the handler without adding more entries */
+  build(): McpHandler<C>;
 }
 
 // ============ Implementation ============
@@ -256,10 +308,10 @@ export function defineMcp(options: McpOptions): McpBuilder {
     setup?: (...args: any[]) => any;
     onError?: (...args: any[]) => any;
     onCleanup?: (...args: any[]) => any;
-    resources?: (...args: any[]) => any;
-    prompts?: (...args: any[]) => any;
-    tools?: (...args: any[]) => any;
-  } = { spec };
+    toolEntries: [string, any][];
+    resourceEntries: [string, any][];
+    promptEntries: [string, any][];
+  } = { spec, toolEntries: [], resourceEntries: [], promptEntries: [] };
 
   const applyLambdaOptions = (lambda: LambdaOptions) => {
     if (Object.keys(lambda).length > 0) {
@@ -267,19 +319,66 @@ export function defineMcp(options: McpOptions): McpBuilder {
     }
   };
 
-  const finalize = (): McpHandler => ({
-    __brand: "effortless-mcp",
-    __spec: state.spec,
-    ...(state.onError ? { onError: state.onError } : {}),
-    ...(state.onCleanup ? { onCleanup: state.onCleanup } : {}),
-    ...(state.setup ? { setup: state.setup } : {}),
-    ...(state.deps ? { deps: state.deps } : {}),
-    ...(state.config ? { config: state.config } : {}),
-    ...(state.static ? { static: state.static } : {}),
-    ...(state.resources ? { resources: state.resources } : {}),
-    ...(state.prompts ? { prompts: state.prompts } : {}),
-    ...(state.tools ? { tools: state.tools } : {}),
-  }) as McpHandler;
+  // Build factory functions from accumulated entries
+  const buildToolsFactory = () =>
+    state.toolEntries.length > 0
+      ? () => Object.fromEntries(state.toolEntries)
+      : undefined;
+
+  const buildResourcesFactory = () =>
+    state.resourceEntries.length > 0
+      ? () => Object.fromEntries(state.resourceEntries)
+      : undefined;
+
+  const buildPromptsFactory = () =>
+    state.promptEntries.length > 0
+      ? () => Object.fromEntries(state.promptEntries)
+      : undefined;
+
+  const finalize = (): McpHandler => {
+    const tools = buildToolsFactory();
+    const resources = buildResourcesFactory();
+    const prompts = buildPromptsFactory();
+    return {
+      __brand: "effortless-mcp",
+      __spec: state.spec,
+      ...(state.onError ? { onError: state.onError } : {}),
+      ...(state.onCleanup ? { onCleanup: state.onCleanup } : {}),
+      ...(state.setup ? { setup: state.setup } : {}),
+      ...(state.deps ? { deps: state.deps } : {}),
+      ...(state.config ? { config: state.config } : {}),
+      ...(state.static ? { static: state.static } : {}),
+      ...(resources ? { resources } : {}),
+      ...(prompts ? { prompts } : {}),
+      ...(tools ? { tools } : {}),
+    } as McpHandler;
+  };
+
+  const finalizeWithEntries = (): McpEntries => {
+    const handler: any = finalize();
+
+    handler.tool = (def: any, fn: any) => {
+      state.toolEntries.push([def.name, { description: def.description, input: def.input, handler: fn }]);
+      handler.tools = buildToolsFactory();
+      return handler;
+    };
+
+    handler.resource = (def: any, fn: any) => {
+      const entry = { name: def.name, ...(def.description ? { description: def.description } : {}), ...(def.mimeType ? { mimeType: def.mimeType } : {}), handler: fn, ...(def.params ? { params: def.params } : {}) };
+      state.resourceEntries.push([def.uri, entry]);
+      handler.resources = buildResourcesFactory();
+      return handler;
+    };
+
+    handler.prompt = (def: any, fn: any) => {
+      const entry = { ...(def.description ? { description: def.description } : {}), args: def.args, handler: fn };
+      state.promptEntries.push([def.name, entry]);
+      handler.prompts = buildPromptsFactory();
+      return handler;
+    };
+
+    return handler as McpEntries;
+  };
 
   const builder: McpBuilder = {
     deps(fn) {
@@ -311,16 +410,21 @@ export function defineMcp(options: McpOptions): McpBuilder {
       state.onCleanup = fn as any;
       return builder as any;
     },
-    resources(fn) {
-      state.resources = fn as any;
-      return builder as any;
+    tool(def: any, fn: any) {
+      state.toolEntries.push([def.name, { description: def.description, input: def.input, handler: fn }]);
+      return finalizeWithEntries() as any;
     },
-    prompts(fn) {
-      state.prompts = fn as any;
-      return builder as any;
+    resource(def: any, fn: any) {
+      const entry = { name: def.name, ...(def.description ? { description: def.description } : {}), ...(def.mimeType ? { mimeType: def.mimeType } : {}), handler: fn, ...(def.params ? { params: def.params } : {}) };
+      state.resourceEntries.push([def.uri, entry]);
+      return finalizeWithEntries() as any;
     },
-    tools(fn) {
-      state.tools = fn as any;
+    prompt(def: any, fn: any) {
+      const entry = { ...(def.description ? { description: def.description } : {}), args: def.args, handler: fn };
+      state.promptEntries.push([def.name, entry]);
+      return finalizeWithEntries() as any;
+    },
+    build() {
       return finalize() as any;
     },
   };

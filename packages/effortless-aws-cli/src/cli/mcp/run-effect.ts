@@ -9,7 +9,6 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { CliContext, makeCliContext } from "~/cli/cli-context";
 import { ProjectConfig } from "~/cli/project-config";
 import { DEFAULT_STAGE, DEFAULT_REGION } from "~/cli/config";
-import { Aws } from "~/aws";
 
 /**
  * Build the full Effect layer stack for MCP tool execution.

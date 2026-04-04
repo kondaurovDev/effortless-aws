@@ -14,7 +14,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "database-url" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -34,7 +34,7 @@ describe("params extraction", () => {
             dbUrl: defineSecret({ key: "database-url" }),
             apiKey: defineSecret({ key: "stripe-api-key" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -55,7 +55,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             appConfig: defineSecret({ key: "app-config" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -71,7 +71,7 @@ describe("params extraction", () => {
         import { defineApi } from "effortless-aws";
 
         export const hello = defineApi({ basePath: "/hello" })
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -88,7 +88,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "database-url" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -108,7 +108,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "database-url" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -130,7 +130,7 @@ describe("params extraction", () => {
             authSecret: defineSecret(),
             dbUrl: defineSecret(),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -149,7 +149,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             dbUrl: defineSecret({ key: "my-custom-key" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -167,7 +167,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             authSecret: defineSecret({ generate: "hex:32" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -185,7 +185,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             token: defineSecret({ generate: "base64:16" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -203,7 +203,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             instanceId: defineSecret({ generate: "uuid" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);
@@ -221,7 +221,7 @@ describe("params extraction", () => {
           .config(({ defineSecret }) => ({
             hmacKey: defineSecret({ key: "hmac-secret", generate: "hex:64" }),
           }))
-          .get("/", () => ({}));
+          .get({ path: "/" }, () => ({}));
       `;
 
       const configs = await extractApiConfigs(source);

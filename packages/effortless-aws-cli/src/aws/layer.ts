@@ -485,7 +485,7 @@ export const collectLayerPackages = (projectDir: string, dependencies: string[])
   let changed = true;
   while (changed) {
     changed = false;
-    for (const pkg of [...packages]) {
+    for (const pkg of Array.from(packages)) {
       if (isAwsRuntime(pkg)) continue;
 
       // Collect all known locations for this package (may differ when multiple versions exist)

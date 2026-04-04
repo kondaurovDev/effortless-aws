@@ -2,9 +2,7 @@ import { Effect, Console } from "effect";
 import { c } from "~/cli/colors";
 import {
   Aws,
-  makeTags,
   resolveStage,
-  type TagContext,
   ensureLayer,
   readProductionDependencies,
   collectLayerPackages,
@@ -1242,9 +1240,9 @@ const deployResources = (input: {
 
       yield* Effect.all(phase1Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
 
-      // Build map: API export name → Lambda Function URL domain
+      // Build map: API/MCP export name → Lambda Function URL domain
       const apiUrlMap = new Map<string, string>();
-      for (const r of apiResults) {
+      for (const r of [...apiResults, ...mcpResults]) {
         apiUrlMap.set(r.exportName, r.url.replace("https://", "").replace(/\/$/, ""));
       }
 

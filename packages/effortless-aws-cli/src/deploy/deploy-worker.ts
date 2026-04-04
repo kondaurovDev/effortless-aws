@@ -13,7 +13,6 @@ import {
   makeTags,
   resolveStage,
   type TagContext,
-  Aws,
 } from "../aws";
 import { sqs, s3 } from "../aws/clients";
 import type { DeployInput } from "./shared";
@@ -103,13 +102,6 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
       queueUrl = existingQueueUrl;
     }
 
-    // Get queue ARN for IAM
-    const queueAttrs = yield* sqs.make("get_queue_attributes", {
-      QueueUrl: queueUrl,
-      AttributeNames: ["QueueArn"],
-    });
-    const queueArn = queueAttrs.Attributes?.QueueArn!;
-
     // 2. Bundle code (same pipeline as Lambda)
     yield* Effect.logDebug("Bundling worker code...");
     const { code } = yield* bundle({
@@ -187,7 +179,7 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
       EFF_IDLE_TIMEOUT: String(idleTimeoutSec),
       EFF_CLUSTER: clusterName,
       EFF_SERVICE: serviceName,
-      ...(depsEnv ?? {}),
+      ...depsEnv,
     };
 
     const taskDefinitionArn = yield* ensureTaskDefinition({

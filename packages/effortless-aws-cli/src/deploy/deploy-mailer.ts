@@ -24,7 +24,7 @@ type DeployMailerInput = {
 };
 
 /** @internal */
-export const deployMailer = ({ project, stage, region, fn }: DeployMailerInput) =>
+export const deployMailer = ({ project, stage, region: _region, fn }: DeployMailerInput) =>
   Effect.gen(function* () {
     const { exportName, config } = fn;
     const handlerName = exportName;

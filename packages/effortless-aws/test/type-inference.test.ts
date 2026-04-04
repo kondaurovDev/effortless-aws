@@ -26,7 +26,7 @@ describe("defineApi type inference", () => {
 
   it("route handler receives input arg", () => {
     defineApi({ basePath: "/hello" })
-      .get("/check", async ({ input }) => {
+      .get({ path: "/check" }, async ({ input }) => {
         const data = input as User;
         type _data = Expect<Equal<typeof data, User>>;
         return { status: 200 };
@@ -35,7 +35,7 @@ describe("defineApi type inference", () => {
 
   it("route handler receives req without validate", () => {
     defineApi({ basePath: "/hello" })
-      .get("/raw", async ({ req }) => {
+      .get({ path: "/raw" }, async ({ req }) => {
         type _req = Expect<Equal<typeof req, HttpRequest>>;
         return { status: 200 };
       });
@@ -44,7 +44,7 @@ describe("defineApi type inference", () => {
   it("setup → properties spread into route handler", () => {
     defineApi({ basePath: "/test" })
       .setup(() => ({ db: "pg-pool" as const, ready: true }))
-      .get("/index", async ({ db, ready }) => {
+      .get({ path: "/index" }, async ({ db, ready }) => {
         type _db = Expect<Equal<typeof db, "pg-pool">>;
         type _ready = Expect<Equal<typeof ready, boolean>>;
         return { status: 200 };
@@ -58,7 +58,7 @@ describe("defineApi type inference", () => {
         type _deps = Expect<Equal<typeof deps.usersTable, TableClient<User>>>;
         return { users: deps.usersTable };
       })
-      .get("/index", async ({ users }) => {
+      .get({ path: "/index" }, async ({ users }) => {
         type _users = Expect<Equal<typeof users, TableClient<User>>>;
         return { status: 200 };
       });
@@ -75,7 +75,7 @@ describe("defineApi type inference", () => {
         type _retries = Expect<Equal<typeof config.maxRetries, number>>;
         return { dbUrl: config.dbUrl, maxRetries: config.maxRetries };
       })
-      .get("/index", async ({ dbUrl }) => {
+      .get({ path: "/index" }, async ({ dbUrl }) => {
         type _url = Expect<Equal<typeof dbUrl, string>>;
         return { status: 200 };
       });
@@ -88,7 +88,7 @@ describe("defineApi type inference", () => {
         type _files = Expect<Equal<typeof files, StaticFiles>>;
         return { tpl: files };
       })
-      .get("/index", async ({ tpl }) => {
+      .get({ path: "/index" }, async ({ tpl }) => {
         type _tpl = Expect<Equal<typeof tpl, StaticFiles>>;
         return { status: 200 };
       });
@@ -98,12 +98,12 @@ describe("defineApi type inference", () => {
     defineApi({ basePath: "/test" })
       // @ts-expect-error — 'req' is a reserved key
       .setup(() => ({ req: "forbidden" }))
-      .get("/", () => ({ status: 200 }));
+      .get({ path: "/" }, () => ({ status: 200 }));
   });
 
   it("return type is ApiHandler with correct brand", () => {
     const handler = defineApi({ basePath: "/test" })
-      .get("/index", async () => ({ status: 200 }));
+      .get({ path: "/index" }, async () => ({ status: 200 }));
     expectTypeOf(handler.__brand).toEqualTypeOf<"effortless-api">();
   });
 

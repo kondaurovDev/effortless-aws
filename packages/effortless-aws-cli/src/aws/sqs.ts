@@ -1,6 +1,5 @@
 import { Effect } from "effect";
 import { sqs, lambda } from "./clients";
-import { toAwsTagList } from "./tags";
 
 export type EnsureFifoQueueInput = {
   name: string;

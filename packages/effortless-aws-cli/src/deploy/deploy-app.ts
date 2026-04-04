@@ -4,7 +4,6 @@ import { toSeconds } from "effortless-aws";
 import type { ExtractedAppFunction } from "~/build/bundle";
 import { zipDirectory, detectAssetPatterns } from "~/build/bundle";
 import {
-  Aws,
   makeTags,
   resolveStage,
   type TagContext,

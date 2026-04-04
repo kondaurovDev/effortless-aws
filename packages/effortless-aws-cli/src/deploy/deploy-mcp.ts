@@ -3,7 +3,6 @@ import { toSeconds } from "effortless-aws";
 import type { ExtractedMcpFunction } from "~/build/bundle";
 import {
   type DeployInput,
-  type DeployResult,
   deployCoreLambda,
 } from "./shared";
 

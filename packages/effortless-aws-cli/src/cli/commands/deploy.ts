@@ -5,7 +5,7 @@ import { Effect, Console, Option } from "effect";
 import { deploy, deployTable, deployAllTables, deployProject, type DeployTableResult, type DeployProjectResult } from "~/deploy/deploy";
 import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
 import { Aws } from "../../aws";
-import { projectOption, stageOption, regionOption, verboseOption, noSitesOption, dryRunOption, getPatternsFromConfig } from "~/cli/config";
+import { projectOption, stageOption, regionOption, verboseOption, noSitesOption, dryRunOption } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
 

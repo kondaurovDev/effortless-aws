@@ -82,7 +82,7 @@ export type BucketObjectRemovedFn<C = undefined> =
  * Internal handler object created by defineBucket
  * @internal
  */
-export type BucketHandler<C = any, Entities extends Record<string, any> = {}> = {
+export type BucketHandler<C = any, _Entities extends Record<string, any> = {}> = {
   readonly __brand: "effortless-bucket";
   readonly __spec: BucketConfig;
   readonly onError?: (...args: any[]) => any;

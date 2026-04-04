@@ -54,6 +54,7 @@
     "typescript": "catalog:",
     "vite-tsconfig-paths": "catalog:",
     "@modelcontextprotocol/sdk": "catalog:",
+    "@standard-schema/spec": "catalog:",
     "vitest": "catalog:"
   }
 }

@@ -11,7 +11,6 @@ import {
 } from "../aws";
 import {
   type DeployInput,
-  type DeployTableResult,
   deployCoreLambda,
   ensureLayerAndExternal
 } from "./shared";

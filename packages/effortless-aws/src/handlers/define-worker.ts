@@ -48,7 +48,7 @@ export type WorkerMessageFn<T, C = undefined> =
  * Handler object created by defineWorker.
  * @internal
  */
-export type WorkerHandler<T = any, C = any> = {
+export type WorkerHandler<_T = any, C = any> = {
   readonly __brand: "effortless-worker";
   readonly __spec: WorkerConfig;
   readonly onError?: (...args: any[]) => any;

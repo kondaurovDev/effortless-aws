@@ -1,4 +1,5 @@
 import { defineApi } from "effortless-aws";
+import { Schema as S } from "effect";
 import { db } from "./table";
 
 // ── Session type ───────────────────────────────────────────────
@@ -29,55 +30,60 @@ export const api = defineApi({ basePath: "/api" })
   }))
 
   // Health: proves setup ran, deps resolved, config loaded
-  .get("/health", async ({ notes, ok }) =>
+  .get({ path: "/health", public: true }, async ({ notes, ok }) =>
     ok({ status: "ok", hasTable: !!notes }),
-    { public: true },
   )
 
   // Auth: login (public)
-  .post("/login", async ({ input, auth }) => {
-    const { userId } = input as { userId: string };
-    return auth.createSession({ userId });
-  }, { public: true })
+  .post({
+    path: "/login",
+    input: S.toStandardSchemaV1(S.Struct({ userId: S.String })),
+    public: true,
+  }, async ({ input, auth }) => {
+    return auth.createSession({ userId: input.userId });
+  })
 
   // Auth: get current session (requires auth)
-  .get("/me", async ({ auth, ok }) =>
+  .get({ path: "/me" }, async ({ auth, ok }) =>
     ok({ session: auth.session }),
   )
 
   // Auth: logout (requires auth)
-  .post("/logout", async ({ auth }) =>
+  .post({ path: "/logout" }, async ({ auth }) =>
     auth.clearSession(),
   )
 
   // Table CRUD: create note (public for easy testing)
-  .post("/notes", async ({ input, notes, ok }) => {
-    const { pk, sk, title, content } = input as { pk: string; sk: string; title: string; content: string };
-    await notes.put({ pk, sk, data: { tag: "note" as const, title, content } });
+  .post({
+    path: "/notes",
+    input: S.toStandardSchemaV1(S.Struct({ pk: S.String, sk: S.String, title: S.String, content: S.String })),
+    public: true,
+  }, async ({ input, notes, ok }) => {
+    await notes.put({ pk: input.pk, sk: input.sk, data: { tag: "note" as const, title: input.title, content: input.content } });
     return ok({ created: true }, 201);
-  }, { public: true })
+  })
 
   // Table CRUD: get note by pk + sk
-  .get("/notes/{pk}/{sk}", async ({ req, notes, ok, fail }) => {
+  .get({ path: "/notes/{pk}/{sk}", public: true }, async ({ req, notes, ok, fail }) => {
     const item = await notes.get({ pk: req.params.pk!, sk: req.params.sk! });
     if (!item) return fail("not found", 404);
     return ok(item);
-  }, { public: true })
+  })
 
   // Table CRUD: list notes by pk
-  .get("/notes/{pk}", async ({ req, notes, ok }) => {
+  .get({ path: "/notes/{pk}", public: true }, async ({ req, notes, ok }) => {
     const items = await notes.query({ pk: req.params.pk! });
     return ok({ items });
-  }, { public: true })
+  })
 
   // Table CRUD: delete note
-  .delete("/notes/{pk}/{sk}", async ({ req, notes, ok }) => {
+  .delete({ path: "/notes/{pk}/{sk}", public: true }, async ({ req, notes, ok }) => {
     await notes.delete({ pk: req.params.pk!, sk: req.params.sk! });
     return ok({ deleted: true });
-  }, { public: true })
+  })
 
   // Audit log: query stream events by note pk (same table, sk prefix)
-  .get("/audit/{pk}", async ({ req, notes, ok }) => {
+  .get({ path: "/audit/{pk}", public: true }, async ({ req, notes, ok }) => {
     const items = await notes.query({ pk: req.params.pk!, sk: { begins_with: "audit#" } });
     return ok({ items });
-  }, { public: true });
+  });

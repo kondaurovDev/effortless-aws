@@ -93,7 +93,7 @@ const deployMiddlewareLambda = (input: {
     const code = yield* zip({ content: bundled });
 
     // 3. Deploy Lambda to us-east-1 (x86_64, no env vars, no layers)
-    const { functionArn } = yield* ensureLambda({
+    yield* ensureLambda({
       project,
       stage,
       name: middlewareName,
