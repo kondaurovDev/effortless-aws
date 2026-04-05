@@ -1,5 +1,16 @@
 # effortless-aws
 
+## 0.36.0
+
+### Minor Changes
+
+- [`b59ce0d`](https://github.com/kondaurovDev/effortless-aws/commit/b59ce0d0fa9c4210b04d7f9c975268189e61dd5b) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - - Add `.auth()` builder method to `defineApi` and `defineMcp` for configuring authentication
+
+  - Remove `enableAuth` from `.setup()` options in favor of the new `.auth()` method
+
+- [`b59ce0d`](https://github.com/kondaurovDev/effortless-aws/commit/b59ce0d0fa9c4210b04d7f9c975268189e61dd5b) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - - Refactor `defineDistribution` back to `defineStaticSite` with a builder pattern: `.route()`, `.middleware()`, `.build()`
+  - Replace `spa: boolean` option with unified `errorPage` field for custom error page handling
+
 ## 0.35.0
 
 ### Minor Changes
