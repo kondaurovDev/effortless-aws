@@ -1,21 +1,5 @@
-/** Any branded handler that deploys to API Gateway (HttpHandler, ApiHandler, etc.) */
+/** Any branded handler that deploys to API Gateway or S3 */
 type AnyRoutableHandler = { readonly __brand: string };
-
-/** Route configuration for serving bucket content through CloudFront */
-export type BucketRouteConfig = {
-  bucket: { readonly __brand: "effortless-bucket" };
-  /** Access control: "private" requires CloudFront signed cookies, "public" serves openly. Default: "public" */
-  access?: "private" | "public";
-};
-
-/** A route value: either an API handler or a bucket route config */
-type RouteValue = AnyRoutableHandler | BucketRouteConfig;
-
-/** Type guard for bucket route entries */
-export const isBucketRoute = (v: unknown): v is BucketRouteConfig =>
-  v != null && typeof v === "object" && "bucket" in v &&
-  (v as any).bucket != null && typeof (v as any).bucket === "object" &&
-  (v as any).bucket.__brand === "effortless-bucket";
 
 /** Simplified request object passed to middleware */
 export type MiddlewareRequest = {
@@ -56,32 +40,32 @@ export type StaticSiteSeo = {
 };
 
 /**
- * Configuration for a static site handler (S3 + CloudFront)
+ * Configuration for a static site (S3 + CloudFront)
  */
 export type StaticSiteConfig = {
-  /** Handler name. Defaults to export name if not specified */
-  name?: string;
   /** Directory containing the static site files, relative to project root */
   dir: string;
   /** Default file for directory requests (default: "index.html") */
   index?: string;
-  /** SPA mode: serve index.html for all paths that don't match a file (default: false) */
-  spa?: boolean;
   /** Shell command to run before deploy to generate site content (e.g., "npx astro build") */
   build?: string;
+  /** Path to a custom error page relative to `dir`.
+   * - If set to the same value as `index` (e.g. "index.html"), enables SPA mode:
+   *   all paths that don't match a file are served with `index.html` (HTTP 200), letting the client-side router handle them.
+   * - If set to a different file (e.g. "404.html"), that file is served with HTTP 404 for missing paths.
+   * - If omitted, a default 404 page is auto-generated. */
+  errorPage?: string;
   /** Custom domain name. Accepts a string (same domain for all stages) or a Record mapping stage names to domains (e.g., `{ prod: "example.com", dev: "dev.example.com" }`). Requires an ACM certificate in us-east-1. If the cert also covers www, a 301 redirect from www to non-www is set up automatically. */
   domain?: string | Record<string, string>;
-  /** CloudFront route overrides: path patterns forwarded to API Gateway or S3 bucket origins.
-   * Keys are CloudFront path patterns (e.g., "/api/*"), values are HTTP handlers or bucket route configs.
-   * Example: `routes: { "/api/*": api, "/files/*": { bucket: storage, access: "private" } }` */
-  routes?: Record<string, RouteValue>;
-  /** Custom 404 error page path relative to `dir` (e.g. "404.html").
-   * For non-SPA sites only. If not set, a default page is generated automatically. */
-  errorPage?: string;
-  /** Lambda@Edge middleware that runs before serving pages. Use for auth checks, redirects, etc. */
-  middleware?: MiddlewareHandler;
   /** SEO: auto-generate sitemap.xml and robots.txt at deploy time, optionally submit URLs to Google Indexing API */
   seo?: StaticSiteSeo;
+};
+
+/** Route entry stored on the static site handler */
+type StaticSiteRouteEntry = {
+  pattern: string;
+  origin: AnyRoutableHandler;
+  access?: "private" | "public";
 };
 
 /**
@@ -91,17 +75,43 @@ export type StaticSiteConfig = {
 export type StaticSiteHandler = {
   readonly __brand: "effortless-static-site";
   readonly __spec: StaticSiteConfig;
+  readonly routes: StaticSiteRouteEntry[];
+  readonly middleware?: MiddlewareHandler;
 };
 
 /**
- * Deploy a static site via S3 + CloudFront CDN.
+ * Deploy a static site via S3 + CloudFront CDN, with optional API and bucket route overrides.
  *
  * @see {@link https://effortless-aws.website/use-cases/web-app | Web app guide}
  *
- * @param options - Static site configuration: directory, optional SPA mode, build command
- * @returns Handler object used by the deployment system
+ * @param options - Static site configuration: directory, optional SPA mode, build command, domain
+ * @returns Builder with `.route()`, `.middleware()`, and `.build()` methods
  */
-export const defineStaticSite = () => (options: StaticSiteConfig): StaticSiteHandler => ({
-  __brand: "effortless-static-site",
-  __spec: options,
-});
+export function defineStaticSite(options: StaticSiteConfig) {
+  const state = {
+    spec: { ...options },
+    routes: [] as StaticSiteRouteEntry[],
+    middleware: undefined as MiddlewareHandler | undefined,
+  };
+
+  const builder = {
+    route(pattern: string, origin: AnyRoutableHandler, opts?: { access?: "private" | "public" }) {
+      state.routes.push({ pattern, origin, ...(opts?.access ? { access: opts.access } : {}) });
+      return builder;
+    },
+    middleware(fn: MiddlewareHandler) {
+      state.middleware = fn;
+      return builder;
+    },
+    build(): StaticSiteHandler {
+      return {
+        __brand: "effortless-static-site",
+        __spec: state.spec,
+        routes: state.routes,
+        ...(state.middleware ? { middleware: state.middleware } : {}),
+      };
+    },
+  };
+
+  return builder;
+}

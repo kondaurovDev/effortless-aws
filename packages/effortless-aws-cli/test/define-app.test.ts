@@ -153,10 +153,8 @@ describe("defineApp extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite()({
-        dir: "dist",
-        build: "npm run build",
-      });
+      export const docs = defineStaticSite({ dir: "dist", build: "npm run build" })
+        .build();
     `;
 
     const configs = await extractAppConfigs(source);

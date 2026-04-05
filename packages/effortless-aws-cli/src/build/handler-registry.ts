@@ -1,4 +1,4 @@
-import { Project, SyntaxKind, type ObjectLiteralExpression, type PropertyAssignment, type ShorthandPropertyAssignment, type CallExpression, type Node } from "ts-morph";
+import { Project, SyntaxKind, type CallExpression, type Node } from "ts-morph";
 
 // ============ Types ============
 
@@ -148,45 +148,47 @@ const bareName = (expr: string): string => {
   return dot === -1 ? expr : expr.slice(dot + 1);
 };
 
-const getProp = (obj: ObjectLiteralExpression, name: string): Node | undefined => {
-  for (const p of obj.getProperties()) {
-    if (p.getKind() === SyntaxKind.PropertyAssignment && (p as PropertyAssignment).getName() === name) {
-      return (p as PropertyAssignment).getInitializer();
-    }
-    if (p.getKind() === SyntaxKind.ShorthandPropertyAssignment && (p as ShorthandPropertyAssignment).getName() === name) {
-      return (p as ShorthandPropertyAssignment).getNameNode();
+
+/** Walk a call expression chain to find a .middleware(fn) call and extract fn text */
+const findMiddlewareInChain = (node: Node): string | undefined => {
+  if (node.getKind() !== SyntaxKind.CallExpression) return undefined;
+  const call = node as CallExpression;
+  const expr = call.getExpression();
+
+  // Check if this is .middleware(fn)
+  if (expr.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const propName = expr.asKindOrThrow(SyntaxKind.PropertyAccessExpression).getName();
+    if (propName === "middleware") {
+      const arg = call.getArguments()[0];
+      return arg?.getText();
     }
   }
+
+  // Recurse into the object expression (the chain before this call)
+  if (expr.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const obj = expr.asKindOrThrow(SyntaxKind.PropertyAccessExpression).getExpression();
+    return findMiddlewareInChain(obj);
+  }
+
   return undefined;
 };
 
-const findDefineCalls = (sourceFile: ReturnType<typeof parseSource>, defineFn: string) => {
-  const results: { exportName: string; args: ObjectLiteralExpression }[] = [];
+/** List of define function names that can produce a static site with middleware */
+const staticSiteDefineFns: Set<string> = new Set([handlerRegistry.staticSite.defineFn]);
 
-  const tryAdd = (callExpr: CallExpression, exportName: string) => {
-    if (bareName(callExpr.getExpression().getText()) !== defineFn) return;
-    const firstArg = callExpr.getArguments()[0];
-    if (firstArg?.getKind() === SyntaxKind.ObjectLiteralExpression) {
-      results.push({ exportName, args: firstArg as ObjectLiteralExpression });
-    }
-  };
-
-  const def = sourceFile.getExportAssignment(e => !e.isExportEquals());
-  if (def?.getExpression().getKind() === SyntaxKind.CallExpression) {
-    tryAdd(def.getExpression().asKindOrThrow(SyntaxKind.CallExpression), "default");
-  }
-
-  for (const stmt of sourceFile.getVariableStatements()) {
-    if (!stmt.isExported()) continue;
-    for (const decl of stmt.getDeclarations()) {
-      const init = decl.getInitializer();
-      if (init?.getKind() === SyntaxKind.CallExpression) {
-        tryAdd(init.asKindOrThrow(SyntaxKind.CallExpression), decl.getName());
-      }
+/** Check if an expression chain contains a defineStaticSite call */
+const chainContainsDefineFn = (node: Node): boolean => {
+  if (node.getKind() === SyntaxKind.CallExpression) {
+    const call = node as CallExpression;
+    const exprText = bareName(call.getExpression().getText());
+    if (staticSiteDefineFns.has(exprText)) return true;
+    // Recurse: .method() chains
+    const expr = call.getExpression();
+    if (expr.getKind() === SyntaxKind.PropertyAccessExpression) {
+      return chainContainsDefineFn(expr.asKindOrThrow(SyntaxKind.PropertyAccessExpression).getExpression());
     }
   }
-
-  return results;
+  return false;
 };
 
 /**
@@ -199,17 +201,37 @@ export const generateMiddlewareEntryPoint = (
   runtimeDir: string
 ): { entryPoint: string; exportName: string } => {
   const sourceFile = parseSource(source);
-  const calls = findDefineCalls(sourceFile, handlerRegistry.staticSite.defineFn);
 
   let middlewareFnText: string | undefined;
   let exportName: string | undefined;
 
-  for (const call of calls) {
-    const mw = getProp(call.args, "middleware")?.getText();
-    if (mw) {
-      middlewareFnText = mw;
-      exportName = call.exportName;
-      break;
+  // Search exported variable declarations for a defineStaticSite chain with .middleware()
+  for (const stmt of sourceFile.getVariableStatements()) {
+    if (!stmt.isExported()) continue;
+    for (const decl of stmt.getDeclarations()) {
+      const init = decl.getInitializer();
+      if (!init) continue;
+      // Walk the chain looking for .middleware(fn)
+      const mw = findMiddlewareInChain(init);
+      if (mw && chainContainsDefineFn(init)) {
+        middlewareFnText = mw;
+        exportName = decl.getName();
+        break;
+      }
+    }
+    if (middlewareFnText) break;
+  }
+
+  // Also check default export
+  if (!middlewareFnText) {
+    const def = sourceFile.getExportAssignment(e => !e.isExportEquals());
+    if (def) {
+      const expr = def.getExpression();
+      const mw = findMiddlewareInChain(expr);
+      if (mw && chainContainsDefineFn(expr)) {
+        middlewareFnText = mw;
+        exportName = "default";
+      }
     }
   }
 

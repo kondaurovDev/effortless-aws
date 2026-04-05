@@ -110,7 +110,7 @@ export const wrapMiddlewareFn = (
 };
 
 export const wrapMiddleware = (handler: StaticSiteHandler) => {
-  const middleware = (handler as any).__spec.middleware as (
+  const middleware = (handler as any).middleware as (
     request: MiddlewareRequest
   ) => Promise<MiddlewareResult> | MiddlewareResult;
   return wrapMiddlewareFn(middleware);

@@ -143,7 +143,7 @@ const staticFiles = {
 };
 
 export const createHandlerRuntime = (
-  handler: { setup?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[] },
+  handler: { setup?: (...args: any[]) => any; authFn?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[] },
   handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket" | "api" | "cron" | "mcp",
   logLevel: LogLevel = "info",
   extraSetupArgs?: () => Record<string, unknown>
@@ -185,12 +185,16 @@ export const createHandlerRuntime = (
     return resolvedCfSigningConfig;
   };
 
-  const getAuthRuntime = async (setupCtx?: unknown) => {
+  const getAuthRuntime = async () => {
     if (resolvedAuthRuntime !== null) return resolvedAuthRuntime;
-    // Auth config lives on ctx.auth (returned from setup)
-    const authOpts = setupCtx && typeof setupCtx === "object" && "auth" in setupCtx
-      ? (setupCtx as Record<string, unknown>).auth as { secret?: string; expiresIn?: Duration; apiToken?: { header?: string; verify?: (value: string) => any; cacheTtl?: Duration } } | undefined
-      : undefined;
+    // Auth config comes from handler.authFn (set by .auth() builder method)
+    if (!handler.authFn) { resolvedAuthRuntime = undefined; return undefined; }
+    const params = await getParams();
+    const deps = getDeps();
+    const authArgs: Record<string, unknown> = {};
+    if (params) authArgs.config = params;
+    if (deps) authArgs.deps = deps;
+    const authOpts = await handler.authFn(authArgs) as { secret?: string; expiresIn?: Duration; apiToken?: { header?: string; verify?: (value: string) => any; cacheTtl?: Duration } } | undefined;
     if (!authOpts?.secret) { resolvedAuthRuntime = undefined; return undefined; }
     const secret = authOpts.secret;
     resolvedAuthHeaderName = authOpts.apiToken?.header;
@@ -218,7 +222,7 @@ export const createHandlerRuntime = (
     if (handler.setup) {
       const params = await getParams();
       const deps = getDeps();
-      const args: Record<string, unknown> = { enableAuth: (opts: unknown) => opts };
+      const args: Record<string, unknown> = {};
       if (params) args.config = params;
       if (deps) args.deps = deps;
       if (handler.static) args.files = staticFiles;
@@ -238,7 +242,7 @@ export const createHandlerRuntime = (
     const params = await getParams();
     if (params) args.config = params;
     if (handler.static) args.files = staticFiles;
-    const authRuntime = await getAuthRuntime(args.ctx);
+    const authRuntime = await getAuthRuntime();
     if (authRuntime) {
       // For callback auth, resolve the header name from resolved auth options on first call
       let finalAuthHeader = authHeader;

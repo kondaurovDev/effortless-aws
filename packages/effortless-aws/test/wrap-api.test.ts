@@ -191,9 +191,9 @@ describe("wrapApi", () => {
   describe("auth gate", () => {
     const makeAuthHandler = (overrides: Partial<ApiHandler> = {}): ApiHandler =>
       makeHandler({
-        setup: (() => ({ auth: { secret: "test-secret-key-32-chars-long!!", expiresIn: "7d" } })) as any,
+        authFn: () => ({ secret: "test-secret-key-32-chars-long!!", expiresIn: "7d" }),
         ...overrides,
-      });
+      } as any);
 
     it("returns 401 for route when auth enabled and no session", async () => {
       const handler = vi.fn().mockReturnValue({ status: 200, body: "ok" });

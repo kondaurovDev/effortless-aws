@@ -21,7 +21,7 @@ export type CfSigningConfig = {
   privateKey: string;
   /** CloudFront public key ID */
   keyPairId: string;
-  /** CloudFront domain (e.g., "d123.cloudfront.net" or "cdn.example.com"), or "*" for wildcard */
+  /** CloudFront domain2 (e.g., "d123.cloudfront.net" or "cdn.example.com"), or "*" for wildcard */
   domain: string;
 };
 
@@ -68,53 +68,6 @@ export const signCfCookies = (
 // ============ Cookie name ============
 
 export const AUTH_COOKIE_NAME = "__eff_session";
-
-// ============ Auth config ============
-
-/** API token authentication strategy nested inside AuthOptions. */
-export type ApiTokenStrategy<T> = {
-  /** HTTP header to read the token from. Default: "authorization" (strips "Bearer " prefix). */
-  header?: string;
-  /** Verify the token value and return session data, or null if invalid. */
-  verify: (args: { value: string }) => T | null | Promise<T | null>;
-  /** Cache verified token results for this duration. Avoids calling verify on every request. */
-  cacheTtl?: Duration;
-};
-
-/**
- * Auth options for `defineApi({ auth: auth<Session>({ ... }) })`.
- * @typeParam T - Session data type. Typed `createSession(data)` and `auth.session`.
- */
-export type AuthOptions<_T = unknown> = {
-  /** @internal Brand to carry session type T through to handler args. */
-  readonly __sessionType?: _T;
-  /** Default session lifetime (default: "7d"). Accepts seconds or duration string. */
-  expiresIn?: Duration;
-  /** Optional API token strategy for external clients (Bearer tokens, API keys). */
-  apiToken?: ApiTokenStrategy<_T>;
-};
-
-/**
- * Create typed auth options for `defineApi`.
- * The generic `T` types `createSession(data)` and `auth.session` in handler args.
- *
- * @see {@link https://effortless-aws.website/use-cases/authentication | Authentication guide}
- *
- * @example
- * ```typescript
- * type Session = { userId: string; role: string };
- * defineApi({
- *   basePath: "/api",
- *   auth: auth<Session>({ expiresIn: "7d" }),
- * })
- * ```
- */
-export const auth = <T = unknown>(options?: {
-  expiresIn?: Duration;
-  apiToken?: ApiTokenStrategy<T>;
-}): AuthOptions<T> =>
-  (options ?? {}) as AuthOptions<T>;
-
 
 // ============ Runtime helpers (API Lambda) ============
 

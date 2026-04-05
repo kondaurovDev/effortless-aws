@@ -8,12 +8,6 @@ import { globSync } from "glob";
 import { generateEntryPoint, generateMiddlewareEntryPoint, type HandlerType, type ExtractedConfig, type SecretEntry, type ApiRouteEntry, type BucketRouteEntry } from "./handler-registry";
 import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig, McpConfig } from "effortless-aws";
 
-/** Check if a route value is a bucket route config (local copy to avoid build dependency) */
-const isBucketRoute = (v: unknown): boolean =>
-  v != null && typeof v === "object" && "bucket" in v &&
-  (v as any).bucket != null && typeof (v as any).bucket === "object" &&
-  (v as any).bucket.__brand === "effortless-bucket";
-
 export type BundleInput = {
   projectDir: string;
   format?: "esm" | "cjs";
@@ -95,67 +89,74 @@ const extractRoutePatternsFromRoutes = (routes: unknown): string[] => {
     .filter((p): p is string => !!p);
 };
 
-/** Extract API route patterns from a static site's routes map (excludes bucket routes) */
-const extractRouteMapPatterns = (routes: unknown): string[] => {
-  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return [];
-  return Object.entries(routes as Record<string, unknown>)
-    .filter(([, v]) => !isBucketRoute(v))
-    .map(([k]) => k);
-};
+/** Extract route entries from a static site handler's routes array */
+const extractStaticSiteRoutes = (handler: any, allExports: Record<string, unknown>) => {
+  const routes: Array<{ pattern: string; origin: any; access?: string }> = handler.routes;
+  if (!Array.isArray(routes)) return { apiRoutes: [] as ApiRouteEntry[], bucketRoutes: [] as BucketRouteEntry[], routePatterns: [] as string[] };
 
-/** Extract API route entries from a static site's routes map (excludes bucket routes) */
-const extractApiRouteEntries = (routes: unknown, allExports: Record<string, unknown>): ApiRouteEntry[] => {
-  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return [];
-  const entries: ApiRouteEntry[] = [];
-  for (const [pattern, value] of Object.entries(routes as Record<string, unknown>)) {
-    if (isBucketRoute(value)) continue;
-    // Find the export name of the referenced handler by identity comparison
-    let handlerExport = "";
-    for (const [name, exp] of Object.entries(allExports)) {
-      if (exp === value) { handlerExport = name; break; }
-    }
-    entries.push({ pattern, handlerExport });
-  }
-  return entries;
-};
+  const apiRoutes: ApiRouteEntry[] = [];
+  const bucketRoutes: BucketRouteEntry[] = [];
+  const routePatterns: string[] = [];
 
-/** Extract bucket route entries from a static site's routes map */
-const extractBucketRouteEntries = (routes: unknown, allExports: Record<string, unknown>): BucketRouteEntry[] => {
-  if (!routes || typeof routes !== "object" || Array.isArray(routes)) return [];
-  const entries: BucketRouteEntry[] = [];
-  for (const [pattern, value] of Object.entries(routes as Record<string, unknown>)) {
-    if (!isBucketRoute(value)) continue;
-    // Find the export name of the referenced bucket by identity comparison
-    const bucket = (value as { bucket: unknown }).bucket;
-    let bucketExportName = "";
-    for (const [name, exp] of Object.entries(allExports)) {
-      if (exp === bucket) { bucketExportName = name; break; }
+  for (const entry of routes) {
+    const brand = (entry.origin as any).__brand as string;
+
+    if (brand === "effortless-bucket") {
+      let bucketExportName = "";
+      for (const [name, exp] of Object.entries(allExports)) {
+        if (exp === entry.origin) { bucketExportName = name; break; }
+      }
+      bucketRoutes.push({
+        pattern: entry.pattern,
+        bucketExportName,
+        access: entry.access === "private" ? "private" : "public",
+      });
+    } else {
+      let handlerExport = "";
+      for (const [name, exp] of Object.entries(allExports)) {
+        if (exp === entry.origin) { handlerExport = name; break; }
+      }
+      apiRoutes.push({ pattern: entry.pattern, handlerExport });
+      routePatterns.push(entry.pattern);
     }
-    entries.push({
-      pattern,
-      bucketExportName,
-      access: (value as { access?: string }).access === "private" ? "private" : "public",
-    });
   }
-  return entries;
+
+  return { apiRoutes, bucketRoutes, routePatterns };
 };
 
 /** Props to strip from __spec when building static config */
 const SPEC_RUNTIME_PROPS: Record<string, readonly string[]> = {
-  staticSite: ["middleware", "routes"],
+  staticSite: [],
   app: [],
 };
 
 /** Extract an ExtractedConfig from a runtime handler object */
 const extractFromHandler = (exportName: string, handler: any, type: HandlerType, allExports?: Record<string, unknown>): ExtractedConfig<any> => {
   const rawSpec = handler.__spec ?? {};
-  // Some handler types store all props in __spec (e.g. staticSite, app)
-  const checkTarget = type === "staticSite" || type === "app" ? rawSpec : handler;
+  const checkTarget = type === "app" ? rawSpec : handler;
   // Strip runtime-only props from spec for the config output
   const stripProps = SPEC_RUNTIME_PROPS[type] ?? [];
   const config = stripProps.length > 0
     ? Object.fromEntries(Object.entries(rawSpec).filter(([k]) => !stripProps.includes(k)))
     : rawSpec;
+
+  // For staticSite, extract routes from handler.routes array
+  if (type === "staticSite") {
+    const { apiRoutes, bucketRoutes, routePatterns } = extractStaticSiteRoutes(handler, allExports ?? {});
+
+    return {
+      exportName,
+      config,
+      hasHandler: handler.middleware != null,
+      depsKeys: extractDepsKeysFromHandler(handler.deps),
+      secretEntries: extractSecretEntriesFromConfig(handler.config),
+      staticGlobs: Array.isArray(handler.static) ? handler.static : [],
+      routePatterns,
+      apiRoutes,
+      bucketRoutes,
+    };
+  }
+
   return {
     exportName,
     config,
@@ -165,9 +166,9 @@ const extractFromHandler = (exportName: string, handler: any, type: HandlerType,
     depsKeys: extractDepsKeysFromHandler(handler.deps),
     secretEntries: extractSecretEntriesFromConfig(handler.config),
     staticGlobs: Array.isArray(handler.static) ? handler.static : [],
-    routePatterns: type === "staticSite" ? extractRouteMapPatterns(rawSpec.routes) : extractRoutePatternsFromRoutes(handler.routes),
-    apiRoutes: type === "staticSite" ? extractApiRouteEntries(rawSpec.routes, allExports ?? {}) : [],
-    bucketRoutes: type === "staticSite" ? extractBucketRouteEntries(rawSpec.routes, allExports ?? {}) : [],
+    routePatterns: extractRoutePatternsFromRoutes(handler.routes),
+    apiRoutes: [],
+    bucketRoutes: [],
   };
 };
 
@@ -554,6 +555,7 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
             : typeof v.onTick === "function" ? ".onTick()"
             : typeof v.handler === "function" ? ".onMessage()"
             : typeof v.tool === "function" ? ".tool() or .tools()"
+            : typeof v.route === "function" ? ".route() and .build()"
             : ".build()";
           console.warn(`⚠ ${shortFile}: "${exportName}" is missing a handler — did you forget ${hint}?`);
           continue;

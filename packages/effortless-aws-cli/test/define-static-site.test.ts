@@ -6,15 +6,12 @@ import { extractStaticSiteConfigs } from "./helpers/extract-from-source"
 
 describe("defineStaticSite extraction", () => {
 
-  it("should extract static site config from named export", async () => {
+  it("should extract config from named export", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite()({
-        dir: "dist",
-        spa: true,
-        build: "npm run build",
-      });
+      export const docs = defineStaticSite({ dir: "dist", errorPage: "index.html", build: "npm run build" })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -23,19 +20,17 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.exportName).toBe("docs");
     expect(configs[0]!.config).toEqual({
       dir: "dist",
-      spa: true,
+      errorPage: "index.html",
       build: "npm run build",
     });
   });
 
-  it("should extract static site config from default export", async () => {
+  it("should extract config from default export", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export default defineStaticSite()({
-        dir: "dist",
-        index: "main.html",
-      });
+      export default defineStaticSite({ dir: "dist", index: "main.html" })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -52,9 +47,8 @@ describe("defineStaticSite extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite()({
-        dir: "dist",
-      });
+      export const docs = defineStaticSite({ dir: "dist" })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -70,14 +64,13 @@ describe("defineStaticSite extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const admin = defineStaticSite()({
-        dir: "admin/dist",
-        middleware: async (request) => {
+      export const admin = defineStaticSite({ dir: "admin/dist" })
+        .middleware(async (request) => {
           if (!request.cookies.session) {
             return { redirect: "/login" };
           }
-        },
-      });
+        })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -85,7 +78,6 @@ describe("defineStaticSite extraction", () => {
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("admin");
     expect(configs[0]!.hasHandler).toBe(true);
-    // middleware should be stripped from config (it's in RUNTIME_PROPS)
     expect(configs[0]!.config).not.toHaveProperty("middleware");
     expect(configs[0]!.config).toEqual({ dir: "admin/dist" });
   });
@@ -94,10 +86,8 @@ describe("defineStaticSite extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite()({
-        dir: "dist",
-        spa: true,
-      });
+      export const docs = defineStaticSite({ dir: "dist", errorPage: "index.html" })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -110,10 +100,11 @@ describe("defineStaticSite extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const app = defineStaticSite()({
+      export const app = defineStaticSite({
         dir: "dist",
         domain: { prod: "example.com", dev: "dev.example.com" },
-      });
+      })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -129,10 +120,8 @@ describe("defineStaticSite extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const app = defineStaticSite()({
-        dir: "dist",
-        domain: "example.com",
-      });
+      export const app = defineStaticSite({ dir: "dist", domain: "example.com" })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -141,40 +130,33 @@ describe("defineStaticSite extraction", () => {
     expect(configs[0]!.config.domain).toBe("example.com");
   });
 
-  it("should extract single route pattern", async () => {
+  it("should extract single API route pattern", async () => {
     const source = `
-      import { defineStaticSite } from "effortless-aws";
+      import { defineStaticSite, defineApi } from "effortless-aws";
       const api = {} as any;
 
-      export const app = defineStaticSite()({
-        dir: "dist",
-        routes: {
-          "/api/*": api,
-        },
-      });
+      export const app = defineStaticSite({ dir: "dist" })
+        .route("/api/*", api)
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
 
     expect(configs).toHaveLength(1);
     expect(configs[0]!.routePatterns).toEqual(["/api/*"]);
-    // routes should be stripped from config
     expect(configs[0]!.config).not.toHaveProperty("routes");
   });
 
-  it("should extract multiple route patterns", async () => {
+  it("should extract multiple API route patterns", async () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
       const api = {} as any;
       const auth = {} as any;
 
-      export const app = defineStaticSite()({
-        dir: "dist",
-        routes: {
-          "/api/*": api,
-          "/auth/*": auth,
-        },
-      });
+      export const app = defineStaticSite({ dir: "dist" })
+        .route("/api/*", api)
+        .route("/auth/*", auth)
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -188,12 +170,9 @@ describe("defineStaticSite extraction", () => {
 
       export const siteApi = defineApi({ basePath: "/api" });
 
-      export const app = defineStaticSite()({
-        dir: "dist",
-        routes: {
-          "/api/*": siteApi,
-        },
-      });
+      export const app = defineStaticSite({ dir: "dist" })
+        .route("/api/*", siteApi)
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -212,13 +191,10 @@ describe("defineStaticSite extraction", () => {
       export const api = defineApi({ basePath: "/api" });
       export const auth = defineApi({ basePath: "/auth" });
 
-      export const app = defineStaticSite()({
-        dir: "dist",
-        routes: {
-          "/api/*": api,
-          "/auth/*": auth,
-        },
-      });
+      export const app = defineStaticSite({ dir: "dist" })
+        .route("/api/*", api)
+        .route("/auth/*", auth)
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -234,12 +210,9 @@ describe("defineStaticSite extraction", () => {
       import { defineStaticSite } from "effortless-aws";
       const api = {} as any;
 
-      export default defineStaticSite()({
-        dir: "dist",
-        routes: {
-          "/api/*": api,
-        },
-      });
+      export default defineStaticSite({ dir: "dist" })
+        .route("/api/*", api)
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -252,10 +225,8 @@ describe("defineStaticSite extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite()({
-        dir: "dist",
-        errorPage: "404.html",
-      });
+      export const docs = defineStaticSite({ dir: "dist", errorPage: "404.html" })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
@@ -268,9 +239,8 @@ describe("defineStaticSite extraction", () => {
     const source = `
       import { defineStaticSite } from "effortless-aws";
 
-      export const docs = defineStaticSite()({
-        dir: "dist",
-      });
+      export const docs = defineStaticSite({ dir: "dist" })
+        .build();
     `;
 
     const configs = await extractStaticSiteConfigs(source);
