@@ -79,6 +79,13 @@ export type StaticSiteHandler = {
   readonly middleware?: MiddlewareHandler;
 };
 
+/** Builder for configuring a static site before calling `.build()` */
+export type StaticSiteBuilder = {
+  route(pattern: string, origin: AnyRoutableHandler, opts?: { access?: "private" | "public" }): StaticSiteBuilder;
+  middleware(fn: MiddlewareHandler): StaticSiteBuilder;
+  build(): StaticSiteHandler;
+};
+
 /**
  * Deploy a static site via S3 + CloudFront CDN, with optional API and bucket route overrides.
  *
@@ -87,7 +94,7 @@ export type StaticSiteHandler = {
  * @param options - Static site configuration: directory, optional SPA mode, build command, domain
  * @returns Builder with `.route()`, `.middleware()`, and `.build()` methods
  */
-export function defineStaticSite(options: StaticSiteConfig) {
+export function defineStaticSite(options: StaticSiteConfig): StaticSiteBuilder {
   const state = {
     spec: { ...options },
     routes: [] as StaticSiteRouteEntry[],
