@@ -1,5 +1,11 @@
 # effortless-aws
 
+## 0.36.1
+
+### Patch Changes
+
+- [`0a8b758`](https://github.com/kondaurovDev/effortless-aws/commit/0a8b75820f8b238122a42a507254f6d7a8496b5e) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix `any` type inference in `defineStaticSite` builder methods by adding explicit `StaticSiteBuilder` return type
+
 ## 0.36.0
 
 ### Minor Changes
