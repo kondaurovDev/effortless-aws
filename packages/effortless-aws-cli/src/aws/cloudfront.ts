@@ -291,8 +291,6 @@ export type EnsureDistributionInput = {
     pathPattern: string;
     /** CloudFront Key Group ID for signed cookies (only for access: "private") */
     keyGroupId?: string;
-    /** Route prefix to strip from URI before forwarding to S3 (e.g. "/files") */
-    stripPrefix: string;
   }[];
 };
 
@@ -412,54 +410,8 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
       : [];
 
     // Build cache behaviors for bucket origins (with optional signed cookies)
-    // Create a CloudFront Function for prefix stripping if needed
-    const bucketPrefixStripFunctions: Map<string, string> = new Map();
-    for (const bo of (input.bucketOrigins ?? [])) {
-      if (bo.stripPrefix && !bucketPrefixStripFunctions.has(bo.stripPrefix)) {
-        const fnName = `${project}-${stage}-${handlerName}-strip${bo.stripPrefix.replace(/\//g, "-")}`;
-        const stripCode = [
-          "function handler(event) {",
-          "  var request = event.request;",
-          `  var prefix = '${bo.stripPrefix}';`,
-          "  if (request.uri.startsWith(prefix)) {",
-          "    request.uri = request.uri.substring(prefix.length) || '/';",
-          "  }",
-          "  return request;",
-          "}",
-        ].join("\n");
-        const encodedCode = new TextEncoder().encode(stripCode);
-
-        // Create or update the CF Function
-        const list = yield* cloudfront.make("list_functions", {});
-        const existing = list.FunctionList?.Items?.find(f => f.Name === fnName);
-
-        if (existing) {
-          const getResult = yield* cloudfront.make("get_function", { Name: fnName, Stage: "LIVE" });
-          const currentCode = getResult.FunctionCode ? new TextDecoder().decode(getResult.FunctionCode) : "";
-          if (currentCode !== stripCode) {
-            const updateResult = yield* cloudfront.make("update_function", {
-              Name: fnName, IfMatch: getResult.ETag!,
-              FunctionConfig: { Comment: `effortless: strip prefix ${bo.stripPrefix}`, Runtime: "cloudfront-js-2.0" },
-              FunctionCode: encodedCode,
-            });
-            yield* cloudfront.make("publish_function", { Name: fnName, IfMatch: updateResult.ETag! });
-          }
-          bucketPrefixStripFunctions.set(bo.stripPrefix, existing.FunctionMetadata!.FunctionARN!);
-        } else {
-          const result = yield* cloudfront.make("create_function", {
-            Name: fnName,
-            FunctionConfig: { Comment: `effortless: strip prefix ${bo.stripPrefix}`, Runtime: "cloudfront-js-2.0" },
-            FunctionCode: encodedCode,
-          });
-          yield* cloudfront.make("publish_function", { Name: fnName, IfMatch: result.ETag! });
-          bucketPrefixStripFunctions.set(bo.stripPrefix, result.FunctionSummary!.FunctionMetadata!.FunctionARN!);
-        }
-      }
-    }
-
     const bucketCacheBehaviorItems = (input.bucketOrigins ?? []).flatMap(bo => {
       const expandedPatterns = expandRoutePatterns([bo.pathPattern]);
-      const stripFnArn = bo.stripPrefix ? bucketPrefixStripFunctions.get(bo.stripPrefix) : undefined;
       return expandedPatterns.map(pattern => ({
         PathPattern: pattern,
         TargetOriginId: bo.originId,
@@ -473,9 +425,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         SmoothStreaming: false,
         CachePolicyId: CACHING_OPTIMIZED_POLICY_ID,
         ResponseHeadersPolicyId: SECURITY_HEADERS_POLICY_ID,
-        FunctionAssociations: stripFnArn
-          ? { Quantity: 1, Items: [{ FunctionARN: stripFnArn, EventType: "viewer-request" as const }] }
-          : { Quantity: 0, Items: [] },
+        FunctionAssociations: { Quantity: 0, Items: [] as { FunctionARN: string; EventType: "viewer-request" }[] },
         LambdaFunctionAssociations: { Quantity: 0, Items: [] },
         FieldLevelEncryptionId: "",
         ...(bo.keyGroupId ? { TrustedKeyGroups: { Enabled: true, Quantity: 1, Items: [bo.keyGroupId] } } : {}),

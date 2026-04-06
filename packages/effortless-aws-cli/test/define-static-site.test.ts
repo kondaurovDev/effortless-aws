@@ -1,4 +1,8 @@
 import { describe, it, expect } from "vitest"
+import * as path from "path"
+import { Effect } from "effect"
+import { NodeContext } from "@effect/platform-node"
+import { discoverHandlers } from "~cli/build/bundle"
 
 import { extractStaticSiteConfigs } from "./helpers/extract-from-source"
 
@@ -260,6 +264,25 @@ describe("defineStaticSite extraction", () => {
 
     const configs = await extractStaticSiteConfigs(source);
     expect(configs).toHaveLength(0);
+  });
+
+  it("should resolve apiRoutes when handler is imported from another file", async () => {
+    const projectDir = path.resolve(import.meta.dirname, "../..");
+    const fixtureDir = path.join(import.meta.dirname, "fixtures/cross-file-route");
+    const files = [
+      path.join(fixtureDir, "api.ts"),
+      path.join(fixtureDir, "site.ts"),
+    ];
+
+    const discovered = await Effect.runPromise(
+      discoverHandlers(files, projectDir).pipe(Effect.provide(NodeContext.layer))
+    );
+
+    expect(discovered.staticSiteHandlers).toHaveLength(1);
+    const site = discovered.staticSiteHandlers[0]!.exports[0]!;
+    expect(site.apiRoutes).toEqual([
+      { pattern: "/site-api/*", handlerExport: "siteApi2" },
+    ]);
   });
 
 });

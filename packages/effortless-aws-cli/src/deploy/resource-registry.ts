@@ -164,7 +164,7 @@ export const HANDLER_RESOURCES: Record<HandlerType, ResourceSpec[]> = {
   // deployCoreLambda → Lambda + IAM Role (only if handler exists)
   bucket: [
     { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)) },
-    { type: "s3-bucket", label: "S3 Bucket", cleanupOrder: ORDER.S3, deriveName: std, cleanup: (c) => deleteBucket(std(c)) },
+    { type: "s3-bucket", label: "S3 Bucket", cleanupOrder: ORDER.S3, deriveName: (c) => std(c).toLowerCase(), cleanup: (c) => deleteBucket(std(c).toLowerCase()) },
     { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`) },
   ],
 

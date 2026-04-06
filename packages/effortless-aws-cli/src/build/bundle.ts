@@ -530,6 +530,7 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
     const cronHandlers: { file: string; exports: ExtractedCronFunction[] }[] = [];
     const workerHandlers: { file: string; exports: ExtractedWorkerFunction[] }[] = [];
     const mcpHandlers: { file: string; exports: ExtractedMcpFunction[] }[] = [];
+    const allModuleExports = new Map<string, unknown>();
 
     for (const file of files) {
       const stat = yield* fileSystem.stat(file);
@@ -564,6 +565,7 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
         if (!("__brand" in value)) continue;
         const type = BRAND_TO_TYPE[(value as any).__brand as string];
         if (!type) continue;
+        allModuleExports.set(exportName, value);
         byType[type].push(extractFromHandler(exportName, value, type, mod));
       }
 
@@ -577,6 +579,53 @@ export const discoverHandlers = (files: string[], projectDir: string) =>
       if (byType.cron.length > 0) cronHandlers.push({ file, exports: byType.cron });
       if (byType.worker.length > 0) workerHandlers.push({ file, exports: byType.worker });
       if (byType.mcp.length > 0) mcpHandlers.push({ file, exports: byType.mcp });
+    }
+
+    // Post-process: resolve cross-file route origins for static sites.
+    // When a route origin (API/MCP/bucket) is imported from another file, reference equality
+    // against the current file's exports fails. Fall back to matching by __brand + __spec.
+    if (staticSiteHandlers.length > 0) {
+      // Build a global lookup: "brand:specJSON" → exportName
+      const specToExport = new Map<string, string>();
+      const allHandlerGroups = [apiHandlers, mcpHandlers, bucketHandlers, appHandlers];
+      for (const group of allHandlerGroups) {
+        for (const { exports: exps } of group) {
+          for (const exp of exps) {
+            const handler = allModuleExports.get(exp.exportName);
+            if (handler && typeof handler === "object" && "__brand" in handler && "__spec" in handler) {
+              specToExport.set(`${(handler as any).__brand}:${JSON.stringify((handler as any).__spec)}`, exp.exportName);
+            }
+          }
+        }
+      }
+
+      for (const { exports: siteExports } of staticSiteHandlers) {
+        for (const site of siteExports) {
+          // Re-resolve empty apiRoutes
+          for (const ar of site.apiRoutes) {
+            if (ar.handlerExport) continue;
+            // Find the route origin from the static site handler's routes array
+            const siteHandler = allModuleExports.get(site.exportName);
+            if (!siteHandler || typeof siteHandler !== "object") continue;
+            const routes: any[] = (siteHandler as any).routes ?? [];
+            const route = routes.find((r: any) => r.pattern === ar.pattern);
+            if (!route?.origin?.__brand || !route?.origin?.__spec) continue;
+            const key = `${route.origin.__brand}:${JSON.stringify(route.origin.__spec)}`;
+            ar.handlerExport = specToExport.get(key) ?? "";
+          }
+          // Re-resolve empty bucketRoutes
+          for (const br of site.bucketRoutes) {
+            if (br.bucketExportName) continue;
+            const siteHandler = allModuleExports.get(site.exportName);
+            if (!siteHandler || typeof siteHandler !== "object") continue;
+            const routes: any[] = (siteHandler as any).routes ?? [];
+            const route = routes.find((r: any) => r.pattern === br.pattern);
+            if (!route?.origin?.__brand || !route?.origin?.__spec) continue;
+            const key = `${route.origin.__brand}:${JSON.stringify(route.origin.__spec)}`;
+            br.bucketExportName = specToExport.get(key) ?? "";
+          }
+        }
+      }
     }
 
     return { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } as DiscoveredHandlers;

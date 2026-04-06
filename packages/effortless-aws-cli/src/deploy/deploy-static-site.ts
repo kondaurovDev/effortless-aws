@@ -294,21 +294,17 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     const apiCachePolicyId = apiRoutes.length > 0 ? yield* ensureApiCachePolicy() : undefined;
 
     // 7. Build bucket origins for CloudFront
-    const bucketOrigins = (input.bucketRoutes ?? []).map(br => {
-      // Strip trailing /* to get the prefix (e.g. "/files/*" → "/files")
-      const stripPrefix = br.pattern.replace(/\/?\*$/, "");
-      return {
+    const bucketOrigins = (input.bucketRoutes ?? []).map(br => ({
         originId: `S3-${br.bucketName}`,
         bucketName: br.bucketName,
         bucketRegion: br.bucketRegion,
         oacId,
         pathPattern: br.pattern,
-        stripPrefix,
         ...(br.access === "private" && input.cfSigningInfo
           ? { keyGroupId: input.cfSigningInfo.keyGroupId }
           : {}),
-      };
-    });
+    }));
+
 
     // 8. Ensure CloudFront distribution
     const { distributionId, distributionArn, domainName } = yield* ensureDistribution({

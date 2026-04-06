@@ -52,7 +52,7 @@ export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, d
 
     // Create S3 bucket
     yield* Effect.logDebug("Creating S3 bucket...");
-    const bucketName = `${input.project}-${tagCtx.stage}-${handlerName}`;
+    const bucketName = `${input.project}-${tagCtx.stage}-${handlerName}`.toLowerCase();
     const { bucketArn, created } = yield* ensureBucket({
       name: bucketName,
       region: input.region,

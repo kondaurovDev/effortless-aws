@@ -79,6 +79,73 @@ describe("API proxying via CloudFront", () => {
   });
 });
 
+// ── Bucket CRUD via API ────────────────────────────────────────
+
+describe("bucket CRUD via API", () => {
+  const testKey = `integration-test-${Date.now()}`;
+  const testContent = "hello from bucket CRUD test";
+
+  it("POST /api/files uploads to bucket", async () => {
+    const res = await fetch(site("/api/files"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: testKey, content: testContent, contentType: "text/plain" }),
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.uploaded).toBe(testKey);
+  });
+
+  it("GET /api/files/{key} reads from bucket", async () => {
+    const res = await fetch(site(`/api/files/${testKey}`));
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.content).toBe(testContent);
+    expect(body.contentType).toBe("text/plain");
+  });
+
+  it("GET /api/files/list lists bucket objects", async () => {
+    const res = await fetch(site(`/api/files/list?prefix=${testKey}`));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { items: { key: string }[] };
+    expect(body.items.some(i => i.key === testKey)).toBe(true);
+  });
+
+  it("GET /api/files/{key} returns 404 for missing key", async () => {
+    const res = await fetch(site("/api/files/nonexistent-key-12345"));
+    expect(res.status).toBe(404);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.error).toBe("not found");
+  });
+
+  it("DELETE /api/files/{key} removes from bucket", async () => {
+    const res = await fetch(site(`/api/files/${testKey}`), { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.deleted).toBe(testKey);
+
+    // Verify it's gone
+    const getRes = await fetch(site(`/api/files/${testKey}`));
+    expect(getRes.status).toBe(404);
+  });
+});
+
+// ── Public bucket route (no auth required) ─────────────────────
+
+describe("public bucket route", () => {
+  it("serves /public/* without authentication", async () => {
+    const res = await fetch(site("/public/readme.txt"));
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain("publicly accessible without authentication");
+  });
+
+  it("returns 403 for missing file in /public/*", async () => {
+    const res = await fetch(site("/public/nonexistent-file.txt"));
+    expect(res.status).toBe(403);
+  });
+});
+
 // ── CloudFront signed cookies (private bucket route) ───────────
 
 describe("signed cookies", () => {

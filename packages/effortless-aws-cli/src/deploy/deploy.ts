@@ -256,7 +256,7 @@ const buildTableNameMap = (
 
 /**
  * Build a map of all bucket handler export names to their resolved S3 bucket names.
- * Bucket names are deterministic: ${project}-${stage}-${handlerName}
+ * Bucket names are deterministic: ${project}-${stage}-${handlerName} (lowercased for S3 compliance)
  */
 const buildBucketNameMap = (
   bucketHandlers: DiscoveredHandlers["bucketHandlers"],
@@ -267,7 +267,7 @@ const buildBucketNameMap = (
   for (const { exports } of bucketHandlers) {
     for (const fn of exports) {
       const handlerName = fn.exportName;
-      map.set(fn.exportName, `${project}-${stage}-${handlerName}`);
+      map.set(fn.exportName, `${project}-${stage}-${handlerName}`.toLowerCase());
     }
   }
   return map;
