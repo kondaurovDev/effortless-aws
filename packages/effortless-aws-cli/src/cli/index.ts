@@ -11,6 +11,7 @@ import { cleanupCommand } from "./commands/cleanup";
 import { logsCommand } from "./commands/logs";
 import { layerCommand } from "./commands/layer";
 import { configCommand } from "./commands/config";
+import { generateCommand } from "./commands/generate";
 import { checkForUpdate } from "./update-check";
 
 const require = createRequire(import.meta.url);
@@ -18,7 +19,7 @@ const { version } = require("../../package.json");
 const versionString = `${version} (${new URL(".", import.meta.url).pathname})`;
 
 const mainCommand = Command.make("eff").pipe(
-  Command.withSubcommands([deployCommand, statusCommand, logsCommand, cleanupCommand, layerCommand, configCommand]),
+  Command.withSubcommands([deployCommand, generateCommand, statusCommand, logsCommand, cleanupCommand, layerCommand, configCommand]),
   Command.withDescription("Code-first AWS Lambda framework")
 );
 

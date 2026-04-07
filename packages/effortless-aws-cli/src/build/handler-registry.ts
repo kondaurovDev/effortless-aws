@@ -102,6 +102,8 @@ export type ExtractedConfig<T = unknown> = {
   config: T;
   hasHandler: boolean;
   depsKeys: string[];
+  /** Dep key → handler type (e.g., "table", "bucket", "fifoQueue") for codegen */
+  depsTypes: Record<string, string>;
   secretEntries: SecretEntry[];
   staticGlobs: string[];
   routePatterns: string[];

@@ -81,6 +81,29 @@ const extractDepsKeysFromHandler = (deps: unknown): string[] => {
   return Object.keys(resolved);
 };
 
+const BRAND_TO_DEP_TYPE: Record<string, string> = {
+  "effortless-table": "table",
+  "effortless-bucket": "bucket",
+  "effortless-fifo-queue": "fifoQueue",
+  "effortless-mailer": "mailer",
+  "effortless-worker": "worker",
+};
+
+/** Extract dep keys → handler types from deps (e.g., { db: "table" }) */
+const extractDepsTypesFromHandler = (deps: unknown): Record<string, string> => {
+  if (!deps) return {};
+  const resolved = typeof deps === "function" ? (deps as () => Record<string, unknown>)() : deps;
+  if (typeof resolved !== "object" || resolved === null) return {};
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(resolved)) {
+    if (value && typeof value === "object" && "__brand" in value) {
+      const brand = (value as any).__brand as string;
+      result[key] = BRAND_TO_DEP_TYPE[brand] ?? "unknown";
+    }
+  }
+  return result;
+};
+
 /** Extract route patterns from parsed routes */
 const extractRoutePatternsFromRoutes = (routes: unknown): string[] => {
   if (!Array.isArray(routes)) return [];
@@ -149,6 +172,7 @@ const extractFromHandler = (exportName: string, handler: any, type: HandlerType,
       config,
       hasHandler: handler.middleware != null,
       depsKeys: extractDepsKeysFromHandler(handler.deps),
+      depsTypes: extractDepsTypesFromHandler(handler.deps),
       secretEntries: extractSecretEntriesFromConfig(handler.config),
       staticGlobs: Array.isArray(handler.static) ? handler.static : [],
       routePatterns,
@@ -161,9 +185,10 @@ const extractFromHandler = (exportName: string, handler: any, type: HandlerType,
     exportName,
     config,
     hasHandler: type === "api"
-      ? Array.isArray(checkTarget.routes) && checkTarget.routes.length > 0
+      ? (rawSpec.runtime != null) || (rawSpec.handler != null) || (Array.isArray(checkTarget.routes) && checkTarget.routes.length > 0)
       : HANDLER_PROPS[type].some(p => checkTarget[p] != null),
     depsKeys: extractDepsKeysFromHandler(handler.deps),
+    depsTypes: extractDepsTypesFromHandler(handler.deps),
     secretEntries: extractSecretEntriesFromConfig(handler.config),
     staticGlobs: Array.isArray(handler.static) ? handler.static : [],
     routePatterns: extractRoutePatternsFromRoutes(handler.routes),
@@ -308,6 +333,54 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
 
     return bundleResult;
   });
+
+// ============ Go bundle ============
+
+export type GoBundleResult = {
+  /** Path to the directory containing the compiled bootstrap binary */
+  outputDir: string;
+};
+
+/**
+ * Compile a Go handler into a Lambda-compatible bootstrap binary.
+ * The binary is cross-compiled for Linux ARM64 (Graviton) and placed
+ * in a temp directory as "bootstrap" (the name Lambda custom runtimes expect).
+ */
+export const bundleGo = (handlerPath: string, projectDir: string) =>
+  Effect.gen(function* () {
+    const p = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
+    const fullHandlerPath = p.isAbsolute(handlerPath) ? handlerPath : p.resolve(projectDir, handlerPath);
+
+    // Verify the Go source directory exists
+    const exists = yield* fs.exists(fullHandlerPath);
+    if (!exists) {
+      return yield* Effect.fail(new Error(`Go handler path not found: ${fullHandlerPath}`));
+    }
+
+    // Create temp output directory
+    const outputDir = p.join(os.tmpdir(), `eff-go-${Date.now()}`);
+    yield* fs.makeDirectory(outputDir, { recursive: true });
+    const bootstrapPath = p.join(outputDir, "bootstrap");
+
+    // Cross-compile for Lambda (Linux ARM64)
+    const { execSync } = yield* Effect.sync(() => require("child_process"));
+    yield* Effect.try({
+      try: () => execSync(
+        `GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -o ${bootstrapPath} .`,
+        { cwd: fullHandlerPath, stdio: "pipe", timeout: 120_000 }
+      ),
+      catch: (error) => new Error(`Go build failed: ${error}`)
+    });
+
+    return { outputDir } satisfies GoBundleResult;
+  });
+
+/**
+ * Zip a Go bootstrap binary for Lambda deployment.
+ * Uses zipDirectory to package the entire output dir (contains "bootstrap").
+ */
+export const zipGoBinary = (outputDir: string) => zipDirectory(outputDir);
 
 /**
  * Extract top modules by size from esbuild metafile.

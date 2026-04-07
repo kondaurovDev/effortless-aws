@@ -41,6 +41,7 @@ export const deployApiFunction = ({ input, fn, layerArn, external, depsEnv, deps
       ...(config.lambda?.permissions ? { permissions: config.lambda.permissions } : {}),
       ...(config.lambda?.memory ? { memory: config.lambda.memory } : {}),
       ...(config.lambda?.timeout ? { timeout: toSeconds(config.lambda.timeout) } : {}),
+      ...(config.runtime ? { externalRuntime: config.runtime } : {}),
       ...(layerArn ? { layerArn } : {}),
       ...(external ? { external } : {}),
       ...(depsEnv ? { depsEnv } : {}),

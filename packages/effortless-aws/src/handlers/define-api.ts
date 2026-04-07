@@ -121,6 +121,14 @@ type ValidateSetupReturn<C> = C & { [K in ReservedKeys]?: never };
 
 // ============ Static config ============
 
+/** External runtime configuration for non-TypeScript handlers (e.g., Go) */
+export type ExternalRuntime = {
+  /** Runtime language identifier */
+  lang: "go";
+  /** Path to the handler source directory (relative to project root) */
+  handler: string;
+};
+
 /** Static config extracted by AST (no runtime callbacks) */
 export type ApiConfig = {
   /** Lambda function settings (memory, timeout, permissions, etc.) */
@@ -129,6 +137,10 @@ export type ApiConfig = {
   basePath: `/${string}`;
   /** Enable response streaming. When true, the Lambda Function URL uses RESPONSE_STREAM invoke mode. */
   stream?: boolean;
+  /** External runtime — when set, handler code is compiled externally (e.g., Go binary) instead of bundled with esbuild. */
+  runtime?: ExternalRuntime;
+  /** Path to external handler directory (relative to project root). Use `effortless generate` to scaffold handler files. */
+  handler?: string;
 };
 
 // ============ Internal handler object ============
@@ -154,6 +166,10 @@ type ApiOptions = {
   basePath: `/${string}`;
   /** Enable response streaming. When true, routes receive a `stream` arg for SSE. */
   stream?: boolean;
+  /** External runtime — handler code is compiled externally (e.g., Go binary) instead of bundled with esbuild. */
+  runtime?: ExternalRuntime;
+  /** Path to external handler directory (relative to project root). Use `effortless generate` to scaffold handler files. */
+  handler?: string;
 };
 
 // ============ ApiRoutes — returned after first route method ============
@@ -226,6 +242,9 @@ interface ApiBuilder<
     fn: (args: SpreadCtx<C, A>) => void | Promise<void>
   ): ApiBuilder<D, P, C, ST, HasFiles, A>;
 
+  /** Finalize as infra-only handler (no routes). Use with `handler` option for external handler code. */
+  build(): ApiHandler<C>;
+
   get<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
   post<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
   put<S extends StandardSchemaV1 | undefined = undefined>(def: RouteDef<S>, handler: RouteHandler<C, ST, A, S>): ApiRoutes<C, ST, A>;
@@ -252,11 +271,20 @@ interface ApiBuilder<
  */
 export function defineApi<const O extends ApiOptions>(
   options: O,
-): ApiBuilder<undefined, undefined, undefined, O["stream"] extends true ? true : false, false>;
+): O["runtime"] extends ExternalRuntime ? ApiHandler : ApiBuilder<undefined, undefined, undefined, O["stream"] extends true ? true : false, false>;
 export function defineApi(
   options: ApiOptions,
-): ApiBuilder {
-  const { basePath, stream } = options;
+): ApiBuilder | ApiHandler {
+  const { basePath, stream, runtime, handler } = options;
+
+  // External runtime (e.g., Go) — no TS routes, return handler immediately
+  if (runtime) {
+    return {
+      __brand: "effortless-api" as const,
+      __spec: { basePath, ...(stream ? { stream } : {}), runtime },
+      routes: [],
+    } satisfies ApiHandler;
+  }
 
   const state: {
     spec: ApiConfig;
@@ -272,6 +300,8 @@ export function defineApi(
     spec: {
       basePath,
       ...(stream ? { stream } : {}),
+      ...(runtime ? { runtime } : {}),
+      ...(handler ? { handler } : {}),
     },
     routes: [],
   };
@@ -357,6 +387,7 @@ export function defineApi(
       state.onCleanup = fn as any;
       return builder as any;
     },
+    build() { return finalize() as any; },
     get(def: any, fn: any) { addRoute("GET", def, fn); return finalize() as any; },
     post(def: any, fn: any) { addRoute("POST", def, fn); return finalize() as any; },
     put(def: any, fn: any) { addRoute("PUT", def, fn); return finalize() as any; },

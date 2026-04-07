@@ -12,7 +12,9 @@ import {
   collectLayerPackages,
   findDepsDir,
 } from "../aws";
-import { bundle, zip, resolveStaticFiles, type BundleInput } from "~/build/bundle";
+import { bundle, zip, resolveStaticFiles, bundleGo, zipGoBinary, type BundleInput } from "~/build/bundle";
+import { Runtime } from "@aws-sdk/client-lambda";
+import type { ExternalRuntime } from "effortless-aws";
 import * as path from "path";
 
 // ============ Deferred warnings ============
@@ -184,6 +186,8 @@ export type DeployCoreLambdaInput = {
   depsPermissions?: readonly string[];
   /** Static file glob patterns to bundle into the Lambda ZIP */
   staticGlobs?: string[];
+  /** External runtime config — when set, uses Go/etc. build instead of esbuild */
+  externalRuntime?: ExternalRuntime;
 };
 
 export const deployCoreLambda = ({
@@ -199,7 +203,8 @@ export const deployCoreLambda = ({
   external,
   depsEnv,
   depsPermissions,
-  staticGlobs
+  staticGlobs,
+  externalRuntime
 }: DeployCoreLambdaInput) =>
   Effect.gen(function* () {
     const tagCtx: TagContext = {
@@ -230,30 +235,42 @@ export const deployCoreLambda = ({
       makeTags(tagCtx)
     );
 
-    const bundleResult = yield* bundle({
-      ...input,
-      exportName,
-      ...(bundleType ? { type: bundleType } : {}),
-      ...(external && external.length > 0 ? { external } : {})
-    });
-    let staticFiles: import("../build/bundle").StaticFile[] | undefined;
-    if (staticGlobs && staticGlobs.length > 0) {
-      const resolved = yield* resolveStaticFiles(staticGlobs, input.projectDir);
-      if (resolved.missing.length > 0) {
-        yield* deferWarning(`Static files not found for "${handlerName}": ${resolved.missing.join(", ")}`);
+    // Build & zip: Go uses go build, TS uses esbuild
+    let code: Buffer;
+    let bundleSize: number;
+
+    if (externalRuntime?.lang === "go") {
+      logDeploy(`[go] ${handlerName}: compiling Go binary`);
+      const goResult = yield* bundleGo(externalRuntime.handler, input.projectDir);
+      code = yield* zipGoBinary(goResult.outputDir);
+      bundleSize = code.length;
+    } else {
+      const bundleResult = yield* bundle({
+        ...input,
+        exportName,
+        ...(bundleType ? { type: bundleType } : {}),
+        ...(external && external.length > 0 ? { external } : {})
+      });
+      let staticFiles: import("../build/bundle").StaticFile[] | undefined;
+      if (staticGlobs && staticGlobs.length > 0) {
+        const resolved = yield* resolveStaticFiles(staticGlobs, input.projectDir);
+        if (resolved.missing.length > 0) {
+          yield* deferWarning(`Static files not found for "${handlerName}": ${resolved.missing.join(", ")}`);
+        }
+        staticFiles = resolved.files.length > 0 ? resolved.files : undefined;
       }
-      staticFiles = resolved.files.length > 0 ? resolved.files : undefined;
-    }
-    const bundleSize = Buffer.byteLength(bundleResult.code, "utf-8");
+      bundleSize = Buffer.byteLength(bundleResult.code, "utf-8");
 
-    // Log bundle composition when size exceeds 500KB
-    if (bundleResult.topModules && bundleSize > 500 * 1024) {
-      const top = bundleResult.topModules.slice(0, 10);
-      const lines = top.map(m => `  ${formatBytes(m.bytes).padStart(8)}  ${m.path}`).join("\n");
-      yield* deferWarning(`Bundle "${handlerName}" is ${formatBytes(bundleSize)} — top modules:\n${lines}`);
-    }
+      // Log bundle composition when size exceeds 500KB
+      if (bundleResult.topModules && bundleSize > 500 * 1024) {
+        const top = bundleResult.topModules.slice(0, 10);
+        const lines = top.map(m => `  ${formatBytes(m.bytes).padStart(8)}  ${m.path}`).join("\n");
+        yield* deferWarning(`Bundle "${handlerName}" is ${formatBytes(bundleSize)} — top modules:\n${lines}`);
+      }
 
-    const code = yield* zip({ content: bundleResult.code, staticFiles });
+      code = yield* zip({ content: bundleResult.code, staticFiles });
+      collectBundle(handlerName, bundleResult.code);
+    }
 
     const environment: Record<string, string> = {
       EFF_PROJECT: input.project,
@@ -272,13 +289,13 @@ export const deployCoreLambda = ({
       memory,
       timeout,
       tags: makeTags(tagCtx),
+      // Go uses custom runtime (provided.al2023), handler is the bootstrap binary
+      ...(externalRuntime ? { runtime: Runtime.providedal2023, handler: "bootstrap" } : {}),
       ...(layerArn ? { layers: [layerArn] } : {}),
       environment
     });
 
-    collectBundle(handlerName, bundleResult.code);
-
-    logDeploy(`[${bundleType ?? "lambda"}] ${handlerName}: ${status} (${formatBytes(bundleSize)})`);
+    logDeploy(`[${externalRuntime ? externalRuntime.lang : bundleType ?? "lambda"}] ${handlerName}: ${status} (${formatBytes(bundleSize)})`);
 
     return { functionArn, status, tagCtx, bundleSize };
   });

@@ -24,7 +24,7 @@ export type { StaticSiteConfig, StaticSiteHandler, StaticSiteSeo, MiddlewareRequ
 export type { FifoQueueConfig, FifoQueueMessage } from "./handlers/define-fifo-queue"
 export type { BucketConfig, BucketEvent, BucketEntityConfig } from "./handlers/define-bucket"
 export type { MailerConfig, MailerHandler } from "./handlers/define-mailer"
-export type { AuthOptions, ApiConfig, ApiHandler, ApiRoutes, CacheOptions } from "./handlers/define-api"
+export type { AuthOptions, ApiConfig, ApiHandler, ApiRoutes, CacheOptions, ExternalRuntime } from "./handlers/define-api"
 export type { CronConfig } from "./handlers/define-cron"
 export type { WorkerConfig } from "./handlers/define-worker"
 export type { McpConfig, McpToolContent, McpToolResult, McpInputSchema, McpResourceContent, McpPromptArgument, McpPromptContent, McpPromptMessage, McpPromptResult, McpEntries } from "./handlers/define-mcp"
