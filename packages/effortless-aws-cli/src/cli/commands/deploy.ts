@@ -73,22 +73,23 @@ const formatDeploySummary = (results: DeployProjectResult): string[] => {
 
 const deployAll = (deployOpts: { noSites: boolean; verbose: boolean; dryRun: boolean }) =>
   Effect.gen(function* () {
-    const { project, stage, region, patterns, projectDir } = yield* CliContext;
+    const { project, stage, region, patterns, projectDir, manifest } = yield* CliContext;
 
-    if (!patterns) {
+    if (!patterns && !manifest) {
       yield* Console.error("Error: No target specified and no 'handlers' patterns in config");
       return;
     }
 
     const results = yield* deployProject({
       projectDir,
-      patterns,
+      patterns: patterns ?? [],
       project,
       stage,
       region,
       noSites: deployOpts.noSites,
       verbose: deployOpts.verbose,
       dryRun: deployOpts.dryRun,
+      manifest: manifest ?? undefined,
     });
 
     if (!deployOpts.dryRun) {

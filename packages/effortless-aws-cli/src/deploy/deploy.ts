@@ -15,6 +15,8 @@ import {
   findDistributionByTags,
 } from "../aws";
 import { findHandlerFiles, discoverHandlers, flattenHandlers, type DiscoveredHandlers, bundle } from "~/build/bundle";
+import { manifestToDiscoveredHandlers } from "~/build/manifest-to-handlers";
+import type { ProjectManifest } from "effortless-aws";
 import type { HandlerType } from "~/build/handler-registry";
 import { toSeconds } from "effortless-aws";
 import type { SecretEntry } from "~/build/handler-registry";
@@ -907,6 +909,8 @@ export type DeployProjectInput = {
   silent?: boolean;
   /** Bundle and validate without deploying to AWS. */
   dryRun?: boolean;
+  /** Project manifest from defineProject() — when set, uses manifest-driven discovery instead of file-glob discovery. */
+  manifest?: ProjectManifest;
 };
 
 export type DeployProjectResult = {
@@ -931,15 +935,26 @@ type HandlerCounts = {
 const discoverAndValidate = (input: DeployProjectInput) =>
   Effect.gen(function* () {
     const stage = resolveStage(input.stage);
-    const files = findHandlerFiles(input.patterns, input.projectDir);
 
-    if (files.length === 0) {
-      return yield* Effect.fail(new Error(`No files match patterns: ${input.patterns.join(", ")}`));
+    let discovered: DiscoveredHandlers;
+    let files: string[] = [];
+
+    if (input.manifest) {
+      // Project mode: derive handlers from manifest
+      discovered = manifestToDiscoveredHandlers(input.manifest, input.projectDir);
+      yield* Effect.logDebug(`Project mode: ${Object.keys(input.manifest.resources).length} resource(s) from manifest`);
+    } else {
+      // Legacy mode: discover handlers from file globs
+      files = findHandlerFiles(input.patterns, input.projectDir);
+
+      if (files.length === 0) {
+        return yield* Effect.fail(new Error(`No files match patterns: ${input.patterns.join(", ")}`));
+      }
+
+      yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
+
+      discovered = yield* discoverHandlers(files, input.projectDir);
     }
-
-    yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
-
-    const discovered = yield* discoverHandlers(files, input.projectDir);
     const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
 
     const counts: HandlerCounts = {

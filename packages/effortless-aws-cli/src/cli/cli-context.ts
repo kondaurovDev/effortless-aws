@@ -5,7 +5,7 @@ import * as Option from "effect/Option";
 import * as Logger from "effect/Logger";
 import * as LogLevel from "effect/LogLevel";
 import { Console } from "effect";
-import type { EffortlessConfig } from "effortless-aws";
+import type { EffortlessConfig, ProjectManifest } from "effortless-aws";
 
 import { ProjectConfig } from "./project-config";
 import { getPatternsFromConfig } from "./config";
@@ -17,6 +17,8 @@ export type CliContextShape = {
   config: EffortlessConfig | null;
   projectDir: string;
   patterns: string[] | null;
+  /** Set when effortless.config.ts uses defineProject() */
+  manifest: ProjectManifest | null;
 };
 
 export class CliContext extends Context.Tag("CliContext")<CliContext, CliContextShape>() {}
@@ -33,7 +35,17 @@ export const makeCliContext = (opts: {
   Layer.effect(
     CliContext,
     Effect.gen(function* () {
-      const { config, projectDir } = yield* ProjectConfig;
+      const projectCtx = yield* ProjectConfig;
+
+      if (projectCtx.mode === "project") {
+        const { manifest, projectDir } = projectCtx;
+        const project = Option.getOrElse(opts.project, () => manifest.name);
+        const stage = manifest.stage ?? opts.stage;
+        const region = manifest.region ?? opts.region;
+        return { project, stage, region, config: null, projectDir, patterns: null, manifest };
+      }
+
+      const { config, projectDir } = projectCtx;
       const project = Option.getOrElse(opts.project, () => config?.name ?? "");
       if (!project) {
         yield* Console.error("Error: --project is required (or set 'name' in effortless.config.ts)");
@@ -42,7 +54,7 @@ export const makeCliContext = (opts: {
       const stage = config?.stage ?? opts.stage;
       const region = config?.region ?? opts.region;
       const patterns = getPatternsFromConfig(config);
-      return { project, stage, region, config, projectDir, patterns };
+      return { project, stage, region, config, projectDir, patterns, manifest: null };
     })
   );
 

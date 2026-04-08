@@ -41,7 +41,9 @@ const resolveDepsDir = (projectDir: string, config: { handlers?: string | string
 
 /** Get layer info: production deps, packages, hash. No Console output. */
 export const getLayerInfo = Effect.gen(function* () {
-  const { config, projectDir } = yield* ProjectConfig;
+  const projectCtx = yield* ProjectConfig;
+  const config = projectCtx.mode === "legacy" ? projectCtx.config : null;
+  const { projectDir } = projectCtx;
   const depsDir = resolveDepsDir(projectDir, config);
 
   const prodDeps = yield* readProductionDependencies(depsDir).pipe(
@@ -242,7 +244,9 @@ export const layerCommand = Command.make(
   { build: buildOption, output: outputOption, verbose: verboseOption },
   ({ build, output, verbose }) =>
     Effect.gen(function* () {
-      const { config, projectDir } = yield* ProjectConfig;
+      const projectCtx = yield* ProjectConfig;
+      const config = projectCtx.mode === "legacy" ? projectCtx.config : null;
+      const { projectDir } = projectCtx;
       const depsDir = resolveDepsDir(projectDir, config);
 
       if (build) {

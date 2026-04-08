@@ -2,12 +2,11 @@ import { Options } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
 import * as esbuild from "esbuild";
 import { Effect } from "effect";
-import type { EffortlessConfig } from "effortless-aws";
+import type { EffortlessConfig, ProjectManifest } from "effortless-aws";
 
-export type LoadedConfig = {
-  config: EffortlessConfig | null;
-  configDir: string;
-};
+export type LoadedConfig =
+  | { mode: "legacy"; config: EffortlessConfig | null; configDir: string }
+  | { mode: "project"; manifest: ProjectManifest; configDir: string };
 
 export const loadConfig = Effect.fn("loadConfig")(function* (): Generator<any, LoadedConfig> {
   const p = yield* Path.Path;
@@ -17,7 +16,7 @@ export const loadConfig = Effect.fn("loadConfig")(function* (): Generator<any, L
 
   const exists = yield* fs.exists(configPath);
   if (!exists) {
-    return { config: null, configDir: process.cwd() };
+    return { mode: "legacy", config: null, configDir: process.cwd() };
   }
 
   const configDir = p.dirname(configPath);
@@ -37,7 +36,7 @@ export const loadConfig = Effect.fn("loadConfig")(function* (): Generator<any, L
 
   const output = result.outputFiles?.[0];
   if (!output) {
-    return { config: null, configDir };
+    return { mode: "legacy", config: null, configDir };
   }
 
   const code = output.text;
@@ -50,7 +49,14 @@ export const loadConfig = Effect.fn("loadConfig")(function* (): Generator<any, L
     catch: (error) => new Error(`Failed to load config: ${error}`),
   }).pipe(Effect.ensuring(fs.remove(tempFile).pipe(Effect.catchAll(() => Effect.void))));
 
-  return { config: mod.default as EffortlessConfig | null, configDir };
+  const defaultExport = mod.default;
+
+  // Detect project mode vs legacy mode
+  if (defaultExport && typeof defaultExport === "object" && defaultExport.__brand === "effortless-project") {
+    return { mode: "project", manifest: defaultExport as ProjectManifest, configDir };
+  }
+
+  return { mode: "legacy", config: defaultExport as EffortlessConfig | null, configDir };
 });
 
 export const DEFAULT_STAGE = "dev";

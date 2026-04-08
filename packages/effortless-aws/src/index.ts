@@ -2,6 +2,10 @@
 export type { EffortlessConfig } from "./config"
 export { defineConfig } from "./config"
 
+// Project
+export { defineProject } from "./project"
+export type { ProjectManifest, ProjectResource, ProjectTable, ProjectApi, ProjectBucket, ProjectCron, ProjectQueue, ProjectWorker, ProjectMailer, ProjectSecret } from "./project"
+
 // Handlers
 export { defineTable } from "./handlers/define-table"
 export { defineApp } from "./handlers/define-app"

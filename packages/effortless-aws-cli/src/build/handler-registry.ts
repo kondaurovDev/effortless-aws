@@ -138,6 +138,15 @@ export const handler = ${wrapperFn}(${importName});
 `;
 };
 
+/**
+ * Generate entry point for project-mode handlers.
+ * In project mode, the handler file already exports a Lambda-compatible function
+ * via createHandler() from the co-located handler.gen.ts.
+ */
+export const generateProjectEntryPoint = (handlerFile: string): string => {
+  return `export { handler } from "${handlerFile}";\n`;
+};
+
 // ============ Middleware extraction (AST — used only for Lambda@Edge) ============
 
 const parseSource = (source: string) => {
