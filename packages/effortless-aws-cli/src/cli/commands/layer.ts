@@ -1,6 +1,6 @@
 import { Command, Options } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
-import { Effect, Console } from "effect";
+import { Effect, Console, Layer } from "effect";
 
 import {
   collectLayerPackages,
@@ -8,10 +8,11 @@ import {
   computeLockfileHash,
   checkDependencyWarnings,
   findDepsDir,
-} from "../../aws";
+} from "~/build";
 import { verboseOption, outputOption, getPatternsFromConfig } from "~/cli/config";
 import { findHandlerFiles } from "~/build/bundle";
-import { ProjectConfig } from "~/cli/project-config";
+import { ProjectConfig, ProjectConfigLive } from "~/cli/project-config";
+import { Esbuild } from "~/build/esbuild";
 import { c } from "~/cli/colors";
 import * as path from "path";
 
@@ -250,5 +251,5 @@ export const layerCommand = Command.make(
       } else {
         yield* showLayerInfo(depsDir, config?.name, verbose);
       }
-    }).pipe(Effect.provide(ProjectConfig.Live))
+    }).pipe(Effect.provide(ProjectConfigLive.pipe(Layer.provide(Esbuild.Default))))
 ).pipe(Command.withDescription("Inspect or locally build the shared Lambda dependency layer from package.json"));

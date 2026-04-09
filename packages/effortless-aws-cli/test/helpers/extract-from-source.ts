@@ -1,29 +1,13 @@
-import * as fs from "fs";
-import * as path from "path";
-import * as crypto from "crypto";
-import { Effect } from "effect";
-import { NodeContext } from "@effect/platform-node";
-import { extractConfigsFromFile } from "~cli/build/bundle";
-import type { HandlerType, ExtractedConfig } from "~cli/build/handler-registry";
-
-const projectDir = path.resolve(import.meta.dirname, "../..");
+import { extractConfigs } from "~cli/discovery";
+import type { HandlerType } from "~cli/core/handler-types";
+import type { ExtractedConfig } from "~cli/core/extracted-config";
 
 /**
- * Test helper: writes source to a temp .ts file, extracts configs via runtime import, cleans up.
+ * Test helper: extracts handler configs from source code via AST parsing.
+ * No temp files, no esbuild, no runtime import — pure static analysis.
  */
-const extractFromSource = async (source: string, type: HandlerType): Promise<ExtractedConfig<any>[]> => {
-  const id = crypto.randomUUID().slice(0, 8);
-  const tempFile = path.join(projectDir, `.temp-extract-${id}.ts`);
-  fs.writeFileSync(tempFile, source);
-  try {
-    return await Effect.runPromise(
-      extractConfigsFromFile(tempFile, projectDir, type).pipe(
-        Effect.provide(NodeContext.layer),
-      )
-    );
-  } finally {
-    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-  }
+const extractFromSource = (source: string, type: HandlerType): ExtractedConfig<any>[] => {
+  return extractConfigs(source, type);
 };
 
 export const extractTableConfigs = (source: string) => extractFromSource(source, "table");

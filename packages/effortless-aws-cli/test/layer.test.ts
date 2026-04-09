@@ -10,7 +10,7 @@ import {
   computeLockfileHash,
   readProductionDependencies,
   collectLayerPackages
-} from "~cli/aws/layer";
+} from "~cli/build";
 
 describe("layer", () => {
   let tempDir: string;

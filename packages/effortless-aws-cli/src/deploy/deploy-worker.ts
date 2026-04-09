@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { ExtractedWorkerFunction } from "~/build/bundle";
+import type { ExtractedWorkerFunction } from "~/discovery";
 import { toSeconds } from "effortless-aws";
 import { bundle, zip, resolveStaticFiles } from "~/build/bundle";
 import {
@@ -10,10 +10,8 @@ import {
   ensureEcsTaskRole,
   ensureEcsExecutionRole,
   getDefaultVpcSubnets,
-  makeTags,
-  resolveStage,
-  type TagContext,
 } from "../aws";
+import { makeTags, resolveStage, type TagContext } from "../core";
 import { sqs, s3 } from "../aws/clients";
 import type { DeployInput } from "./shared";
 

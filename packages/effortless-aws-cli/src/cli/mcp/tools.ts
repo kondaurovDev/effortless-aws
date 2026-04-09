@@ -2,7 +2,8 @@ import * as Effect from "effect/Effect";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { Aws } from "~/aws";
-import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { findHandlerFiles } from "~/build/bundle";
+import { discoverHandlers, flattenHandlers } from "~/discovery";
 import { deployProject } from "~/deploy/deploy";
 import { CliContext } from "~/cli/cli-context";
 import { getStatus } from "~/cli/commands/status";
@@ -19,7 +20,7 @@ export const handleDescribe = async (): Promise<CallToolResult> =>
     Effect.gen(function* () {
       const { project, stage, region, patterns, projectDir, config } = yield* CliContext;
       const handlers = patterns
-        ? flattenHandlers(yield* discoverHandlers(findHandlerFiles(patterns, projectDir), projectDir))
+        ? flattenHandlers(yield* discoverHandlers(findHandlerFiles(patterns, projectDir)))
             .map(h => ({ name: h.exportName, type: h.type, file: h.file }))
         : [];
       return { project, stage, region, projectDir, handlersPattern: config?.handlers ?? null, handlers };

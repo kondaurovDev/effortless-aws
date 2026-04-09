@@ -13,7 +13,6 @@
  */
 
 import { Effect } from "effect";
-import type { ResourceType } from "../aws/tags";
 import {
   deleteLambda,
   deleteRole,
@@ -28,21 +27,12 @@ import {
   deleteEcsCluster,
   deregisterTaskDefinitions,
   deleteLogGroup,
-  findHandlerResourceArns,
 } from "../aws";
+import { findHandlerResourceArns } from "../aws/resource-lookup";
+import type { ResourceType, HandlerType } from "../core";
+export type { HandlerType } from "../core";
 
 // ============ Types ============
-
-export type HandlerType =
-  | "table"
-  | "api"
-  | "cron"
-  | "fifoQueue"
-  | "bucket"
-  | "mailer"
-  | "staticSite"
-  | "app"
-  | "worker";
 
 export type NameCtx = { project: string; stage: string; handler: string; region: string };
 
@@ -93,7 +83,7 @@ const std = (ctx: NameCtx) => `${ctx.project}-${ctx.stage}-${ctx.handler}`;
 /** Find and delete CloudFront distribution by handler tags */
 const deleteCloudFrontByTag = (ctx: NameCtx) =>
   Effect.gen(function* () {
-    const arns = yield* findHandlerResourceArns(ctx.project, ctx.stage, ctx.region, ctx.handler, "arn:aws:cloudfront:");
+    const arns = yield* findHandlerResourceArns(ctx.handler, "arn:aws:cloudfront:");
     for (const arn of arns) {
       const distributionId = arn.split("/").pop()!;
       yield* disableAndDeleteDistribution(distributionId);
@@ -103,7 +93,7 @@ const deleteCloudFrontByTag = (ctx: NameCtx) =>
 /** Find and delete SES identity by handler tags */
 const deleteSesByTag = (ctx: NameCtx) =>
   Effect.gen(function* () {
-    const arns = yield* findHandlerResourceArns(ctx.project, ctx.stage, ctx.region, ctx.handler, "arn:aws:ses:");
+    const arns = yield* findHandlerResourceArns(ctx.handler, "arn:aws:ses:");
     for (const arn of arns) {
       const identity = arn.split("/").pop()!;
       yield* deleteSesIdentity(identity);
@@ -211,6 +201,14 @@ export const HANDLER_RESOURCES: Record<HandlerType, ResourceSpec[]> = {
     { type: "ecs", label: "ECS Cluster", cleanupOrder: ORDER.ECS_CLUSTER, deriveName: (c) => `${c.project}-${c.stage}`, cleanup: (c) => deleteEcsCluster(`${c.project}-${c.stage}`), shared: true },
     { type: "iam-role", label: "Task IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-task-role`, cleanup: (c) => deleteRole(`${std(c)}-task-role`) },
     { type: "iam-role", label: "Execution IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${c.project}-${c.stage}-ecs-execution-role`, cleanup: (c) => deleteRole(`${c.project}-${c.stage}-ecs-execution-role`), shared: true },
+  ],
+
+  // ── defineMcp ─────────────────────────────────────────
+  // deployCoreLambda → Lambda + IAM Role
+  // ensureFunctionUrl → sub-resource of Lambda
+  mcp: [
+    { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)) },
+    { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`) },
   ],
 };
 

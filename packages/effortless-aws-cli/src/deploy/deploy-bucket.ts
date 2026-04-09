@@ -1,17 +1,15 @@
 import { Effect } from "effect";
 import { Path } from "@effect/platform";
 import { toSeconds } from "effortless-aws";
-import type { ExtractedBucketFunction } from "~/build/bundle";
+import type { ExtractedBucketFunction } from "~/discovery";
 import {
   ensureBucket,
   ensureBucketNotification,
   addS3LambdaPermission,
   syncFiles,
   seedFiles,
-  makeTags,
-  resolveStage,
-  type TagContext,
 } from "../aws";
+import { makeTags, resolveStage, type TagContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,

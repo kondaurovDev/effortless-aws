@@ -1,12 +1,7 @@
 import { Effect, Console } from "effect";
-import type { ExtractedMailerFunction } from "~/build/bundle";
-import {
-  ensureSesIdentity,
-  type DkimRecord,
-  makeTags,
-  resolveStage,
-  type TagContext,
-} from "../aws";
+import type { ExtractedMailerFunction } from "~/discovery";
+import { ensureSesIdentity, type DkimRecord } from "../aws";
+import { makeTags, resolveStage, type TagContext } from "../core";
 import { c } from "~/cli/colors";
 
 export type DeployMailerResult = {

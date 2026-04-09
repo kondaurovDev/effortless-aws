@@ -2,47 +2,48 @@
 
 [![npm version](https://img.shields.io/npm/v/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
 
-Code-first AWS Lambda framework. Export handlers, deploy with one command. No YAML, no CloudFormation, no state files.
+You write handlers. The framework builds, bundles, provisions AWS resources, wires IAM permissions, and deploys — all from your TypeScript code.
 
-```bash
-npm install effortless-aws
-```
+Your TypeScript is the single source of truth — for code and infrastructure.
 
-## What it looks like
+## You write this
 
 ```typescript
-import { defineApi } from "effortless-aws";
+import { defineApi, defineTable } from "effortless-aws";
 
-export const hello = defineApi({ basePath: "/hello" })
-  .get("/", async ({ ok }) => ok({ message: "Hello!" }));
+const db = defineTable<Order>();
+
+export const api = defineApi({ basePath: "/orders" })
+  .deps(() => ({ db }))
+  .get("/{id}", async ({ params, deps, ok }) => {
+    const order = await deps.db.get(params.id);
+    return ok(order);
+  });
 ```
 
-## Handlers
+## You run this
 
-| Handler | Description |
-|---------|-------------|
-| `defineApi` | HTTP API with typed GET/POST routes via Lambda Function URL |
-| `defineApp` | SSR framework deployment (Nuxt, Next.js) via CloudFront |
-| `defineTable` | DynamoDB table with stream processing |
-| `defineFifoQueue` | SQS FIFO queue consumer |
-| `defineBucket` | S3 bucket with event triggers |
-| `defineMailer` | SES email sending |
-| `defineStaticSite` | CloudFront + S3 static site with optional middleware |
+```bash
+eff deploy
+```
 
-## Features
+## The framework handles the rest
 
-- **Infrastructure from code** — export a handler, get the AWS resources
-- **Typed everything** — `defineTable<Order>()` gives you typed `put()`, typed `deps.orders.get()`, typed `record.new`
-- **Cross-handler deps** — `.deps(() => ({ orders }))` auto-wires IAM and injects a typed `TableClient`
-- **SSM params** — `.config(({ defineSecret }) => ...)` fetches secrets from Parameter Store at cold start
-- **Static files** — `static: ["templates/*.ejs"]` bundles files into the Lambda ZIP
-- **Cold start caching** — `setup` factory runs once per cold start, cached across invocations
+From the example above, `eff deploy` will:
 
-Deploy with [`@effortless-aws/cli`](https://www.npmjs.com/package/@effortless-aws/cli).
+- **Bundle** your code with esbuild and package dependencies into a Lambda layer
+- **Create a DynamoDB table** with streams and indexes — from `defineTable<Order>()`
+- **Create a Lambda** with a public HTTP endpoint — from `defineApi()`
+- **Wire IAM permissions** so the API can read/write the table — from `.deps(() => ({ db }))`
+- **Type everything** — `deps.db.get()` returns `Order`, no casts, no `as any`
+
+The same principle works for S3 buckets, SQS queues, SES email, static sites, SSR apps, cron jobs — define a handler, the infrastructure follows.
 
 ## Documentation
 
 Full docs, examples, and API reference: **[effortless-aws.website](https://effortless-aws.website)**
+
+Deploy with [`@effortless-aws/cli`](https://www.npmjs.com/package/@effortless-aws/cli).
 
 ## License
 

@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { Path, FileSystem } from "@effect/platform";
 import * as crypto from "crypto";
 import { s3, lambda } from "./clients";
-import { toAwsTagList } from "./tags";
+import { toAwsTagList } from "./resource-lookup";
 
 // Reuse the same content-type map as wrap-app.ts
 const CONTENT_TYPES: Record<string, string> = {

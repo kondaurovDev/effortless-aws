@@ -3,7 +3,8 @@ import { Path } from "@effect/platform";
 import { Effect, Console, Option } from "effect";
 
 import { deploy, deployTable, deployAllTables, deployProject, type DeployTableResult, type DeployProjectResult } from "~/deploy/deploy";
-import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { findHandlerFiles } from "~/build/bundle";
+import { discoverHandlers, flattenHandlers } from "~/discovery";
 import { Aws } from "../../aws";
 import { projectOption, stageOption, regionOption, verboseOption, noSitesOption, dryRunOption } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
@@ -141,7 +142,7 @@ const deployByName = (targetValue: string) =>
     }
 
     const files = findHandlerFiles(patterns, projectDir);
-    const discovered = yield* discoverHandlers(files, projectDir);
+    const discovered = yield* discoverHandlers(files);
     const allHandlers = flattenHandlers(discovered);
     const found = allHandlers.find(h => h.exportName === targetValue);
 

@@ -2,11 +2,7 @@ import { Effect, Console } from "effect";
 import { c } from "~/cli/colors";
 import {
   Aws,
-  resolveStage,
   ensureLayer,
-  readProductionDependencies,
-  collectLayerPackages,
-  findDepsDir,
   cleanupOrphanedFunctions,
   ensureFunctionUrl,
   addFunctionUrlPublicAccess,
@@ -14,10 +10,11 @@ import {
   ensureKeyGroup,
   findDistributionByTags,
 } from "../aws";
-import { findHandlerFiles, discoverHandlers, flattenHandlers, type DiscoveredHandlers, bundle } from "~/build/bundle";
-import type { HandlerType } from "~/build/handler-registry";
+import { readProductionDependencies, collectLayerPackages, findDepsDir } from "../build";
+import { resolveStage, type HandlerType, type SecretEntry } from "../core";
+import { findHandlerFiles, bundle } from "~/build/bundle";
+import { discoverHandlers, flattenHandlers, type DiscoveredHandlers } from "~/discovery";
 import { toSeconds } from "effortless-aws";
-import type { SecretEntry } from "~/build/handler-registry";
 import * as crypto from "crypto";
 import * as path from "path";
 import { ssm } from "~/aws/clients";
@@ -939,7 +936,7 @@ const discoverAndValidate = (input: DeployProjectInput) =>
 
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
-    const discovered = yield* discoverHandlers(files, input.projectDir);
+    const discovered = yield* discoverHandlers(files);
     const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
 
     const counts: HandlerCounts = {
@@ -1153,7 +1150,7 @@ const resolveCfDomain = (input: {
           const d = typeof domainCfg === "string" ? domainCfg : domainCfg?.[input.stage];
           if (d) return d;
 
-          const existing = yield* findDistributionByTags(input.project, input.stage, fn.exportName).pipe(
+          const existing = yield* findDistributionByTags(fn.exportName).pipe(
             Effect.provide(Aws.makeClients({
               resource_groups_tagging_api: { region: "us-east-1" },
               cloudfront: { region: "us-east-1" },
@@ -1275,7 +1272,7 @@ const deployResources = (input: {
 
     // Clean up orphaned CloudFront Functions
     if ((!noSites && staticSiteResults.length > 0) || appResults.length > 0) {
-      yield* cleanupOrphanedFunctions(ctx.input.project, ctx.stage).pipe(
+      yield* cleanupOrphanedFunctions.pipe(
         Effect.provide(Aws.makeClients({
           cloudfront: { region: "us-east-1" },
           resource_groups_tagging_api: { region: "us-east-1" },

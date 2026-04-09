@@ -2,7 +2,7 @@
 
 > Code-first AWS Lambda framework for TypeScript. Export handlers, deploy with one command.
 
-Effortless AWS is a TypeScript framework where you define AWS resources (Lambda, DynamoDB, SQS, S3, SES, CloudFront) by exporting handler objects from `.ts` files. The framework handles all infrastructure — IAM roles, Lambda Function URLs, event source mappings, Lambda layers — automatically. No YAML, no CloudFormation, no state files.
+Effortless AWS is a TypeScript framework where you define AWS resources (Lambda, DynamoDB, SQS, S3, SES, CloudFront, Fargate, MCP) by exporting handler objects from `.ts` files. The framework handles all infrastructure — IAM roles, Lambda Function URLs, event source mappings, Lambda layers — automatically. No YAML, no CloudFormation, no state files.
 
 - Package: `effortless-aws` (npm)
 - CLI: `eff deploy`
@@ -41,7 +41,19 @@ Reference other handlers via `deps: () => ({ orders, uploads, mailer })`. The fr
 
 ### config = SSM secrets
 
-`config: { key: param("ssm/path") }` fetches secrets from SSM Parameter Store at cold start, caches them. SSM path: `/${project}/${stage}/${key}`.
+Use `defineSecret()` inside a config callback to declare SSM secrets:
+
+```typescript
+config: ({ defineSecret }) => ({
+  apiKey: defineSecret(),                          // string, key inferred from property name
+  port: defineSecret({ transform: Number }),       // number
+  config: defineSecret({ transform: JSON.parse }), // parsed JSON
+  token: defineSecret({ generate: "hex:32" }),     // auto-generated on first deploy
+  id: defineSecret({ generate: "uuid" }),          // auto-generated UUID
+})
+```
+
+SSM path: `/${project}/${stage}/${key}`. The legacy `param()` function is deprecated — use `defineSecret()` instead.
 
 ### setup = cold-start factory
 
@@ -49,65 +61,83 @@ Reference other handlers via `deps: () => ({ orders, uploads, mailer })`. The fr
 
 ### schema = validation
 
-Pass a validation function for runtime validation, or use the generic parameter on `define*<T>()` for type-only. Validated data arrives as `data` arg in callbacks.
+Pass a Standard Schema V1 compliant validator (Zod, ArkType, Valibot, etc.) for runtime validation, or use the generic parameter on `define*<T>()` for type-only. Validated data arrives as `data` arg in callbacks.
 
 ### static = bundled files
 
-`static: ["src/templates/*.ejs"]` bundles files into Lambda ZIP. Access via `files.read("src/templates/invoice.ejs")`.
+Use `.include("src/templates/*.ejs")` builder method to bundle files into Lambda ZIP. Access via `files.read("src/templates/invoice.ejs")` in setup.
 
-### Shared handler options
+### Shared builder methods
 
-All handler types accept: `deps`, `config`, `setup`, `memory`, `timeout`, `logLevel`, `onError`, `onCleanup`. Examples below show these only where relevant — they work the same everywhere.
+All handler types support the following builder chain: `.deps()`, `.config()`, `.include()`, `.setup()`, `.onError()`, `.onCleanup()`. Examples below show these only where relevant — they work the same everywhere.
 
 ## Handler types
 
 ### defineApi — HTTP API
 
-Creates Lambda + Function URL. Routes via chained `.get()`, `.post()`, `.put()`, `.delete()`, `.patch()` with path as first arg. Shared options in the constructor; `.setup()` is chained.
+Creates Lambda + Function URL. Routes via chained `.get()`, `.post()`, `.put()`, `.delete()`, `.patch()` with a route definition object. Builder chain: `.deps()` → `.config()` → `.include()` → `.auth()` → `.setup()` → `.onError()` → `.onCleanup()` → route methods.
 
 ```typescript
-import { defineApi, defineTable, param } from "effortless-aws";
+import { defineApi, defineTable } from "effortless-aws";
 import { z } from "zod";
 
 type Session = { userId: string; role: string };
 export const users = defineTable<{ tag: string; name: string }>().build();
 
-export default defineApi({
-  deps: () => ({ users }),
-  config: { dbUrl: param("database-url") },
-})
+export default defineApi({ basePath: "/api" })
+  .deps(() => ({ users }))
+  .config(({ defineSecret }) => ({ dbUrl: defineSecret() }))
+  .auth(async ({ config }) => ({
+    secret: config.dbUrl,
+    expiresIn: "7d",
+    apiToken: {
+      header: "x-api-key",
+      verify: async (token) => ({ userId: token, role: "api" }),
+      cacheTtl: "5m",
+    },
+  }))
   .setup(async ({ deps, config }) => {
     const pool = createPool(config.dbUrl);
-    const auth = enableAuth<Session>({ expiresIn: "7d" });
-    return { pool, auth };
+    return { pool };
   })
-  .get("/api/users", async ({ pool }) => ({
+  .get({ path: "/users" }, async ({ pool }) => ({
     status: 200,
     body: await pool.query("SELECT * FROM users"),
   }))
-  .post("/api/users", async ({ input, pool }) => {
-    const data = z.object({ name: z.string() }).parse(input);
-    return { status: 201, body: { id: crypto.randomUUID() } };
-  })
-  .post("/api/login", async ({ input, auth }) => {
-    // public: true skips auth check
+  .get({ path: "/users", cache: "30s" }, async ({ pool }) => ({
+    status: 200,
+    body: await pool.query("SELECT * FROM users"),
+  }))
+  .post({ path: "/users", input: z.object({ name: z.string() }) }, async ({ input, pool }) => ({
+    status: 201,
+    body: { id: crypto.randomUUID() },
+  }))
+  .post({ path: "/login", public: true }, async ({ input, auth }) => {
     return auth.createSession({ userId: "admin", role: "admin" });
-  }, { public: true });
+  });
 ```
 
-**Route options:** `.get("/path", handler)` — authenticated by default. `.post("/path", handler, { public: true })` — public. Unmatched routes → 404, missing session → 401.
+**Route definition object:** `{ path: "/...", public?: boolean, input?: StandardSchemaV1, cache?: CacheOptions }`. Routes are authenticated by default when `.auth()` is configured. Set `public: true` to skip auth. Unmatched routes → 404, missing session → 401.
 
-**`enableAuth`** — return from `.setup()` to enable typed auth. Helpers spread into route args:
-- `auth.createSession(data)` — set signed cookie, returns `{ status, headers }`
+**Cache options (GET routes):** `cache: "30s"` (shorthand) or `cache: { ttl: "30s", swr: "5m", scope: "public" | "private" }`. Shorthand defaults to public scope with `swr = ttl * 2`.
+
+**Stream mode:** `defineApi({ basePath: "/api", stream: true })` enables Server-Sent Events. Route handlers receive a `stream: ResponseStream` argument.
+
+**`.auth()` builder method** — enables typed session auth. Auth helpers spread into route args:
+- `auth.createSession(data, options?)` — set signed cookie, returns `{ status, headers }`
 - `auth.clearSession()` — clear cookie
 - `auth.session` — current session (`T | undefined`)
-- Supports hybrid API token auth: `enableAuth<S>({ expiresIn: "7d", apiToken: { verify: fn, cacheTtl: "5m", header: "x-api-key" } })`
+- Supports hybrid API token auth via `apiToken: { verify: fn, cacheTtl: "5m", header: "x-api-key" }`
+
+**Route callback args:** `req`, `input` (validated), `ok`, `fail`, `auth` (if configured), `stream` (if stream mode), plus all properties from `setup` return.
+
+**`ok` / `fail` helpers:** `ok(body?, status?)` returns success response. `fail(message, status?)` returns error response.
 
 **`req` object:** `req.method`, `req.path`, `req.headers`, `req.query`, `req.body` (auto-parsed JSON), `req.rawBody`.
 
 ### defineTable — DynamoDB table
 
-Creates a DynamoDB table with fixed envelope: `{ pk, sk, tag, data: T, ttl? }`. Optionally creates a stream Lambda via `onRecord`/`onRecordBatch`.
+Creates a DynamoDB table with fixed envelope: `{ pk, sk, tag, data: T, ttl? }`. Optionally creates a stream Lambda via `onRecord`/`onRecordBatch`. Builder chain: `.deps()` → `.config()` → `.include()` → `.setup()` → `.onError()` → `.onCleanup()` → `.onRecord()` / `.onRecordBatch()` / `.build()`.
 
 ```typescript
 import { defineTable } from "effortless-aws";
@@ -117,8 +147,11 @@ type Order = { tag: string; amount: number; status: string };
 // Resource-only
 export const orders = defineTable<Order>().build();
 
+// With custom tag field name
+export const orders = defineTable<Order>({ tagField: "type" }).build();
+
 // With stream handler (builder chain)
-export const orders = defineTable<Order>({ batchSize: 100 })
+export const orders = defineTable<Order>({ batchSize: 100, concurrency: 5 })
   .deps(() => ({ customers }))
   .setup(({ deps }) => ({ customers: deps.customers }))
   .onRecord(async ({ record, customers }) => {
@@ -128,6 +161,8 @@ export const orders = defineTable<Order>({ batchSize: 100 })
   });
 // OR: .onRecordBatch (return { failures: string[] } for partial batch failure)
 ```
+
+**Table options:** `billingMode`, `streamView`, `batchSize`, `batchWindow`, `startingPosition`, `concurrency` (parallel processing, default 1), `tagField` (custom discriminant field name, default "tag").
 
 **TableClient API** (via `deps`):
 
@@ -139,13 +174,16 @@ await table.delete({ pk: "USER#1", sk: "PROFILE" });
 await table.query({ pk: "USER#1", sk: { begins_with: "ORDER#" }, limit: 10, scanIndexForward: false });
 await table.queryByTag({ tag: "user", limit: 50 }); // GSI
 await table.update({ pk: "USER#1", sk: "ORDER#1" }, {
-  set: { status: "shipped" }, append: { events: ["shipped"] }, remove: ["tempNotes"], tag: "shipped-order", ttl: ts,
+  set: { status: "shipped" }, append: { events: ["shipped"] }, remove: ["tempNotes"],
+  increment: { count: 1 }, tag: "shipped-order", ttl: ts,
 });
 ```
 
+**SK conditions:** `string` (exact match), `{ begins_with }`, `{ gt }`, `{ gte }`, `{ lt }`, `{ lte }`, `{ between: [a, b] }`.
+
 ### defineFifoQueue — SQS FIFO queue
 
-Creates SQS FIFO queue + Lambda consumer.
+Creates SQS FIFO queue + Lambda consumer. Builder chain: `.deps()` → `.config()` → `.include()` → `.setup()` → `.onError()` → `.onCleanup()` → `.onMessage()` / `.onMessageBatch()`.
 
 ```typescript
 import { defineFifoQueue } from "effortless-aws";
@@ -153,8 +191,8 @@ import { defineFifoQueue } from "effortless-aws";
 type OrderEvent = { orderId: string; action: "created" | "shipped" };
 
 export const orderQueue = defineFifoQueue<OrderEvent>({
-  batchSize: 10,                    // 1-10
-  batchWindow: 10,                  // seconds, 0-300
+  batchSize: 10,
+  batchWindow: 10,
   visibilityTimeout: 120,
   contentBasedDeduplication: true,
 })
@@ -165,28 +203,49 @@ export const orderQueue = defineFifoQueue<OrderEvent>({
 // OR: .onMessageBatch (return { failures: string[] } for partial batch failure)
 ```
 
-**Sending** (via `deps`): `await orderQueue.send({ body: { orderId: "1", action: "created" }, messageGroupId: "order-1" })`
+**Queue options:** `batchSize` (1-10), `batchWindow` (seconds), `visibilityTimeout`, `retentionPeriod`, `delay`, `contentBasedDeduplication`, `maxReceiveCount`.
+
+**Sending** (via `deps`):
+
+```typescript
+await orderQueue.send({ body: { orderId: "1", action: "created" }, groupId: "order-1" });
+await orderQueue.sendBatch([
+  { body: { orderId: "1", action: "created" }, groupId: "order-1" },
+  { body: { orderId: "2", action: "shipped" }, groupId: "order-2" },
+]);
+```
+
+**Send options:** `{ body: T, groupId: string, deduplicationId?: string, messageAttributes?: Record<string, { dataType: string; stringValue: string }> }`.
 
 ### defineBucket — S3 bucket
 
-Creates S3 bucket. Optionally creates event Lambda.
+Creates S3 bucket. Optionally creates event Lambda. Supports typed entity storage. Builder chain: `.deps()` → `.config()` → `.include()` → `.entity()` → `.setup()` → `.onError()` → `.onCleanup()` → `.onObjectCreated()` / `.onObjectRemoved()` / `.build()`.
 
 ```typescript
 import { defineBucket } from "effortless-aws";
 
-export const uploads = defineBucket({}); // resource-only
+// Resource-only
+export const uploads = defineBucket({}).build();
 
-export const images = defineBucket({
-  prefix: "uploads/", suffix: ".jpg",
-  onObjectCreated: async ({ event, bucket }) => {
+// With entities (typed JSON storage)
+export const storage = defineBucket({})
+  .entity<"users", { name: string; email: string }>("users")
+  .entity<"settings", { theme: string }>("settings", { cache: "1h" })
+  .build();
+
+// With event handler
+export const images = defineBucket({ prefix: "uploads/", suffix: ".jpg" })
+  .onObjectCreated(async ({ event, bucket }) => {
     // event.key, event.size, event.eTag, event.eventTime
     const file = await bucket.get(event.key);
-  },
-  onObjectRemoved: async ({ event }) => { /* ... */ },
-});
+  });
 ```
 
-**BucketClient API** (via `deps`): `put(key, content, opts?)`, `get(key)`, `delete(key)`, `list(prefix)`.
+**Bucket options:** `prefix`, `suffix` (event filtering), `seed` (local directory — uploaded once on first deploy), `sync` (local directory — synced on every deploy, deletes removed files).
+
+**BucketClient API** (via `deps`): `put(key, body, opts?)`, `get(key)`, `delete(key)`, `list(prefix?)`, `bucketName`.
+
+**StoreEntityClient API** (via `deps` when entities are defined): `put(id, data)`, `get(id)`, `delete(id)`, `list()`. Each entity is accessible as a property: `storage.users.put("1", { name: "Alice", email: "a@b.com" })`.
 
 ### defineCron — Scheduled Lambda
 
@@ -200,7 +259,8 @@ export const cleanup = defineCron({ schedule: "rate(2 hours)" })
 
 export const sync = defineCron({ schedule: "cron(0 9 * * ? *)", timezone: "Europe/Moscow" })
   .deps(() => ({ orders }))
-  .setup(async ({ deps }) => ({ db: deps.orders }), { memory: 512, timeout: "5m" })
+  .config(({ defineSecret }) => ({ apiKey: defineSecret() }))
+  .setup(async ({ deps }) => ({ db: deps.orders }))
   .onTick(async ({ db }) => { /* ... */ });
 ```
 
@@ -215,6 +275,93 @@ export const mailer = defineMailer({ domain: "myapp.com" });
 // Via deps: await mailer.send({ from, to, subject, html?, text? })
 ```
 
+### defineWorker — Long-running Fargate worker
+
+Creates SQS queue + Fargate container. The worker auto-scales: starts when messages arrive, shuts down after idle timeout. Builder chain: `.deps()` → `.config()` → `.include()` → `.setup()` → `.onError()` → `.onCleanup()` → `.onMessage()` (terminal).
+
+```typescript
+import { defineWorker } from "effortless-aws";
+
+type Job = { videoId: string; format: string };
+
+export const encoder = defineWorker<Job>({
+  size: "2vCPU-4gb",
+  idleTimeout: "10m",
+  concurrency: 3,
+})
+  .deps(() => ({ uploads }))
+  .setup(async ({ deps }) => ({ bucket: deps.uploads }))
+  .onMessage(async (msg, { bucket }) => {
+    // msg — typed as Job
+    // long-running processing here
+  });
+```
+
+**Worker options:** `size` (Fargate size: `"0.25vCPU-512mb"`, `"0.5vCPU-1gb"`, `"1vCPU-2gb"`, `"2vCPU-4gb"`, `"4vCPU-8gb"`, default `"0.5vCPU-1gb"`), `idleTimeout` (default `"5m"`), `concurrency` (max parallel messages, 1-10, default 1).
+
+**onMessage callback:** receives `(msg: T, ctx)` where `msg` is the typed message body and `ctx` contains setup return properties.
+
+**onError callback:** receives `{ error, msg, retryCount }`. Return `"delete"` to discard the message, `"retry"` (default) to reprocess.
+
+**WorkerClient API** (via `deps`):
+
+```typescript
+await encoder.send({ videoId: "abc", format: "mp4" });
+await encoder.send({ videoId: "abc", format: "mp4" }, { delay: "5m", start: false });
+const status = await encoder.status(); // "running" | "idle"
+await encoder.stop();
+```
+
+### defineMcp — Model Context Protocol server
+
+Creates Lambda + Function URL implementing the MCP protocol. Exposes tools, resources, and prompts to MCP clients (Claude Desktop, Cursor, etc.). Builder chain: `.deps()` → `.config()` → `.include()` → `.auth()` → `.setup()` → `.onError()` → `.onCleanup()` → `.tool()` / `.resource()` / `.prompt()` / `.build()`.
+
+```typescript
+import { defineMcp, defineTable } from "effortless-aws";
+import { z } from "zod";
+
+export const db = defineTable<{ tag: string; title: string; content: string }>().build();
+
+export default defineMcp({ name: "my-tools", version: "1.0.0", instructions: "A helpful assistant" })
+  .deps(() => ({ db }))
+  .setup(async ({ deps }) => ({ db: deps.db }))
+  .tool(
+    { name: "search", description: "Search notes", input: z.object({ query: z.string() }) },
+    async (input, { db }) => {
+      const results = await db.queryByTag({ tag: "note", limit: 10 });
+      return results.map(r => r.data.title);
+    }
+  )
+  .tool(
+    { name: "create", description: "Create a note", input: { type: "object", properties: { title: { type: "string" }, content: { type: "string" } }, required: ["title", "content"] } },
+    async (input, { db }) => {
+      await db.put({ pk: "NOTE#" + crypto.randomUUID(), sk: "META", data: { tag: "note", ...input } });
+      return "Created";
+    }
+  )
+  .resource(
+    { uri: "resource://notes/{id}", name: "Note", params: z.object({ id: z.string() }) },
+    async ({ id }, { db }) => {
+      const note = await db.get({ pk: "NOTE#" + id, sk: "META" });
+      return note?.data;
+    }
+  )
+  .prompt(
+    { name: "summarize", description: "Summarize notes", args: [{ name: "topic", required: true }] },
+    async ({ topic }) => `Please summarize all notes about: ${topic}`
+  );
+```
+
+**MCP options:** `name` (server name), `version` (default `"1.0.0"`), `instructions` (system prompt context sent to clients).
+
+**`.tool(def, handler)`** — `def: { name, description, input }`. Input can be a Standard JSON Schema V1 (e.g. Zod schema) for typed inference, or a raw `{ type: "object", properties, required? }` object. Handler receives `(input, ctx)`. Return value is auto-wrapped as text content; return `{ content: McpToolContent[], isError? }` for explicit control.
+
+**`.resource(def, handler)`** — `def: { uri, name, params?, description?, mimeType? }`. URI can be a template with `{param}` placeholders. Handler receives `(params, ctx)`. Return string or `McpResourceContent[]`.
+
+**`.prompt(def, handler)`** — `def: { name, description?, args? }`. Args can be Standard Schema V1 or `McpPromptArgument[]`. Handler receives `(args, ctx)`. Return a string (auto-wrapped as user message) or `McpPromptResult` with explicit messages.
+
+**Auth:** `.auth()` works identically to `defineApi` — uses signed cookies with optional API token support.
+
 ### defineApp — SSR framework deployment
 
 Creates CloudFront + Lambda Function URL + S3 for SSR frameworks.
@@ -224,8 +371,10 @@ export const frontend = defineApp({
   server: ".output/server",   // directory with index.mjs handler
   assets: ".output/public",   // static assets → S3
   build: "nuxt build",
+  path: "/",                  // base URL path (default: "/")
   domain: "app.example.com",  // optional (needs ACM cert in us-east-1)
   memory: 1024,
+  routes: { "/api/*": apiHandler }, // proxy API routes via CloudFront
 });
 // Stage-specific: domain: { prod: "app.example.com", staging: "staging.example.com" }
 ```
@@ -234,21 +383,36 @@ Supports: Nuxt (native), Next.js (via OpenNext), any Nitro-based framework, cust
 
 ### defineStaticSite — static site / SPA on CloudFront
 
-Creates S3 + CloudFront distribution.
+Creates S3 + CloudFront distribution. Builder chain: `.route()` → `.middleware()` → `.build()`.
 
 ```typescript
+import { defineStaticSite } from "effortless-aws";
+
 export const docs = defineStaticSite({
   dir: "dist",
   build: "npm run build",
   domain: "docs.example.com",
-  spa: true,                  // all routes → index.html
-  errorPage: "404.html",      // non-SPA only
-  routes: { "/api/*": apiHandler }, // proxy to API (eliminates CORS)
-  middleware: async (request) => {  // Lambda@Edge auth
-    if (!request.cookies.session) return { redirect: "/login" };
+  errorPage: "404.html",
+  seo: {
+    sitemap: "sitemap.xml",
+    googleIndexing: "path/to/service-account-key.json",
   },
-});
+})
+  .route("/api/*", apiHandler, { access: "private" })
+  .middleware(async (request) => {
+    // request.uri, request.method, request.querystring, request.headers, request.cookies
+    if (!request.cookies.session) return { redirect: "/login" };
+    // return { status: 403, body?: "..." } to deny
+    // return void to allow
+  })
+  .build();
 ```
+
+**Config options:** `dir`, `index` (default `"index.html"`), `build`, `errorPage`, `domain` (string or stage-keyed record), `seo: { sitemap, googleIndexing? }`.
+
+**`.route(pattern, handler, opts?)`** — proxy routes to another handler (e.g., API) via CloudFront. Eliminates CORS. `opts: { access?: "private" | "public" }`.
+
+**`.middleware(fn)`** — Lambda@Edge function for request-level auth/redirects. Return `{ redirect: "/path", status? }` to redirect, `{ status: 403 }` to deny, or `void` to allow.
 
 ## CLI commands
 
@@ -271,6 +435,21 @@ eff layer --build                  # build layer locally
 
 All commands accept `--project`, `--stage`, `--region`, `--verbose`.
 
+### MCP server
+
+The CLI ships as an MCP server (`eff-mcp`) that can be connected to Claude Desktop, Cursor, or any MCP client. It exposes tools for deploying, viewing logs, managing config, checking status, and cleaning up resources — all within the AI assistant context.
+
+```json
+{
+  "mcpServers": {
+    "effortless-aws": {
+      "command": "npx",
+      "args": ["eff-mcp"]
+    }
+  }
+}
+```
+
 ## Key patterns and conventions
 
 ### Naming
@@ -289,25 +468,33 @@ Resources are discovered via AWS resource tags: `effortless-project`, `effortles
 
 Production `dependencies` from `package.json` → shared Lambda Layer. AWS SDK v3 excluded (provided by runtime). Hash-versioned, re-uploaded only when deps change.
 
+### Duration format
+
+Durations can be a number (seconds) or string: `"30s"`, `"5m"`, `"1h"`, `"1d"`. Helper: `toSeconds(duration)`.
+
 ### Callback args
 
-Handler callbacks receive a single object. Args are conditionally present based on configuration:
+Handler callbacks receive a single object (or positional args for `defineWorker`). Args are conditionally present based on configuration:
 - `req` — HTTP request (defineApi only)
-- `data` — validated input (when schema is set) | `input` — raw input (without schema)
+- `input` — validated input (when schema/input is set on route)
+- `ok`, `fail` — response helpers (defineApi only)
+- `auth` — session helpers (when `.auth()` is configured)
+- `stream` — SSE stream (when `stream: true` on defineApi)
 - `...ctx` — setup return properties spread directly into args
-- `auth` — session helpers (when `enableAuth` returned from setup)
 - `record` / `records` / `message` / `messages` / `event` / `bucket` — event data (type-specific)
 
 `deps`, `config`, `files` are available in `setup` only — not in callbacks.
 
-### param() and schema
+### config with defineSecret
 
 ```typescript
-config: {
-  apiKey: param("api-key"),                    // string
-  port: param("port", Number),                 // number
-  config: param("app-config", JSON.parse),     // parsed JSON
-}
-defineTable<MyType>()                          // type-only (no runtime validation)
-schema: (input) => MySchema.parse(input)       // runtime validation (e.g. Zod)
+config: ({ defineSecret }) => ({
+  apiKey: defineSecret(),                                  // string
+  port: defineSecret({ transform: Number }),               // number
+  config: defineSecret({ transform: JSON.parse }),         // parsed JSON
+  secret: defineSecret({ generate: "hex:32" }),            // auto-generate on first deploy
+  id: defineSecret({ generate: "uuid" }),                  // auto-generate UUID
+})
 ```
+
+The legacy `param("key")` and `param("key", transform)` still work but are deprecated.

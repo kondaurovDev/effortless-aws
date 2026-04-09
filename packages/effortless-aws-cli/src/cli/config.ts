@@ -1,7 +1,7 @@
 import { Options } from "@effect/cli";
 import { Path, FileSystem } from "@effect/platform";
-import * as esbuild from "esbuild";
 import { Effect } from "effect";
+import { esbuildEval } from "../build/esbuild";
 import type { EffortlessConfig } from "effortless-aws";
 
 export type LoadedConfig = {
@@ -9,7 +9,7 @@ export type LoadedConfig = {
   configDir: string;
 };
 
-export const loadConfig = Effect.fn("loadConfig")(function* (): Generator<any, LoadedConfig> {
+export const loadConfig = Effect.fn("loadConfig")(function* () {
   const p = yield* Path.Path;
   const fs = yield* FileSystem.FileSystem;
 
@@ -22,35 +22,15 @@ export const loadConfig = Effect.fn("loadConfig")(function* (): Generator<any, L
 
   const configDir = p.dirname(configPath);
 
-  const result = yield* Effect.tryPromise({
-    try: () =>
-      esbuild.build({
-        entryPoints: [configPath],
-        bundle: true,
-        write: false,
-        format: "esm",
-        platform: "node",
-        external: ["effortless-aws"],
-      }),
-    catch: (error) => new Error(`Failed to compile config: ${error}`),
-  });
+  const mod = yield* esbuildEval({
+    entryPoints: [configPath],
+  }).pipe(Effect.catchAll((err) => {
+    return Effect.logWarning(`Failed to load ${configPath}: ${err.cause}`).pipe(
+      Effect.map(() => null)
+    );
+  }));
 
-  const output = result.outputFiles?.[0];
-  if (!output) {
-    return { config: null, configDir };
-  }
-
-  const code = output.text;
-  const tempFile = p.join(configDir, ".effortless-config.mjs");
-  yield* fs.writeFileString(tempFile, code);
-
-  const fileUrl = yield* p.toFileUrl(tempFile);
-  const mod = yield* Effect.tryPromise({
-    try: () => import(fileUrl.href),
-    catch: (error) => new Error(`Failed to load config: ${error}`),
-  }).pipe(Effect.ensuring(fs.remove(tempFile).pipe(Effect.catchAll(() => Effect.void))));
-
-  return { config: mod.default as EffortlessConfig | null, configDir };
+  return { config: (mod as any)?.default as EffortlessConfig | null, configDir };
 });
 
 export const DEFAULT_STAGE = "dev";

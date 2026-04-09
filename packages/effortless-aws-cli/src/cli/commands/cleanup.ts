@@ -1,18 +1,12 @@
 import { Command, Options, Prompt } from "@effect/cli";
 import { Effect, Console, Option } from "effect";
 
-import {
-  Aws,
-  getAllResourcesByTags,
-  groupResourcesByHandler,
-  resourceTypeFromArn,
-  listLayerVersions,
-  deleteLayerVersion,
-  listSchedulesByPrefix,
-} from "../../aws";
+import { Aws, listLayerVersions, deleteLayerVersion, listSchedulesByPrefix } from "../../aws";
+import { getAllResourcesByTags, groupResourcesByHandler } from "~/aws/resource-lookup";
+import { resourceTypeFromArn, type ResourceType } from "~/core";
 import { deleteHandlerResources, HANDLER_RESOURCES, type HandlerType, type ResourceSpec } from "~/deploy/resource-registry";
-import type { ResourceType } from "~/aws/tags";
-import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { findHandlerFiles } from "~/build/bundle";
+import { discoverHandlers, flattenHandlers } from "~/discovery";
 import { projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
@@ -89,6 +83,7 @@ const PRIMARY_RESOURCE: Record<HandlerType, ResourceType> = {
   staticSite: "cloudfront-distribution",
   app: "lambda",
   worker: "ecs",
+  mcp: "lambda",
 };
 
 type StaleResource = { handler: string; handlerType: HandlerType; spec: ResourceSpec };
@@ -155,11 +150,11 @@ const loadCleanupContext = Effect.gen(function* () {
   const { project, stage, region, patterns, projectDir } = yield* CliContext;
 
   const codeHandlers = patterns
-    ? flattenHandlers(yield* discoverHandlers(findHandlerFiles(patterns, projectDir), projectDir))
+    ? flattenHandlers(yield* discoverHandlers(findHandlerFiles(patterns, projectDir)))
     : [];
   const codeHandlerMap = new Map(codeHandlers.map(h => [h.exportName, h.type]));
 
-  const resources = yield* getAllResourcesByTags(project, stage, region);
+  const resources = yield* getAllResourcesByTags;
   const byHandler = groupResourcesByHandler(resources);
 
   const prefix = `${project}-${stage}-`;

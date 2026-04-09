@@ -7,8 +7,10 @@ import { NodeContext } from "@effect/platform-node";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import { CliContext, makeCliContext } from "~/cli/cli-context";
-import { ProjectConfig } from "~/cli/project-config";
+import { ProjectConfigLive } from "~/cli/project-config";
 import { DEFAULT_STAGE, DEFAULT_REGION } from "~/cli/config";
+import { DeployContext } from "~/core";
+import { Esbuild } from "~/build/esbuild";
 
 /**
  * Build the full Effect layer stack for MCP tool execution.
@@ -26,16 +28,24 @@ export const makeContext = (
   return <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, never> => {
     const program = Effect.gen(function* () {
       const ctx = yield* CliContext;
+      const deployLayer = Layer.succeed(DeployContext, {
+        project: ctx.project,
+        stage: ctx.stage,
+        region: ctx.region,
+      });
+      const withDeploy = Effect.provide(effect, deployLayer);
       const withProvided = makeClients
-        ? (effect as Effect.Effect<A, E, any>).pipe(Effect.provide(makeClients(ctx.region)))
-        : effect;
+        ? (withDeploy as Effect.Effect<A, E, any>).pipe(Effect.provide(makeClients(ctx.region)))
+        : withDeploy;
       return yield* withProvided as Effect.Effect<A, E, CliContext>;
     });
+
+    const configLayer = ProjectConfigLive.pipe(Layer.provide(Esbuild.Default));
 
     return program.pipe(
       Logger.withMinimumLogLevel(LogLevel.None),
       Effect.provide(cliContextLayer),
-      Effect.provide(ProjectConfig.Live),
+      Effect.provide(configLayer),
       Effect.provide(NodeContext.layer),
     ) as Effect.Effect<A, E, never>;
   };

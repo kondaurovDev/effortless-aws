@@ -1,7 +1,8 @@
 import { Effect, Schedule } from "effect";
 import type { DistributionConfig } from "@aws-sdk/client-cloudfront";
 import { cloudfront } from "./clients";
-import { toAwsTagList, getResourcesByTags } from "./tags";
+import { toAwsTagList, getResourcesByTags } from "./resource-lookup";
+import { DeployContext } from "../core";
 
 // AWS managed CachingOptimized policy
 const CACHING_OPTIMIZED_POLICY_ID = "658327ea-f89d-4fab-a63d-7e88639e58f6";
@@ -461,7 +462,7 @@ export const ensureDistribution = (input: EnsureDistributionInput) =>
         : { Quantity: 0, Items: [] };
 
     // Find existing distribution by tags
-    const existing = yield* findDistributionByTags(project, stage, handlerName);
+    const existing = yield* findDistributionByTags(handlerName);
 
     if (existing) {
       // Get current config to check if update is needed
@@ -808,7 +809,7 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
       : { Quantity: 0, Items: [] as never[] };
 
     // Find existing distribution by tags
-    const existing = yield* findDistributionByTags(project, stage, handlerName);
+    const existing = yield* findDistributionByTags(handlerName);
 
     if (existing) {
       const configResult = yield* cloudfront.make("get_distribution_config", {
@@ -909,9 +910,9 @@ export const ensureSsrDistribution = (input: EnsureSsrDistributionInput) =>
     } satisfies DistributionResult;
   });
 
-export const findDistributionByTags = (project: string, stage: string, handlerName: string) =>
+export const findDistributionByTags = (handlerName: string) =>
   Effect.gen(function* () {
-    const resources = yield* getResourcesByTags(project, stage);
+    const resources = yield* getResourcesByTags;
     const candidates = resources.filter(r => {
       const isDistribution = r.ResourceARN?.includes(":distribution/");
       const handlerTag = r.Tags?.find(t => t.Key === "effortless:handler");
@@ -1061,8 +1062,8 @@ export const deleteOAC = (oacId: string) =>
  * Find and delete CloudFront Functions that match the project/stage naming
  * convention but are not associated with any distribution in the project.
  */
-export const cleanupOrphanedFunctions = (project: string, stage: string) =>
-  Effect.gen(function* () {
+export const cleanupOrphanedFunctions = Effect.gen(function* () {
+    const { project, stage } = yield* DeployContext;
     const prefix = `${project}-${stage}-`;
 
     // List all CloudFront Functions matching our naming pattern
@@ -1074,7 +1075,7 @@ export const cleanupOrphanedFunctions = (project: string, stage: string) =>
     if (ourFunctions.length === 0) return;
 
     // Get all distributions for this project/stage
-    const resources = yield* getResourcesByTags(project, stage);
+    const resources = yield* getResourcesByTags;
     const distIds = resources
       .filter(r => r.ResourceARN?.includes(":distribution/"))
       .map(r => r.ResourceARN!.split("/").pop()!)

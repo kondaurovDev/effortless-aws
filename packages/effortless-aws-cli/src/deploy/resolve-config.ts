@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { ssm } from "~/aws/clients";
-import type { DiscoveredHandlers } from "~/build/bundle";
-import type { SecretEntry } from "~/build/handler-registry";
+import type { DiscoveredHandlers } from "~/discovery";
+import type { SecretEntry } from "~/core";
 
 export type RequiredSecret = {
   ssmPath: string;

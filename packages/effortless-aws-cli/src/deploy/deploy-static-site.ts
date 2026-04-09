@@ -1,13 +1,10 @@
 import { Effect } from "effect";
 import { Path, FileSystem, Command } from "@effect/platform";
 import { Architecture } from "@aws-sdk/client-lambda";
-import type { ExtractedStaticSiteFunction } from "~/build/bundle";
+import type { ExtractedStaticSiteFunction } from "~/discovery";
 import { bundleMiddleware, zip } from "~/build/bundle";
 import {
   Aws,
-  makeTags,
-  resolveStage,
-  type TagContext,
   ensureBucket,
   syncFiles,
   putObject,
@@ -23,6 +20,7 @@ import {
   findCertificate,
   ensureApiCachePolicy,
 } from "../aws";
+import { makeTags, resolveStage, type TagContext } from "../core";
 import { generateSitemap, generateRobots, collectHtmlKeys, keysToUrls, submitToGoogleIndexing } from "./seo";
 
 // ============ Static site deployment ============

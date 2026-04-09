@@ -1,13 +1,8 @@
 import { Effect } from "effect";
 import { toSeconds } from "effortless-aws";
-import { extractConfigsFromFile, type ExtractedApiFunction } from "~/build/bundle";
-import {
-  Aws,
-  ensureFunctionUrl,
-  addFunctionUrlPublicAccess,
-  resolveStage,
-  type TagContext
-} from "../aws";
+import { extractConfigsFromFile, type ExtractedApiFunction } from "~/discovery";
+import { Aws, ensureFunctionUrl, addFunctionUrlPublicAccess } from "../aws";
+import { resolveStage, type TagContext } from "../core";
 import {
   type DeployInput,
   type DeployResult,
@@ -53,7 +48,7 @@ export const deployApiFunction = ({ input, fn, layerArn, external, depsEnv, deps
 
 export const deploy = (input: DeployInput) =>
   Effect.gen(function* () {
-    const configs = yield* extractConfigsFromFile<import("effortless-aws").ApiConfig>(input.file, input.projectDir, "api");
+    const configs = yield* extractConfigsFromFile<import("effortless-aws").ApiConfig>(input.file, "api");
 
     if (configs.length === 0) {
       return yield* Effect.fail(new Error("Could not extract defineApi config from source"));

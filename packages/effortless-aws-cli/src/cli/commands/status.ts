@@ -1,15 +1,12 @@
 import { Command } from "@effect/cli";
 import { Effect, Console } from "effect";
 
-import {
-  Aws,
-  getAllResourcesByTags,
-  groupResourcesByHandler,
-  checkDependencyWarnings,
-  resourceTypeFromArn,
-  findDepsDir,
-} from "../../aws";
-import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { Aws, type ResourceTagMapping } from "../../aws";
+import { checkDependencyWarnings, findDepsDir } from "~/build";
+import { getAllResourcesByTags, groupResourcesByHandler } from "~/aws/resource-lookup";
+import { resourceTypeFromArn } from "~/core";
+import { findHandlerFiles } from "~/build/bundle";
+import { discoverHandlers, flattenHandlers } from "~/discovery";
 import { projectOption, stageOption, regionOption, verboseOption } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
@@ -97,7 +94,7 @@ export const getDistributionInfo = (distributionArn: string) =>
 export const discoverCodeHandlers = (projectDir: string, patterns: string[]) =>
   Effect.gen(function* () {
     const files = findHandlerFiles(patterns, projectDir);
-    const discovered = yield* discoverHandlers(files, projectDir);
+    const discovered = yield* discoverHandlers(files);
     return flattenHandlers(discovered).map(h => ({
       name: h.exportName,
       type: h.type as HandlerType,
@@ -114,9 +111,9 @@ type AwsHandler = {
 };
 
 export const discoverAwsHandlers = (
-  resources: Awaited<ReturnType<typeof getAllResourcesByTags>> extends Effect.Effect<infer A, any, any> ? A : never
+  resources: ResourceTagMapping[]
 ) => {
-  const byHandler = groupResourcesByHandler(resources as any);
+  const byHandler = groupResourcesByHandler(resources);
   const handlers: AwsHandler[] = [];
 
   for (const [name, handlerResources] of byHandler) {
@@ -233,7 +230,7 @@ export const getStatus = Effect.gen(function* () {
   const codeHandlers = patterns ? yield* discoverCodeHandlers(projectDir, patterns) : [];
   const codeHandlerNames = new Set(codeHandlers.map(h => h.name));
 
-  const resources = yield* getAllResourcesByTags(project, stage, region);
+  const resources = yield* getAllResourcesByTags;
   const awsHandlers = discoverAwsHandlers(resources);
 
   const entries: StatusEntry[] = [];

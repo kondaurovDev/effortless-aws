@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { toSeconds } from "effortless-aws";
-import type { ExtractedMcpFunction } from "~/build/bundle";
+import type { ExtractedMcpFunction } from "~/discovery";
 import {
   type DeployInput,
   deployCoreLambda,

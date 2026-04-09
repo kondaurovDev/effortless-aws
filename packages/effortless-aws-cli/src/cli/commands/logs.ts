@@ -2,7 +2,8 @@ import { Args, Command, Options } from "@effect/cli";
 import { Effect, Console, Schedule } from "effect";
 
 import { Aws } from "../../aws";
-import { findHandlerFiles, discoverHandlers, flattenHandlers } from "~/build/bundle";
+import { findHandlerFiles } from "~/build/bundle";
+import { discoverHandlers, flattenHandlers } from "~/discovery";
 import { projectOption, stageOption, regionOption, verboseOption } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
@@ -113,7 +114,7 @@ export const getLogs = (handlerName: string, since = "5m", maxLines = 100) =>
     let handlerType: string | undefined;
     if (patterns) {
       const files = findHandlerFiles(patterns, projectDir);
-      const discovered = yield* discoverHandlers(files, projectDir);
+      const discovered = yield* discoverHandlers(files);
       const allHandlers = flattenHandlers(discovered);
       const matched = allHandlers.find(h => h.exportName === handlerName);
 

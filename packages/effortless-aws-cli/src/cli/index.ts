@@ -12,6 +12,7 @@ import { logsCommand } from "./commands/logs";
 import { layerCommand } from "./commands/layer";
 import { configCommand } from "./commands/config";
 import { checkForUpdate } from "./update-check";
+import { Esbuild } from "../build/esbuild";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json");
@@ -35,6 +36,7 @@ const program = Effect.gen(function* () {
 
 program.pipe(
   Effect.provide(NodeContext.layer),
+  Effect.provide(Esbuild.Default),
   Effect.provide(CliConfig.layer({ showBuiltIns: false, showTypes: false })),
   NodeRuntime.runMain,
 );

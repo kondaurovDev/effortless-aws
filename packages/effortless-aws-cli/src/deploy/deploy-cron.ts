@@ -1,13 +1,8 @@
 import { Effect } from "effect";
-import type { ExtractedCronFunction } from "~/build/bundle";
+import type { ExtractedCronFunction } from "~/discovery";
 import { toSeconds } from "effortless-aws";
-import {
-  ensureSchedule,
-  ensureSchedulerRole,
-  makeTags,
-  resolveStage,
-  type TagContext,
-} from "../aws";
+import { ensureSchedule, ensureSchedulerRole } from "../aws";
+import { makeTags, resolveStage, type TagContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,

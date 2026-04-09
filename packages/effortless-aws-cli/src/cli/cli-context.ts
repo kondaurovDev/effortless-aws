@@ -1,29 +1,18 @@
-import * as Context from "effect/Context";
 import * as Layer from "effect/Layer";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Logger from "effect/Logger";
 import * as LogLevel from "effect/LogLevel";
 import { Console } from "effect";
-import type { EffortlessConfig } from "effortless-aws";
 
-import { ProjectConfig } from "./project-config";
+import { ProjectConfig, ProjectConfigLive } from "./project-config";
 import { getPatternsFromConfig } from "./config";
+import { CliContext, MissingProjectError, DeployContext } from "../core";
+import { Esbuild } from "../build/esbuild";
 
-export type CliContextShape = {
-  project: string;
-  stage: string;
-  region: string;
-  config: EffortlessConfig | null;
-  projectDir: string;
-  patterns: string[] | null;
-};
-
-export class CliContext extends Context.Tag("CliContext")<CliContext, CliContextShape>() {}
-
-export class MissingProjectError {
-  readonly _tag = "MissingProjectError";
-}
+// Re-export for consumers
+export { CliContext, MissingProjectError } from "../core";
+export type { CliContextShape } from "../core";
 
 export const makeCliContext = (opts: {
   project: Option.Option<string>;
@@ -48,7 +37,7 @@ export const makeCliContext = (opts: {
 
 /**
  * Composes ProjectConfig → CliContext → AWS clients → logger into a single pipeline.
- * Provides CliContext, AWS clients (resolved from region), and log level.
+ * Provides CliContext, DeployContext, AWS clients (resolved from region), and log level.
  */
 export const withCliContext = (
   opts: { project: Option.Option<string>; stage: string; region: string; verbose: boolean },
@@ -60,15 +49,23 @@ export const withCliContext = (
 
   const program = Effect.gen(function* () {
     const ctx = yield* CliContext;
+    const deployLayer = Layer.succeed(DeployContext, {
+      project: ctx.project,
+      stage: ctx.stage,
+      region: ctx.region,
+    });
+    const withDeploy = Effect.provide(effect, deployLayer);
     const withProvided = makeClients
-      ? (effect as Effect.Effect<A, E, any>).pipe(Effect.provide(makeClients(ctx.region)))
-      : effect;
+      ? (withDeploy as Effect.Effect<A, E, any>).pipe(Effect.provide(makeClients(ctx.region)))
+      : withDeploy;
     return yield* withProvided as Effect.Effect<A, E, CliContext>;
   });
+
+  const configLayer = ProjectConfigLive.pipe(Layer.provide(Esbuild.Default));
 
   return program.pipe(
     Logger.withMinimumLogLevel(logLevel),
     Effect.provide(makeCliContext(opts)),
-    Effect.provide(ProjectConfig.Live),
+    Effect.provide(configLayer),
   ) as Effect.Effect<A, E | MissingProjectError, never>;
 };

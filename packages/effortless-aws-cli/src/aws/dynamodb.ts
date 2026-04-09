@@ -1,7 +1,7 @@
 import { Effect, Schedule } from "effect";
 import { dynamodb, lambda } from "./clients";
 
-import { toAwsTagList } from "./tags";
+import { toAwsTagList } from "./resource-lookup";
 
 // Types from define-table (duplicated to avoid circular dependency)
 export type StreamView = "NEW_IMAGE" | "OLD_IMAGE" | "NEW_AND_OLD_IMAGES" | "KEYS_ONLY";

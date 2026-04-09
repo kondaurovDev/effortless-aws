@@ -1,17 +1,8 @@
 import { Effect } from "effect";
 import { Path, FileSystem } from "@effect/platform";
-import {
-  ensureRole,
-  ensureLambda,
-  type LambdaStatus,
-  makeTags,
-  resolveStage,
-  type TagContext,
-  ensureLayer,
-  readProductionDependencies,
-  collectLayerPackages,
-  findDepsDir,
-} from "../aws";
+import { ensureRole, ensureLambda, type LambdaStatus, ensureLayer } from "../aws";
+import { readProductionDependencies, collectLayerPackages, findDepsDir } from "../build";
+import { makeTags, resolveStage, type TagContext } from "../core";
 import { bundle, zip, resolveStaticFiles, type BundleInput } from "~/build/bundle";
 import * as path from "path";
 

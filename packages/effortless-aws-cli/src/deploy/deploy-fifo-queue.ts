@@ -1,13 +1,8 @@
 import { Effect } from "effect";
-import type { ExtractedFifoQueueFunction } from "~/build/bundle";
+import type { ExtractedFifoQueueFunction } from "~/discovery";
 import { toSeconds } from "effortless-aws";
-import {
-  ensureFifoQueue,
-  ensureSqsEventSourceMapping,
-  makeTags,
-  resolveStage,
-  type TagContext,
-} from "../aws";
+import { ensureFifoQueue, ensureSqsEventSourceMapping } from "../aws";
+import { makeTags, resolveStage, type TagContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,

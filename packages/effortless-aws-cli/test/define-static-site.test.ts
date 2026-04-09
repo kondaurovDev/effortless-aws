@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import * as path from "path"
 import { Effect } from "effect"
 import { NodeContext } from "@effect/platform-node"
-import { discoverHandlers } from "~cli/build/bundle"
+import { discoverHandlers } from "~cli/discovery"
 
 import { extractStaticSiteConfigs } from "./helpers/extract-from-source"
 
@@ -275,7 +275,7 @@ describe("defineStaticSite extraction", () => {
     ];
 
     const discovered = await Effect.runPromise(
-      discoverHandlers(files, projectDir).pipe(Effect.provide(NodeContext.layer))
+      discoverHandlers(files).pipe(Effect.provide(NodeContext.layer))
     );
 
     expect(discovered.staticSiteHandlers).toHaveLength(1);

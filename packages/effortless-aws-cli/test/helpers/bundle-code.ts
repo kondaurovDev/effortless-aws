@@ -5,6 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import { bundle, type BundleInput } from "~cli/build/bundle";
+import { Esbuild } from "~cli/build/esbuild";
 import type { HandlerType } from "~cli/build/handler-registry";
 
 // AWS SDK packages are externalized in production (via Lambda layer).
@@ -58,7 +59,7 @@ export const bundleCode = (input: BundleCodeInput) =>
  * Unlike data URLs, file-based imports can resolve bare specifiers (e.g. @aws-sdk/*).
  */
 export const importBundle = async (input: BundleCodeInput) => {
-  const result = await Effect.runPromise(bundleCode(input).pipe(Effect.provide(NodeContext.layer)));
+  const result = await Effect.runPromise(bundleCode(input).pipe(Effect.provide(Esbuild.Default), Effect.provide(NodeContext.layer)));
   const hash = crypto.createHash("md5").update(result.code).digest("hex").slice(0, 8);
   const tempMjs = path.join(os.tmpdir(), `.temp-bundle-${hash}.mjs`);
   fs.writeFileSync(tempMjs, result.code);

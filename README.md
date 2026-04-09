@@ -3,22 +3,42 @@
 [![npm version](https://img.shields.io/npm/v/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
 [![npm downloads](https://img.shields.io/npm/dw/effortless-aws)](https://www.npmjs.com/package/effortless-aws)
 
-**Write a TypeScript handler. Export it. Deploy. That's it.**
+You write handlers. The framework builds, bundles, provisions AWS resources, wires IAM permissions, and deploys — all from your TypeScript code.
 
-No CloudFormation. No Terraform. No YAML. No state files. Lambda, DynamoDB, IAM — all created from your code in ~10 seconds.
+Your TypeScript is the single source of truth — for code and infrastructure.
+
+## You write this
 
 ```typescript
-import { defineApi } from "effortless-aws";
+import { defineApi, defineTable } from "effortless-aws";
 
-export const hello = defineApi({ basePath: "/hello" })
-  .get("/", async ({ ok }) => ok({ message: "Hello!" }));
+const db = defineTable<Order>();
+
+export const api = defineApi({ basePath: "/orders" })
+  .deps(() => ({ db }))
+  .get("/{id}", async ({ params, deps, ok }) => {
+    const order = await deps.db.get(params.id);
+    return ok(order);
+  });
 ```
+
+## You run this
 
 ```bash
-npx eff deploy   # ~10 seconds
+eff deploy
 ```
 
-One file. One command. Lambda + Function URL + IAM role created automatically.
+## The framework handles the rest
+
+From the example above, `eff deploy` will:
+
+- **Bundle** your code with esbuild and package dependencies into a Lambda layer
+- **Create a DynamoDB table** with streams and indexes — from `defineTable<Order>()`
+- **Create a Lambda** with a public HTTP endpoint — from `defineApi()`
+- **Wire IAM permissions** so the API can read/write the table — from `.deps(() => ({ db }))`
+- **Type everything** — `deps.db.get()` returns `Order`, no casts, no `as any`
+
+The same principle works for S3 buckets, SQS queues, SES email, static sites, SSR apps, cron jobs — define a handler, the infrastructure follows.
 
 ## Getting started
 

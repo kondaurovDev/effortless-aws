@@ -1,12 +1,9 @@
 import { Effect } from "effect";
 import { Path, Command } from "@effect/platform";
 import { toSeconds } from "effortless-aws";
-import type { ExtractedAppFunction } from "~/build/bundle";
+import type { ExtractedAppFunction } from "~/discovery";
 import { zipDirectory, detectAssetPatterns } from "~/build/bundle";
 import {
-  makeTags,
-  resolveStage,
-  type TagContext,
   ensureRole,
   ensureLambda,
   ensureFunctionUrl,
@@ -20,6 +17,7 @@ import {
   findCertificate,
   ensureApiCachePolicy,
 } from "../aws";
+import { makeTags, resolveStage, type TagContext } from "../core";
 
 // ============ App (SSR) deployment ============
 

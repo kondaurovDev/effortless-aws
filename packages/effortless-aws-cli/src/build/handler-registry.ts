@@ -1,115 +1,8 @@
 import { Project, SyntaxKind, type CallExpression, type Node } from "ts-morph";
+import { handlers, type HandlerType } from "../core";
 
-// ============ Types ============
-
-/** Secret entry extracted from handler config at discovery time. */
-export type SecretEntry = { propName: string; ssmKey: string; generate?: string };
-
-/** @deprecated Use SecretEntry */
-export type ParamEntry = SecretEntry;
-
-export type HandlerDefinition = {
-  defineFn: string;
-  handlerProps: readonly string[];
-  wrapperFn: string;
-};
-
-export const handlerRegistry = {
-  table: {
-    defineFn: "defineTable",
-    handlerProps: ["onRecord", "onRecordBatch"],
-    wrapperFn: "wrapTableStream",
-    wrapperPath: "~/runtime/wrap-table-stream",
-  },
-  app: {
-    defineFn: "defineApp",
-    handlerProps: [],
-    wrapperFn: "",
-    wrapperPath: "",
-  },
-  staticSite: {
-    defineFn: "defineStaticSite",
-    handlerProps: ["middleware"],
-    wrapperFn: "wrapMiddleware",
-    wrapperPath: "~/runtime/wrap-middleware",
-  },
-  fifoQueue: {
-    defineFn: "defineFifoQueue",
-    handlerProps: ["onMessage", "onMessageBatch"],
-    wrapperFn: "wrapFifoQueue",
-    wrapperPath: "~/runtime/wrap-fifo-queue",
-  },
-  bucket: {
-    defineFn: "defineBucket",
-    handlerProps: ["onObjectCreated", "onObjectRemoved"],
-    wrapperFn: "wrapBucket",
-    wrapperPath: "~/runtime/wrap-bucket",
-  },
-  mailer: {
-    defineFn: "defineMailer",
-    handlerProps: [],
-    wrapperFn: "",
-    wrapperPath: "",
-  },
-  cron: {
-    defineFn: "defineCron",
-    handlerProps: ["onTick"],
-    wrapperFn: "wrapCron",
-    wrapperPath: "~/runtime/wrap-cron",
-  },
-  api: {
-    defineFn: "defineApi",
-    handlerProps: ["routes"],
-    wrapperFn: "wrapApi",
-    wrapperPath: "~/runtime/wrap-api",
-  },
-  worker: {
-    defineFn: "defineWorker",
-    handlerProps: ["onMessage"],
-    wrapperFn: "wrapWorker",
-    wrapperPath: "~/runtime/wrap-worker",
-  },
-  mcp: {
-    defineFn: "defineMcp",
-    handlerProps: ["tools", "resources", "prompts"],
-    wrapperFn: "wrapMcp",
-    wrapperPath: "~/runtime/wrap-mcp",
-  },
-} as const;
-
-export type HandlerType = keyof typeof handlerRegistry;
-
-/** API route extracted from a static site's routes map */
-export type ApiRouteEntry = {
-  /** CloudFront path pattern (e.g., "/api/*") */
-  pattern: string;
-  /** Export name of the referenced API handler */
-  handlerExport: string;
-};
-
-/** Bucket route extracted from a static site's routes map */
-export type BucketRouteEntry = {
-  /** CloudFront path pattern (e.g., "/files/*") */
-  pattern: string;
-  /** Export name of the referenced bucket handler */
-  bucketExportName: string;
-  /** Access control mode */
-  access: "private" | "public";
-};
-
-export type ExtractedConfig<T = unknown> = {
-  exportName: string;
-  config: T;
-  hasHandler: boolean;
-  depsKeys: string[];
-  secretEntries: SecretEntry[];
-  staticGlobs: string[];
-  routePatterns: string[];
-  /** API routes extracted from a static site's routes map (only for staticSite type) */
-  apiRoutes: ApiRouteEntry[];
-  /** Bucket routes extracted from a static site's routes map (only for staticSite type) */
-  bucketRoutes: BucketRouteEntry[];
-};
+// Re-export types from core
+export type { HandlerType, SecretEntry, ParamEntry, ExtractedConfig, ApiRouteEntry, BucketRouteEntry, HandlerDefinition } from "../core";
 
 // ============ Entry point generation ============
 
@@ -119,7 +12,7 @@ export const generateEntryPoint = (
   type: HandlerType,
   runtimeDir?: string
 ): string => {
-  const { wrapperFn, wrapperPath } = handlerRegistry[type];
+  const { wrapperFn, wrapperPath } = handlers[type];
 
   const resolvedWrapperPath = runtimeDir
     ? wrapperPath.replace("~/runtime", runtimeDir)
@@ -174,7 +67,7 @@ const findMiddlewareInChain = (node: Node): string | undefined => {
 };
 
 /** List of define function names that can produce a static site with middleware */
-const staticSiteDefineFns: Set<string> = new Set([handlerRegistry.staticSite.defineFn]);
+const staticSiteDefineFns: Set<string> = new Set([handlers.staticSite.defineFn]);
 
 /** Check if an expression chain contains a defineStaticSite call */
 const chainContainsDefineFn = (node: Node): boolean => {
@@ -255,8 +148,8 @@ export const generateMiddlewareEntryPoint = (
     .join("\n");
 
   const wrapperPath = runtimeDir
-    ? handlerRegistry.staticSite.wrapperPath.replace("~/runtime", runtimeDir)
-    : handlerRegistry.staticSite.wrapperPath;
+    ? handlers.staticSite.wrapperPath.replace("~/runtime", runtimeDir)
+    : handlers.staticSite.wrapperPath;
 
   const entryPoint = `${imports}
 import { wrapMiddlewareFn } from "${wrapperPath}";

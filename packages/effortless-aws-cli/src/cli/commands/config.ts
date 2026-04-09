@@ -4,12 +4,13 @@ import { Effect, Console } from "effect";
 
 import { Aws } from "../../aws";
 import { ssm } from "~/aws/clients";
-import { findHandlerFiles, discoverHandlers } from "~/build/bundle";
+import { findHandlerFiles } from "~/build/bundle";
+import { discoverHandlers } from "~/discovery";
 import { collectRequiredSecrets, checkMissingSecrets } from "~/deploy/resolve-config";
 import { projectOption, stageOption, regionOption, verboseOption } from "~/cli/config";
 import { CliContext, withCliContext } from "~/cli/cli-context";
 import { c } from "~/cli/colors";
-import { toAwsTagList } from "~/aws/tags";
+import { toAwsTagList } from "~/aws/resource-lookup";
 
 // ============ Shared helpers ============
 
@@ -28,7 +29,7 @@ const loadRequiredParams = Effect.gen(function* () {
   }
 
   const files = findHandlerFiles(patterns, projectDir);
-  const handlers = yield* discoverHandlers(files, projectDir);
+  const handlers = yield* discoverHandlers(files);
   const params = collectRequiredSecrets(handlers, project, stage);
   return { params, project, stage, region };
 });

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { iam } from "./clients";
-import { toAwsTagList } from "./tags";
+import { toAwsTagList } from "./resource-lookup";
 
 const LAMBDA_ASSUME_ROLE_POLICY = JSON.stringify({
   Version: "2012-10-17",

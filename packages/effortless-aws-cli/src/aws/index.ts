@@ -14,8 +14,8 @@ export type { EnsureTableInput, EnsureTableResult, EnsureEventSourceMappingInput
 export { ensureProjectApi, addRouteToApi, removeStaleRoutes, deleteApi } from "./apigateway";
 export type { ProjectApiConfig, RouteConfig, HttpMethod } from "./apigateway";
 
-// Layer
-export { ensureLayer, readProductionDependencies, computeLockfileHash, collectLayerPackages, checkDependencyWarnings, listLayerVersions, deleteAllLayerVersions, deleteLayerVersion, findDepsDir } from "./layer";
+// Layer (AWS operations only)
+export { ensureLayer, listLayerVersions, deleteAllLayerVersions, deleteLayerVersion } from "./layer";
 export type { LayerConfig, LayerResult, LayerStatus, LayerVersionInfo } from "./layer";
 
 // S3
@@ -49,9 +49,8 @@ export type { EnsureScheduleInput, EnsureScheduleResult } from "./scheduler";
 export { ensureSesIdentity, deleteSesIdentity } from "./ses";
 export type { EnsureSesIdentityInput, EnsureSesIdentityResult, DkimRecord } from "./ses";
 
-// Tags
-export { makeTags, toAwsTagList, resolveStage, getResourcesByTags, getAllResourcesByTags, findOrphanedResources, groupResourcesByHandler, resourceTypeFromArn, findHandlerResourceArns } from "./tags";
-export type { ResourceType, TagContext } from "./tags";
+// Resource lookup & tag utilities
+export { toAwsTagList } from "./resource-lookup";
 
 // Clients
 export * as Aws from "./clients/index";
