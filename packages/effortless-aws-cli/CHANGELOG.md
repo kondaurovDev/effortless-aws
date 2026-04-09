@@ -1,5 +1,11 @@
 # @effortless-aws/cli
 
+## 0.20.1
+
+### Patch Changes
+
+- [`a23ba89`](https://github.com/kondaurovDev/effortless-aws/commit/a23ba896a99113d3f45fc971903c2690c57c2ec4) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - - Refactor CLI internals: extract `core/`, `discovery/`, and `build/layer` modules to improve code organization and reduce duplication
+
 ## 0.20.0
 
 ### Minor Changes
