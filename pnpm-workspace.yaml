@@ -3,6 +3,12 @@ packages:
   - '!packages/effortless-runner'
   - integration
 
+onlyBuiltDependencies:
+  - '@effect-ak/aws-sdk'
+  - '@parcel/watcher'
+  - esbuild
+  - msgpackr-extract
+
 catalog:
   '@aws-sdk/client-acm': ^3.993.0
   '@aws-sdk/client-apigatewayv2': ^3.975.0
