@@ -4,6 +4,9 @@ import { Effect } from "effect"
 import { NodeContext } from "@effect/platform-node"
 import { discoverHandlers } from "~cli/discovery"
 
+import { resolveStaticSiteRoutes } from "~cli/discovery/extract"
+import type { HandlerType } from "~cli/core/handler-types"
+
 import { extractStaticSiteConfigs } from "./helpers/extract-from-source"
 
 // ============ AST extraction ============
@@ -283,6 +286,100 @@ describe("defineStaticSite extraction", () => {
     expect(site.apiRoutes).toEqual([
       { pattern: "/site-api/*", handlerExport: "siteApi2" },
     ]);
+  });
+
+  it("should extract access: 'private' on a bucket route", () => {
+    const source = `
+      import { defineStaticSite, defineBucket } from "effortless-aws";
+
+      export const storage = defineBucket({ prefix: "uploads/" })
+        .onUpload(async () => {});
+
+      export const app = defineStaticSite({ dir: "dist" })
+        .route("/files/*", storage, { access: "private" })
+        .build();
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    // Before resolution, routes are stored in apiRoutes with access preserved
+    expect(configs[0]!.apiRoutes).toEqual([
+      { pattern: "/files/*", handlerExport: "storage", access: "private" },
+    ]);
+
+    // After resolution, bucket routes should carry the access value
+    const allExports = new Map<string, { type: HandlerType; exportName: string }>([
+      ["storage", { type: "bucket", exportName: "storage" }],
+    ]);
+    resolveStaticSiteRoutes(configs, allExports, source);
+
+    expect(configs[0]!.bucketRoutes).toEqual([
+      { pattern: "/files/*", bucketExportName: "storage", access: "private" },
+    ]);
+    expect(configs[0]!.apiRoutes).toEqual([]);
+  });
+
+  it("should extract access: 'public' on a bucket route", () => {
+    const source = `
+      import { defineStaticSite, defineBucket } from "effortless-aws";
+
+      export const assets = defineBucket({ prefix: "assets/" })
+        .onUpload(async () => {});
+
+      export const app = defineStaticSite({ dir: "dist" })
+        .route("/assets/*", assets, { access: "public" })
+        .build();
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.apiRoutes).toEqual([
+      { pattern: "/assets/*", handlerExport: "assets", access: "public" },
+    ]);
+
+    const allExports = new Map<string, { type: HandlerType; exportName: string }>([
+      ["assets", { type: "bucket", exportName: "assets" }],
+    ]);
+    resolveStaticSiteRoutes(configs, allExports, source);
+
+    expect(configs[0]!.bucketRoutes).toEqual([
+      { pattern: "/assets/*", bucketExportName: "assets", access: "public" },
+    ]);
+    expect(configs[0]!.apiRoutes).toEqual([]);
+  });
+
+  it("should default bucket route access to 'public' when not specified", () => {
+    const source = `
+      import { defineStaticSite, defineBucket } from "effortless-aws";
+
+      export const media = defineBucket({ prefix: "media/" })
+        .onUpload(async () => {});
+
+      export const app = defineStaticSite({ dir: "dist" })
+        .route("/media/*", media)
+        .build();
+    `;
+
+    const configs = extractStaticSiteConfigs(source);
+
+    expect(configs).toHaveLength(1);
+    // No access specified, so apiRoutes entry should have undefined access
+    expect(configs[0]!.apiRoutes).toEqual([
+      { pattern: "/media/*", handlerExport: "media" },
+    ]);
+
+    const allExports = new Map<string, { type: HandlerType; exportName: string }>([
+      ["media", { type: "bucket", exportName: "media" }],
+    ]);
+    resolveStaticSiteRoutes(configs, allExports, source);
+
+    // Should default to "public" when no access is specified
+    expect(configs[0]!.bucketRoutes).toEqual([
+      { pattern: "/media/*", bucketExportName: "media", access: "public" },
+    ]);
+    expect(configs[0]!.apiRoutes).toEqual([]);
   });
 
 });

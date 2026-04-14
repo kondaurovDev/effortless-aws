@@ -35,7 +35,7 @@ export { deployTable, deployAllTables } from "./deploy-table";
 export { deploy } from "./deploy-api";
 
 // Import for internal use
-import { type DeployInput, type DeployResult, type DeployTableResult, flushDeferredWarnings, startBundleCollector, flushBundleCollector, collectBundle, startDeployLog, flushDeployLog, logDeploy, formatBytes } from "./shared";
+import { type DeployInput, type DeployResult, type DeployTableResult, flushDeferredWarnings, startBundleCollector, flushBundleCollector, collectBundle, startDeployLog, flushDeployLog, logDeploy, formatBytes, resolveSecrets } from "./shared";
 import { deployTableFunction } from "./deploy-table";
 import { deployApp, type DeployAppResult } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
@@ -451,15 +451,6 @@ const resolveDeps = (
 
 // ============ Params resolution ============
 
-const SSM_PERMISSIONS = [
-  "ssm:GetParameter",
-  "ssm:GetParameters",
-] as const;
-
-/**
- * Resolve param entries to environment variables and IAM permissions.
- * SSM path convention: /${project}/${stage}/${key}
- */
 /** Execute a generate DSL string to produce a secret value at deploy time. */
 const executeGenerate = (spec: string): string => {
   if (spec === "uuid") return crypto.randomUUID();
@@ -468,21 +459,6 @@ const executeGenerate = (spec: string): string => {
   const base64Match = spec.match(/^base64:(\d+)$/);
   if (base64Match) return crypto.randomBytes(Number(base64Match[1])).toString("base64url");
   throw new Error(`Unknown generate spec: "${spec}". Use "hex:N", "base64:N", or "uuid".`);
-};
-
-const resolveSecrets = (
-  secretEntries: SecretEntry[],
-  project: string,
-  stage: string
-): { paramsEnv: Record<string, string>; paramsPermissions: readonly string[] } | undefined => {
-  if (secretEntries.length === 0) return undefined;
-
-  const paramsEnv: Record<string, string> = {};
-  for (const { propName, ssmKey } of secretEntries) {
-    paramsEnv[`EFF_PARAM_${propName}`] = `/${project}/${stage}/${ssmKey}`;
-  }
-
-  return { paramsEnv, paramsPermissions: SSM_PERMISSIONS };
 };
 
 /**

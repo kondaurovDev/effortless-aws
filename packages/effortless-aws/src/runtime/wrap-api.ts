@@ -276,10 +276,12 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const streamify = (globalThis as any).awslambda?.streamifyResponse;
     if (!streamify) {
-      return async (event: LambdaEvent) => handleRequest(event);
+      const fn = async (event: LambdaEvent) => handleRequest(event);
+      (fn as any).__preload = () => rt.preload();
+      return fn;
     }
 
-    return streamify(async (event: LambdaEvent, rawStream: any) => {
+    const fn = streamify(async (event: LambdaEvent, rawStream: any) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const HttpResponseStream = (globalThis as any).awslambda?.HttpResponseStream;
 
@@ -335,11 +337,15 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
         rawStream.end();
       }
     });
+    (fn as any).__preload = () => rt.preload();
+    return fn;
   }
 
   // Buffered mode (default)
-  return async (event: LambdaEvent) => {
+  const fn = async (event: LambdaEvent) => {
     const result = await handleRequest(event);
     return result ?? notFound();
   };
+  (fn as any).__preload = () => rt.preload();
+  return fn;
 };

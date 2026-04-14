@@ -3,13 +3,57 @@ import { join } from "path";
 import type { LogLevel, Duration } from "../handlers/handler-options";
 import { toSeconds } from "../handlers/handler-options";
 import type { AuthRuntime, CfSigningConfig } from "../handlers/auth";
-import { createAuthRuntime } from "../handlers/auth";
-import { createTableClient } from "./table-client";
-import { createBucketClient, createBucketClientWithEntities } from "./bucket-client";
-import { createEmailClient } from "./email-client";
-import { createQueueClient } from "./queue-client";
-import { createWorkerClient } from "./worker-client";
-import { getParameters } from "./ssm-client";
+
+// Lazy imports — AWS SDK clients are loaded only when actually needed.
+// This avoids loading DynamoDB, S3, SES, SQS, ECS, SSM SDKs on cold start
+// for handlers that don't use them.
+
+const lazyTableClient = async (name: string, opts?: { tagField?: string }) => {
+  const { createTableClient } = await import("./table-client");
+  return createTableClient(name, opts);
+};
+
+const lazyBucketClient = async (name: string) => {
+  const { createBucketClient } = await import("./bucket-client");
+  return createBucketClient(name);
+};
+
+const lazyBucketClientWithEntities = async (name: string, config: Record<string, { cacheSeconds?: number }>) => {
+  const { createBucketClientWithEntities } = await import("./bucket-client");
+  return createBucketClientWithEntities(name, config);
+};
+
+const lazyEmailClient = async () => {
+  const { createEmailClient } = await import("./email-client");
+  return createEmailClient();
+};
+
+const lazyQueueClient = async (name: string) => {
+  const { createQueueClient } = await import("./queue-client");
+  return createQueueClient(name);
+};
+
+const lazyWorkerClient = async (name: string) => {
+  const { createWorkerClient } = await import("./worker-client");
+  return createWorkerClient(name);
+};
+
+const lazyGetParameters = async (paths: string[]) => {
+  const { getParameters } = await import("./ssm-client");
+  return getParameters(paths);
+};
+
+const lazyCreateAuthRuntime = async (
+  secret: string,
+  defaultExpiresIn: number,
+  apiTokenVerify?: (args: { value: string }) => unknown | Promise<unknown>,
+  apiTokenHeader?: string,
+  apiTokenCacheTtlSeconds?: number,
+  cfSigningConfig?: CfSigningConfig,
+) => {
+  const { createAuthRuntime } = await import("../handlers/auth");
+  return createAuthRuntime(secret, defaultExpiresIn, apiTokenVerify, apiTokenHeader, apiTokenCacheTtlSeconds, cfSigningConfig);
+};
 
 export type { LogLevel };
 
@@ -29,10 +73,10 @@ const truncate = (value: unknown, maxLength = 4096): unknown => {
  * Registry of dep type → client factory.
  * To add a new dep type, add a single entry here.
  */
-const DEP_FACTORIES: Record<string, (name: string, depHandler: unknown) => unknown> = {
+const DEP_FACTORIES: Record<string, (name: string, depHandler: unknown) => Promise<unknown>> = {
   table: (name, depHandler) => {
     const tagField = (depHandler as { __spec?: { tagField?: string } } | undefined)?.__spec?.tagField;
-    return createTableClient(name, tagField ? { tagField } : undefined);
+    return lazyTableClient(name, tagField ? { tagField } : undefined);
   },
   bucket: (name, depHandler) => {
     const entities = (depHandler as { __spec?: { entities?: Record<string, { cache?: Duration }> } } | undefined)?.__spec?.entities;
@@ -41,13 +85,13 @@ const DEP_FACTORIES: Record<string, (name: string, depHandler: unknown) => unkno
       for (const [entityName, entityOpts] of Object.entries(entities)) {
         config[entityName] = entityOpts.cache ? { cacheSeconds: toSeconds(entityOpts.cache) } : {};
       }
-      return createBucketClientWithEntities(name, config);
+      return lazyBucketClientWithEntities(name, config);
     }
-    return createBucketClient(name);
+    return lazyBucketClient(name);
   },
-  mailer: () => createEmailClient(),
-  queue: (name) => createQueueClient(name),
-  worker: (name) => createWorkerClient(name),
+  mailer: () => lazyEmailClient(),
+  queue: (name) => lazyQueueClient(name),
+  worker: (name) => lazyWorkerClient(name),
 };
 
 /**
@@ -67,17 +111,20 @@ type DepsInput = Record<string, unknown> | (() => Record<string, unknown>) | und
 const resolveDepsInput = (deps: DepsInput): Record<string, unknown> | undefined =>
   typeof deps === "function" ? deps() : deps;
 
-export const buildDeps = (rawDeps: DepsInput): Record<string, unknown> | undefined => {
+export const buildDeps = async (rawDeps: DepsInput): Promise<Record<string, unknown> | undefined> => {
   const deps = resolveDepsInput(rawDeps);
   if (!deps) return undefined;
   const result: Record<string, unknown> = {};
-  for (const key of Object.keys(deps)) {
+  const entries = Object.keys(deps).map(key => {
     const raw = process.env[`${ENV_DEP_PREFIX}${key}`];
     if (!raw) throw new Error(`Missing environment variable ${ENV_DEP_PREFIX}${key} for dep "${key}"`);
     const { type, name } = parseDepValue(raw);
     const factory = DEP_FACTORIES[type];
     if (!factory) throw new Error(`Unknown dep type "${type}" for dep "${key}"`);
-    result[key] = factory(name, deps[key]);
+    return { key, promise: factory(name, deps[key]) };
+  });
+  for (const { key, promise } of entries) {
+    result[key] = await promise;
   }
   return result;
 };
@@ -104,7 +151,7 @@ export const buildParams = async (
   if (entries.length === 0) return undefined;
 
   // Batch fetch from SSM
-  const values = await getParameters(entries.map(e => e.ssmPath));
+  const values = await lazyGetParameters(entries.map(e => e.ssmPath));
 
   // Apply transforms
   const result: Record<string, unknown> = {};
@@ -121,6 +168,8 @@ export const buildParams = async (
 };
 
 export type HandlerRuntime = {
+  /** Run full init chain (deps → params → auth → setup) during INIT phase. */
+  preload(): Promise<void>;
   commonArgs(cookieValue?: string, authHeader?: string, headers?: Record<string, string | undefined>): Promise<Record<string, unknown>>;
   logExecution(startTime: number, input: unknown, output: unknown): void;
   logError(startTime: number, input: unknown, error: unknown): void;
@@ -146,23 +195,21 @@ export const createHandlerRuntime = (
   handler: { setup?: (...args: any[]) => any; authFn?: (...args: any[]) => any; deps?: DepsInput; config?: Record<string, unknown>; static?: string[] },
   handlerType: "http" | "table" | "app" | "fifo-queue" | "bucket" | "api" | "cron" | "mcp",
   logLevel: LogLevel = "info",
-  extraSetupArgs?: () => Record<string, unknown>
+  extraSetupArgs?: () => Record<string, unknown> | Promise<Record<string, unknown>>
 ): HandlerRuntime => {
   const handlerName = process.env.EFF_HANDLER ?? "unknown";
   const rank = LOG_RANK[logLevel];
 
   let ctx: unknown = null;
-  let resolvedDeps: Record<string, unknown> | undefined;
-  let resolvedParams: Record<string, unknown> | undefined | null = null;
   let resolvedAuthRuntime: AuthRuntime | undefined | null = null;
 
-  const getDeps = () => (resolvedDeps ??= buildDeps(handler.deps));
+  // Shared promises ensure each step runs at most once,
+  // whether called from preload() during INIT or from commonArgs() on first invoke.
+  let depsPromise: Promise<Record<string, unknown> | undefined> | null = null;
+  const getDeps = () => (depsPromise ??= buildDeps(handler.deps));
 
-  const getParams = async () => {
-    if (resolvedParams !== null) return resolvedParams;
-    resolvedParams = await buildParams(handler.config);
-    return resolvedParams;
-  };
+  let configPromise: Promise<Record<string, unknown> | undefined> | null = null;
+  const getConfig = () => (configPromise ??= buildParams(handler.config));
 
   let resolvedCfSigningConfig: CfSigningConfig | undefined | null = null;
 
@@ -175,7 +222,7 @@ export const createHandlerRuntime = (
       resolvedCfSigningConfig = undefined;
       return undefined;
     }
-    const values = await getParameters([cfSigningKeySsmPath]);
+    const values = await lazyGetParameters([cfSigningKeySsmPath]);
     const privateKey = values.get(cfSigningKeySsmPath);
     if (!privateKey) {
       resolvedCfSigningConfig = undefined;
@@ -189,10 +236,10 @@ export const createHandlerRuntime = (
     if (resolvedAuthRuntime !== null) return resolvedAuthRuntime;
     // Auth config comes from handler.authFn (set by .auth() builder method)
     if (!handler.authFn) { resolvedAuthRuntime = undefined; return undefined; }
-    const params = await getParams();
-    const deps = getDeps();
+    const config = await getConfig();
+    const deps = await getDeps();
     const authArgs: Record<string, unknown> = {};
-    if (params) authArgs.config = params;
+    if (config) authArgs.config = config;
     if (deps) authArgs.deps = deps;
     const authOpts = await handler.authFn(authArgs) as { secret?: string; expiresIn?: Duration; apiToken?: { header?: string; verify?: (value: string) => any; cacheTtl?: Duration } } | undefined;
     if (!authOpts?.secret) { resolvedAuthRuntime = undefined; return undefined; }
@@ -206,7 +253,7 @@ export const createHandlerRuntime = (
       ? (args: { value: string }) => rawVerify(args.value)
       : undefined;
     const cfSigningConfig = await getCfSigningConfig();
-    resolvedAuthRuntime = createAuthRuntime(
+    resolvedAuthRuntime = await lazyCreateAuthRuntime(
       secret,
       defaultExpires,
       wrappedVerify,
@@ -220,13 +267,13 @@ export const createHandlerRuntime = (
   const getSetup = async () => {
     if (ctx !== null) return ctx;
     if (handler.setup) {
-      const params = await getParams();
-      const deps = getDeps();
+      const config = await getConfig();
+      const deps = await getDeps();
       const args: Record<string, unknown> = {};
-      if (params) args.config = params;
+      if (config) args.config = config;
       if (deps) args.deps = deps;
       if (handler.static) args.files = staticFiles;
-      if (extraSetupArgs) Object.assign(args, extraSetupArgs());
+      if (extraSetupArgs) Object.assign(args, await extraSetupArgs());
       ctx = await handler.setup(args);
     }
     return ctx;
@@ -237,10 +284,10 @@ export const createHandlerRuntime = (
   const commonArgs = async (cookieValue?: string, authHeader?: string, headers?: Record<string, string | undefined>): Promise<Record<string, unknown>> => {
     const args: Record<string, unknown> = {};
     if (handler.setup) args.ctx = await getSetup();
-    const deps = getDeps();
+    const deps = await getDeps();
     if (deps) args.deps = deps;
-    const params = await getParams();
-    if (params) args.config = params;
+    const config = await getConfig();
+    if (config) args.config = config;
     if (handler.static) args.files = staticFiles;
     const authRuntime = await getAuthRuntime();
     if (authRuntime) {
@@ -292,5 +339,12 @@ export const createHandlerRuntime = (
     console.debug = saved.debug;
   };
 
-  return { commonArgs, logExecution, logError, patchConsole, restoreConsole, handlerName };
+  const preload = async () => {
+    await getDeps();
+    await getConfig();
+    await getAuthRuntime();
+    await getSetup();
+  };
+
+  return { preload, commonArgs, logExecution, logError, patchConsole, restoreConsole, handlerName };
 };

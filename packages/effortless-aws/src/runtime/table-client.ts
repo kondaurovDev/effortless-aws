@@ -1,6 +1,10 @@
-import { DynamoDB } from "@aws-sdk/client-dynamodb";
+import type * as DynamoSdk from "@aws-sdk/client-dynamodb";
+import type { DynamoDB } from "@aws-sdk/client-dynamodb";
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 import type { TableKey, TableItem, PutInput } from "../handlers/handler-options";
+import { lazyImport } from "./lazy-import";
+
+const loadSdk = () => lazyImport<typeof DynamoSdk>("@aws-sdk/client-dynamodb");
 
 /** Built-in GSI name: tag (PK) + pk (SK) */
 const GSI_TAG_PK = "tag-pk-index";
@@ -153,9 +157,10 @@ export type TableClientOptions = {
  * Creates a typed TableClient for a DynamoDB table.
  * Lazily initializes the DynamoDB SDK client on first use (cold start friendly).
  */
-export const createTableClient = <T = Record<string, unknown>>(tableName: string, options?: TableClientOptions): TableClient<T> => {
+export const createTableClient = async <T = Record<string, unknown>>(tableName: string, options?: TableClientOptions): Promise<TableClient<T>> => {
+  const { DynamoDB: DynamoDBClient } = await loadSdk();
   let client: DynamoDB | null = null;
-  const getClient = () => (client ??= new DynamoDB({}));
+  const getClient = () => (client ??= new DynamoDBClient({}));
   const tagField = options?.tagField ?? "tag";
 
   return {

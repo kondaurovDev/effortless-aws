@@ -7,7 +7,8 @@ import {
   type DeployInput,
   type DeployResult,
   deployCoreLambda,
-  ensureLayerAndExternal
+  ensureLayerAndExternal,
+  resolveSecrets,
 } from "./shared";
 
 // ============ API handler deployment ============
@@ -74,11 +75,15 @@ export const deploy = (input: DeployInput) =>
       file: input.file,
     });
 
+    // Resolve secrets into EFF_PARAM_* env vars
+    const secrets = resolveSecrets(fn.secretEntries, input.project, resolveStage(input.stage));
+
     const { functionArn } = yield* deployApiFunction({
       input,
       fn,
       ...(layerArn ? { layerArn } : {}),
-      ...(external.length > 0 ? { external } : {})
+      ...(external.length > 0 ? { external } : {}),
+      ...(secrets ? { depsEnv: secrets.paramsEnv, depsPermissions: secrets.paramsPermissions } : {}),
     });
 
     // Setup Function URL

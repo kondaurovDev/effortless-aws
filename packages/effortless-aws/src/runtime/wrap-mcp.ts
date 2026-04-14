@@ -124,7 +124,7 @@ export const wrapMcp = <C>(handler: McpHandler<C>) => {
   const serverVersion = handler.__spec.version ?? "1.0.0";
   const instructions = handler.__spec.instructions;
 
-  return async (event: LambdaEvent) => {
+  const fn = async (event: LambdaEvent) => {
     const startTime = Date.now();
     rt.patchConsole();
     let ctxProps: Record<string, unknown> = {};
@@ -190,6 +190,8 @@ export const wrapMcp = <C>(handler: McpHandler<C>) => {
       rt.restoreConsole();
     }
   };
+  (fn as any).__preload = () => rt.preload();
+  return fn;
 };
 
 // ============ Method router ============

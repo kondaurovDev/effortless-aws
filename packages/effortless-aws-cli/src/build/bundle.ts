@@ -49,6 +49,22 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
 
     const format = input.format ?? "esm";
 
+    // Plugin: AWS SDK packages are external (provided by Lambda layer),
+    // but dynamic import() calls should stay lazy at runtime.
+    // We handle @aws-sdk/* via plugin instead of the global `external` list
+    // so we can distinguish static vs dynamic imports.
+    const awsSdkPlugin: import("esbuild").Plugin = {
+      name: "aws-sdk-external",
+      setup(build) {
+        build.onResolve({ filter: /^@aws-sdk\/|^@smithy\// }, (args) => {
+          return { path: args.path, external: true, sideEffects: false };
+        });
+      },
+    };
+
+    // Remove @aws-sdk/* and @smithy/* from the flat external list — handled by plugin above
+    const nonSdkExternals = allExternals.filter(e => e !== "@aws-sdk/*" && e !== "@smithy/*");
+
     const result = yield* esbuildBuild({
       stdin: {
         contents: entryPoint,
@@ -62,8 +78,9 @@ export const bundle = (input: BundleInput & { exportName?: string; external?: st
       minify: false,
       sourcemap: false,
       format,
-      external: allExternals,
+      external: nonSdkExternals,
       metafile: true,
+      plugins: [awsSdkPlugin],
       ...(format === "esm" ? { banner: { js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);" } } : {}),
     });
 

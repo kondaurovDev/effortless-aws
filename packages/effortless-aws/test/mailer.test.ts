@@ -48,7 +48,7 @@ describe("EmailClient", () => {
   });
 
   it("should send email with html body", async () => {
-    const client = createEmailClient();
+    const client = await createEmailClient();
 
     await client.send({
       from: "hello@myapp.com",
@@ -72,7 +72,7 @@ describe("EmailClient", () => {
   });
 
   it("should send email with text body", async () => {
-    const client = createEmailClient();
+    const client = await createEmailClient();
 
     await client.send({
       from: "hello@myapp.com",
@@ -86,7 +86,7 @@ describe("EmailClient", () => {
   });
 
   it("should send email with both html and text", async () => {
-    const client = createEmailClient();
+    const client = await createEmailClient();
 
     await client.send({
       from: "hello@myapp.com",
@@ -104,7 +104,7 @@ describe("EmailClient", () => {
   });
 
   it("should accept multiple recipients", async () => {
-    const client = createEmailClient();
+    const client = await createEmailClient();
 
     await client.send({
       from: "hello@myapp.com",
@@ -118,7 +118,7 @@ describe("EmailClient", () => {
   });
 
   it("should lazily initialize SES client (only on first send)", async () => {
-    const client = createEmailClient();
+    const client = await createEmailClient();
     expect(mockSend).not.toHaveBeenCalled();
 
     await client.send({ from: "a@x.com", to: "b@x.com", subject: "test", text: "hi" });

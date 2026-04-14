@@ -9,7 +9,7 @@ export const wrapCron = <C>(handler: CronHandler<C>) => {
   const rt = createHandlerRuntime(handler, "cron", handler.__spec.lambda?.logLevel ?? "info");
   const handleError = handler.onError ?? (({ error }: { error: unknown }) => console.error(`[effortless:${rt.handlerName}]`, error));
 
-  return async () => {
+  const fn = async () => {
     const startTime = Date.now();
     rt.patchConsole();
     let ctxProps: Record<string, unknown> = {};
@@ -34,4 +34,6 @@ export const wrapCron = <C>(handler: CronHandler<C>) => {
       rt.restoreConsole();
     }
   };
+  (fn as any).__preload = () => rt.preload();
+  return fn;
 };

@@ -1,5 +1,11 @@
-import { SQS } from "@aws-sdk/client-sqs";
-import { ECSClient, DescribeServicesCommand, UpdateServiceCommand } from "@aws-sdk/client-ecs";
+import type * as SqsSdk from "@aws-sdk/client-sqs";
+import type { SQS } from "@aws-sdk/client-sqs";
+import type * as EcsSdk from "@aws-sdk/client-ecs";
+import type { ECSClient } from "@aws-sdk/client-ecs";
+import { lazyImport } from "./lazy-import";
+
+const loadSqs = () => lazyImport<typeof SqsSdk>("@aws-sdk/client-sqs");
+const loadEcs = () => lazyImport<typeof EcsSdk>("@aws-sdk/client-ecs");
 import type { Duration } from "../handlers/handler-options";
 import { toSeconds } from "../handlers/handler-options";
 
@@ -30,7 +36,12 @@ export type WorkerClient<T = unknown> = {
  *
  * @param depValue - The resolved dep value: "${project}-${stage}-${exportName}:${idleTimeoutSec}"
  */
-export const createWorkerClient = <T = unknown>(depValue: string): WorkerClient<T> => {
+export const createWorkerClient = async <T = unknown>(depValue: string): Promise<WorkerClient<T>> => {
+  const [{ SQS: SQSCls }, { ECSClient: ECSCls, DescribeServicesCommand, UpdateServiceCommand }] = await Promise.all([
+    loadSqs(),
+    loadEcs(),
+  ]);
+
   // Parse "workerName:idleTimeoutSec"
   const lastColon = depValue.lastIndexOf(":");
   const workerName = depValue.slice(0, lastColon);
@@ -42,10 +53,10 @@ export const createWorkerClient = <T = unknown>(depValue: string): WorkerClient<
   const service = workerName;
 
   let sqsClient: SQS | null = null;
-  const getSqs = () => (sqsClient ??= new SQS({}));
+  const getSqs = () => (sqsClient ??= new SQSCls({}));
 
   let ecsClient: ECSClient | null = null;
-  const getEcs = () => (ecsClient ??= new ECSClient({}));
+  const getEcs = () => (ecsClient ??= new ECSCls({}));
 
   // Lazily resolve queue URL from queue name
   let resolvedQueueUrl: string | undefined;

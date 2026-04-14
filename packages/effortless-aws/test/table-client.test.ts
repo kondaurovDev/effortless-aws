@@ -28,8 +28,8 @@ describe("createTableClient (single-table design)", () => {
     vi.clearAllMocks();
   });
 
-  it("should expose the table name", () => {
-    const client = createTableClient<OrderData>("my-table");
+  it("should expose the table name", async () => {
+    const client = await createTableClient<OrderData>("my-table");
     expect(client.tableName).toBe("my-table");
   });
 
@@ -37,7 +37,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should auto-extract tag from data.tag and marshall full item", async () => {
       mockPutItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.put({ pk: "USER#1", sk: "ORDER#1", data: { tag: "order", amount: 100, status: "new" } });
 
@@ -49,7 +49,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should include ttl when provided", async () => {
       mockPutItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.put({ pk: "USER#1", sk: "ORDER#1", data: { tag: "order", amount: 50, status: "new" }, ttl: 1700000000 });
 
@@ -60,7 +60,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should use custom tagField to extract tag from data", async () => {
       mockPutItem.mockResolvedValueOnce({});
-      const client = createTableClient<{ type: string; amount: number }>("orders", { tagField: "type" });
+      const client = await createTableClient<{ type: string; amount: number }>("orders", { tagField: "type" });
 
       await client.put({ pk: "USER#1", sk: "ORDER#1", data: { type: "order", amount: 100 } });
 
@@ -70,14 +70,14 @@ describe("createTableClient (single-table design)", () => {
     });
 
     it("should throw when tag field is missing from data", async () => {
-      const client = createTableClient<{ amount: number; status: string }>("orders");
+      const client = await createTableClient<{ amount: number; status: string }>("orders");
       await expect(
         client.put({ pk: "USER#1", sk: "ORDER#1", data: { amount: 100, status: "new" } })
       ).rejects.toThrow('tag is required: data must include a "tag" field');
     });
 
     it("should throw with custom tagField name in error message", async () => {
-      const client = createTableClient<{ amount: number }>("orders", { tagField: "type" });
+      const client = await createTableClient<{ amount: number }>("orders", { tagField: "type" });
       await expect(
         client.put({ pk: "USER#1", sk: "ORDER#1", data: { amount: 100 } })
       ).rejects.toThrow('tag is required: data must include a "type" field');
@@ -85,7 +85,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should add ConditionExpression when ifNotExists is true", async () => {
       mockPutItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.put(
         { pk: "USER#1", sk: "ORDER#1", data: { tag: "order", amount: 100, status: "new" } },
@@ -99,7 +99,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should not add ConditionExpression when ifNotExists is false or omitted", async () => {
       mockPutItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.put({ pk: "USER#1", sk: "ORDER#1", data: { tag: "order", amount: 100, status: "new" } });
 
@@ -116,7 +116,7 @@ describe("createTableClient (single-table design)", () => {
         Item: marshall({ pk: "USER#1", sk: "ORDER#1", tag: "order", data: { amount: 100, status: "new" } }),
       });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       const result = await client.get({ pk: "USER#1", sk: "ORDER#1" });
 
       expect(mockGetItem).toHaveBeenCalledWith({
@@ -129,7 +129,7 @@ describe("createTableClient (single-table design)", () => {
     it("should return undefined when item not found", async () => {
       mockGetItem.mockResolvedValueOnce({});
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       const result = await client.get({ pk: "USER#1", sk: "ORDER#999" });
 
       expect(result).toBeUndefined();
@@ -141,7 +141,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should call deleteItem with pk + sk", async () => {
       mockDeleteItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.delete({ pk: "USER#1", sk: "ORDER#1" });
 
@@ -157,7 +157,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should auto-prefix data. for set fields", async () => {
       mockUpdateItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         set: { status: "shipped" },
@@ -174,7 +174,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should auto-prefix data. for append fields", async () => {
       mockUpdateItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         append: { tags: ["urgent"] },
@@ -188,7 +188,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should auto-prefix data. for remove fields", async () => {
       mockUpdateItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         remove: ["tags"],
@@ -202,7 +202,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should update top-level tag", async () => {
       mockUpdateItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         tag: "shipped-order",
@@ -217,7 +217,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should update top-level ttl", async () => {
       mockUpdateItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         ttl: 1700000000,
@@ -232,7 +232,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should remove ttl when null", async () => {
       mockUpdateItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         ttl: null,
@@ -246,7 +246,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should combine data fields with top-level fields", async () => {
       mockUpdateItem.mockResolvedValueOnce({});
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         set: { status: "shipped" },
@@ -259,7 +259,7 @@ describe("createTableClient (single-table design)", () => {
     });
 
     it("should no-op when no actions", async () => {
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {});
       expect(mockUpdateItem).not.toHaveBeenCalled();
     });
@@ -269,7 +269,7 @@ describe("createTableClient (single-table design)", () => {
         .mockRejectedValueOnce(Object.assign(new Error("ValidationException"), { name: "ValidationException" }))
         .mockResolvedValueOnce({});
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         set: { status: "shipped", amount: 200 },
       });
@@ -286,7 +286,7 @@ describe("createTableClient (single-table design)", () => {
         .mockRejectedValueOnce(Object.assign(new Error("ValidationException"), { name: "ValidationException" }))
         .mockResolvedValueOnce({});
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         set: { status: "shipped" },
         tag: "shipped-order",
@@ -303,7 +303,7 @@ describe("createTableClient (single-table design)", () => {
         .mockRejectedValueOnce(Object.assign(new Error("ValidationException"), { name: "ValidationException" }))
         .mockResolvedValueOnce({});
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.update({ pk: "USER#1", sk: "ORDER#1" }, {
         set: { status: "archived" },
         ttl: null,
@@ -317,7 +317,7 @@ describe("createTableClient (single-table design)", () => {
     it("should rethrow non-ValidationException errors", async () => {
       mockUpdateItem.mockRejectedValueOnce(new Error("AccessDeniedException"));
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await expect(
         client.update({ pk: "USER#1", sk: "ORDER#1" }, { set: { status: "x" } })
       ).rejects.toThrow("AccessDeniedException");
@@ -328,7 +328,7 @@ describe("createTableClient (single-table design)", () => {
         Object.assign(new Error("ValidationException"), { name: "ValidationException" })
       );
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await expect(
         client.update({ pk: "USER#1", sk: "ORDER#1" }, { tag: "new-tag" })
       ).rejects.toThrow("ValidationException");
@@ -346,7 +346,7 @@ describe("createTableClient (single-table design)", () => {
         ],
       });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       const results = await client.query({ pk: "USER#1" });
 
       expect(mockQuery).toHaveBeenCalledWith({
@@ -363,7 +363,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query with exact sk match (string shorthand)", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.query({ pk: "USER#1", sk: "ORDER#1" });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -376,7 +376,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query with begins_with", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.query({ pk: "USER#1", sk: { begins_with: "ORDER#" } });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -387,7 +387,7 @@ describe("createTableClient (single-table design)", () => {
 
     it("should query with gt/gte/lt/lte", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
 
       await client.query({ pk: "USER#1", sk: { gt: "ORDER#100" } });
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -419,7 +419,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query with between", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.query({ pk: "USER#1", sk: { between: ["ORDER#100", "ORDER#200"] } });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -431,7 +431,7 @@ describe("createTableClient (single-table design)", () => {
     it("should pass limit and scanIndexForward", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.query({ pk: "USER#1", limit: 10, scanIndexForward: false });
 
       expect(mockQuery).toHaveBeenCalledWith(
@@ -445,7 +445,7 @@ describe("createTableClient (single-table design)", () => {
     it("should return empty array when no items", async () => {
       mockQuery.mockResolvedValueOnce({});
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       const results = await client.query({ pk: "USER#1" });
 
       expect(results).toEqual([]);
@@ -462,7 +462,7 @@ describe("createTableClient (single-table design)", () => {
         ],
       });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       const results = await client.queryByTag({ tag: "user" });
 
       expect(mockQuery).toHaveBeenCalledWith({
@@ -479,7 +479,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query GSI with pk exact match", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.queryByTag({ tag: "order", pk: "USER#1" });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -493,7 +493,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query GSI with pk begins_with", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.queryByTag({ tag: "order", pk: { begins_with: "USER#" } });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -505,7 +505,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query GSI with pk between", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.queryByTag({ tag: "order", pk: { between: ["USER#A", "USER#Z"] } });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -518,7 +518,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query GSI with pk gt", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.queryByTag({ tag: "order", pk: { gt: "USER#100" } });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -531,7 +531,7 @@ describe("createTableClient (single-table design)", () => {
     it("should query GSI with pk lte", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.queryByTag({ tag: "order", pk: { lte: "USER#Z" } });
 
       expect(mockQuery).toHaveBeenCalledWith(expect.objectContaining({
@@ -543,7 +543,7 @@ describe("createTableClient (single-table design)", () => {
     it("should pass limit and scanIndexForward", async () => {
       mockQuery.mockResolvedValueOnce({ Items: [] });
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       await client.queryByTag({ tag: "order", limit: 5, scanIndexForward: false });
 
       expect(mockQuery).toHaveBeenCalledWith(
@@ -558,7 +558,7 @@ describe("createTableClient (single-table design)", () => {
     it("should return empty array when no items", async () => {
       mockQuery.mockResolvedValueOnce({});
 
-      const client = createTableClient<OrderData>("orders");
+      const client = await createTableClient<OrderData>("orders");
       const results = await client.queryByTag({ tag: "user" });
 
       expect(results).toEqual([]);

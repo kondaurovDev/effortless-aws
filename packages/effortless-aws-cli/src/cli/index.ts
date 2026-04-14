@@ -9,6 +9,7 @@ import { deployCommand } from "./commands/deploy";
 import { statusCommand } from "./commands/status";
 import { cleanupCommand } from "./commands/cleanup";
 import { logsCommand } from "./commands/logs";
+import { statsCommand } from "./commands/stats";
 import { layerCommand } from "./commands/layer";
 import { configCommand } from "./commands/config";
 import { checkForUpdate } from "./update-check";
@@ -19,7 +20,7 @@ const { version } = require("../../package.json");
 const versionString = `${version} (${new URL(".", import.meta.url).pathname})`;
 
 const mainCommand = Command.make("eff").pipe(
-  Command.withSubcommands([deployCommand, statusCommand, logsCommand, cleanupCommand, layerCommand, configCommand]),
+  Command.withSubcommands([deployCommand, statusCommand, logsCommand, statsCommand, cleanupCommand, layerCommand, configCommand]),
   Command.withDescription("Code-first AWS Lambda framework")
 );
 

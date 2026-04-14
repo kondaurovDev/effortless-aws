@@ -23,15 +23,15 @@ describe("createBucketClient", () => {
     vi.clearAllMocks()
   })
 
-  it("should expose the bucket name", () => {
-    const client = createBucketClient("my-bucket")
+  it("should expose the bucket name", async () => {
+    const client = await createBucketClient("my-bucket")
     expect(client.bucketName).toBe("my-bucket")
   })
 
   describe("put", () => {
     it("should upload a string body", async () => {
       mockPutObject.mockResolvedValueOnce({})
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       await client.put("docs/readme.txt", "hello world")
 
@@ -44,7 +44,7 @@ describe("createBucketClient", () => {
 
     it("should upload a buffer body", async () => {
       mockPutObject.mockResolvedValueOnce({})
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
       const buf = Buffer.from([1, 2, 3])
 
       await client.put("bin/data.bin", buf)
@@ -58,7 +58,7 @@ describe("createBucketClient", () => {
 
     it("should include contentType when provided", async () => {
       mockPutObject.mockResolvedValueOnce({})
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       await client.put("img/photo.jpg", Buffer.from([]), { contentType: "image/jpeg" })
 
@@ -78,7 +78,7 @@ describe("createBucketClient", () => {
         Body: { [Symbol.asyncIterator]: async function* () { yield* chunks } },
         ContentType: "text/plain",
       })
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       const result = await client.get("docs/readme.txt")
 
@@ -91,7 +91,7 @@ describe("createBucketClient", () => {
     it("should return undefined for NoSuchKey", async () => {
       const error = Object.assign(new Error("NoSuchKey"), { name: "NoSuchKey" })
       mockGetObject.mockRejectedValueOnce(error)
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       const result = await client.get("missing.txt")
 
@@ -101,7 +101,7 @@ describe("createBucketClient", () => {
     it("should return undefined for 404 status code", async () => {
       const error = Object.assign(new Error("Not Found"), { name: "NotFound", $metadata: { httpStatusCode: 404 } })
       mockGetObject.mockRejectedValueOnce(error)
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       const result = await client.get("missing.txt")
 
@@ -110,7 +110,7 @@ describe("createBucketClient", () => {
 
     it("should throw on unexpected errors", async () => {
       mockGetObject.mockRejectedValueOnce(new Error("Access Denied"))
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       await expect(client.get("secret.txt")).rejects.toThrow("Access Denied")
     })
@@ -119,7 +119,7 @@ describe("createBucketClient", () => {
   describe("delete", () => {
     it("should delete an object", async () => {
       mockDeleteObject.mockResolvedValueOnce({})
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       await client.delete("old-file.txt")
 
@@ -138,7 +138,7 @@ describe("createBucketClient", () => {
           { Key: "file2.txt", Size: 200 },
         ],
       })
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       const items = await client.list()
 
@@ -153,7 +153,7 @@ describe("createBucketClient", () => {
       mockListObjectsV2.mockResolvedValueOnce({
         Contents: [{ Key: "uploads/photo.jpg", Size: 500 }],
       })
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       await client.list("uploads/")
 
@@ -174,7 +174,7 @@ describe("createBucketClient", () => {
           Contents: [{ Key: "b.txt", Size: 20 }],
           IsTruncated: false,
         })
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       const items = await client.list()
 
@@ -190,7 +190,7 @@ describe("createBucketClient", () => {
 
     it("should handle empty bucket", async () => {
       mockListObjectsV2.mockResolvedValueOnce({ Contents: undefined })
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       const items = await client.list()
 
@@ -201,7 +201,7 @@ describe("createBucketClient", () => {
   describe("lazy initialization", () => {
     it("should reuse the same S3 client across calls", async () => {
       mockPutObject.mockResolvedValue({})
-      const client = createBucketClient("my-bucket")
+      const client = await createBucketClient("my-bucket")
 
       await client.put("a.txt", "a")
       await client.put("b.txt", "b")

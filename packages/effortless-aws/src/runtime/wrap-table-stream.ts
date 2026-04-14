@@ -71,23 +71,23 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
   const tagField = handler.__spec.tagField ?? "tag";
   const concurrency = handler.__spec.concurrency ?? 1;
 
-  let selfClient: ReturnType<typeof createTableClient> | null = null;
-  const getSelfClient = () => {
+  let selfClient: Awaited<ReturnType<typeof createTableClient>> | null = null;
+  const getSelfClient = async () => {
     if (selfClient) return selfClient;
     const raw = process.env[ENV_DEP_SELF];
     if (!raw) return undefined;
     const tableName = raw.startsWith("table:") ? raw.slice(6) : raw;
-    selfClient = createTableClient(tableName, { tagField });
+    selfClient = await createTableClient(tableName, { tagField });
     return selfClient;
   };
 
-  const rt = createHandlerRuntime(handler, "table", handler.__spec.lambda?.logLevel ?? "info", () => {
-    const table = getSelfClient();
+  const rt = createHandlerRuntime(handler, "table", handler.__spec.lambda?.logLevel ?? "info", async () => {
+    const table = await getSelfClient();
     return table ? { table } : {};
   });
   const handleError = handler.onError ?? (({ error }: { error: unknown }) => console.error(`[effortless:${rt.handlerName}]`, error));
 
-  return async (event: DynamoDBStreamEvent) => {
+  const fn = async (event: DynamoDBStreamEvent) => {
     const startTime = Date.now();
     rt.patchConsole();
     let ctxProps: Record<string, unknown> = {};
@@ -99,7 +99,8 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
       const common = await rt.commonArgs();
       const ctx = common.ctx;
       ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
-      const shared = { ...ctxProps };
+      const table = await getSelfClient();
+      const shared = { ...ctxProps, ...(table ? { table } : {}) };
 
       let records: TableRecord<T>[];
       let sequenceNumbers: Map<TableRecord<T>, string>;
@@ -175,4 +176,6 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
       rt.restoreConsole();
     }
   };
+  (fn as any).__preload = () => rt.preload();
+  return fn;
 };

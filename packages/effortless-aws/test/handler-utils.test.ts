@@ -50,56 +50,56 @@ describe("buildDeps", () => {
     process.env = originalEnv;
   });
 
-  it("returns undefined when deps is undefined", () => {
-    expect(buildDeps(undefined)).toBeUndefined();
+  it("returns undefined when deps is undefined", async () => {
+    expect(await buildDeps(undefined)).toBeUndefined();
   });
 
-  it("builds table client from env var", () => {
+  it("builds table client from env var", async () => {
     process.env = { ...originalEnv, [`${ENV_DEP_PREFIX}orders`]: "table:my-orders" };
-    const deps = buildDeps({ orders: {} });
+    const deps = await buildDeps({ orders: {} });
     expect(deps).toEqual({
       orders: { __mock: "table", name: "my-orders", opts: undefined },
     });
   });
 
-  it("forwards tagField from dep handler __spec", () => {
+  it("forwards tagField from dep handler __spec", async () => {
     process.env = { ...originalEnv, [`${ENV_DEP_PREFIX}orders`]: "table:my-orders" };
-    const deps = buildDeps({ orders: { __spec: { tagField: "type" } } });
+    const deps = await buildDeps({ orders: { __spec: { tagField: "type" } } });
     expect(deps).toEqual({
       orders: { __mock: "table", name: "my-orders", opts: { tagField: "type" } },
     });
   });
 
-  it("builds bucket client", () => {
+  it("builds bucket client", async () => {
     process.env = { ...originalEnv, [`${ENV_DEP_PREFIX}files`]: "bucket:my-bucket" };
-    expect(buildDeps({ files: {} })).toEqual({ files: { __mock: "bucket", name: "my-bucket" } });
+    expect(await buildDeps({ files: {} })).toEqual({ files: { __mock: "bucket", name: "my-bucket" } });
   });
 
-  it("builds mailer client", () => {
+  it("builds mailer client", async () => {
     process.env = { ...originalEnv, [`${ENV_DEP_PREFIX}mail`]: "mailer:ignored" };
-    expect(buildDeps({ mail: {} })).toEqual({ mail: { __mock: "mailer" } });
+    expect(await buildDeps({ mail: {} })).toEqual({ mail: { __mock: "mailer" } });
   });
 
-  it("builds queue client", () => {
+  it("builds queue client", async () => {
     process.env = { ...originalEnv, [`${ENV_DEP_PREFIX}q`]: "queue:https://sqs.example.com/q" };
-    expect(buildDeps({ q: {} })).toEqual({ q: { __mock: "queue", name: "https://sqs.example.com/q" } });
+    expect(await buildDeps({ q: {} })).toEqual({ q: { __mock: "queue", name: "https://sqs.example.com/q" } });
   });
 
-  it("throws on missing env var", () => {
+  it("throws on missing env var", async () => {
     process.env = { ...originalEnv };
-    expect(() => buildDeps({ missing: {} })).toThrow(
+    await expect(buildDeps({ missing: {} })).rejects.toThrow(
       `Missing environment variable ${ENV_DEP_PREFIX}missing for dep "missing"`
     );
   });
 
-  it("throws on unknown dep type", () => {
+  it("throws on unknown dep type", async () => {
     process.env = { ...originalEnv, [`${ENV_DEP_PREFIX}x`]: "unknown:res" };
-    expect(() => buildDeps({ x: {} })).toThrow('Unknown dep type "unknown" for dep "x"');
+    await expect(buildDeps({ x: {} })).rejects.toThrow('Unknown dep type "unknown" for dep "x"');
   });
 
-  it("accepts deps as a function", () => {
+  it("accepts deps as a function", async () => {
     process.env = { ...originalEnv, [`${ENV_DEP_PREFIX}orders`]: "table:tbl" };
-    const deps = buildDeps(() => ({ orders: {} }));
+    const deps = await buildDeps(() => ({ orders: {} }));
     expect(deps).toHaveProperty("orders");
   });
 });

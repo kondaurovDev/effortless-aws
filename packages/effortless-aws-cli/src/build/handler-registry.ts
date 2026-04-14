@@ -26,6 +26,7 @@ export const generateEntryPoint = (
   return `${importStmt}
 import { ${wrapperFn} } from "${resolvedWrapperPath}";
 export const handler = ${wrapperFn}(${importName});
+await handler.__preload?.();
 `;
 };
 

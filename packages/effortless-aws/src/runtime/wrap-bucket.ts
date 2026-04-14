@@ -57,7 +57,7 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
 
   // S3 event notifications are fire-and-forget — no partial batch failure support,
   // so unlike table/queue wrappers we don't return batchItemFailures.
-  return async (event: S3Event) => {
+  const fn = async (event: S3Event) => {
     const startTime = Date.now();
     rt.patchConsole();
     let ctxProps: Record<string, unknown> = {};
@@ -108,4 +108,6 @@ export const wrapBucket = <C>(handler: BucketHandler<C>) => {
       rt.restoreConsole();
     }
   };
+  (fn as any).__preload = () => rt.preload();
+  return fn;
 };

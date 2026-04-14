@@ -16,6 +16,8 @@ export type ApiRouteEntry = {
   pattern: string;
   /** Export name of the referenced API handler */
   handlerExport: string;
+  /** Access control mode (only relevant when route points to a bucket) */
+  access?: "private" | "public";
 };
 
 /** Bucket route extracted from a static site's routes map */

@@ -1,4 +1,8 @@
-import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import type * as SesSdk from "@aws-sdk/client-sesv2";
+import type { SESv2Client } from "@aws-sdk/client-sesv2";
+import { lazyImport } from "./lazy-import";
+
+const loadSdk = () => lazyImport<typeof SesSdk>("@aws-sdk/client-sesv2");
 
 /**
  * Options for sending an email via EmailClient.send()
@@ -32,9 +36,10 @@ export type EmailClient = {
  * Creates an EmailClient that sends emails via Amazon SESv2.
  * Lazily initializes the SESv2 SDK client on first use.
  */
-export const createEmailClient = (): EmailClient => {
+export const createEmailClient = async (): Promise<EmailClient> => {
+  const { SESv2Client: Cls, SendEmailCommand } = await loadSdk();
   let client: SESv2Client | null = null;
-  const getClient = () => (client ??= new SESv2Client({}));
+  const getClient = () => (client ??= new Cls({}));
 
   return {
     async send({ from, to, subject, html, text }) {

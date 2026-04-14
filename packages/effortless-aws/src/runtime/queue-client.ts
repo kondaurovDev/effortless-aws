@@ -1,4 +1,8 @@
-import { SQS } from "@aws-sdk/client-sqs";
+import type * as SqsSdk from "@aws-sdk/client-sqs";
+import type { SQS } from "@aws-sdk/client-sqs";
+import { lazyImport } from "./lazy-import";
+
+const loadSdk = () => lazyImport<typeof SqsSdk>("@aws-sdk/client-sqs");
 
 /**
  * Input for QueueClient.send()
@@ -32,9 +36,10 @@ export type QueueClient<T = unknown> = {
  * Creates a typed QueueClient for an SQS FIFO queue.
  * Lazily initializes the SQS SDK client and resolves the queue URL on first use (cold start friendly).
  */
-export const createQueueClient = <T = unknown>(queueName: string): QueueClient<T> => {
+export const createQueueClient = async <T = unknown>(queueName: string): Promise<QueueClient<T>> => {
+  const { SQS: SQSClient } = await loadSdk();
   let client: SQS | null = null;
-  const getClient = () => (client ??= new SQS({}));
+  const getClient = () => (client ??= new SQSClient({}));
 
   let resolvedUrl: string | undefined;
   const getQueueUrl = async (): Promise<string> => {

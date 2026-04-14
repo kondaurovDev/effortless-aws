@@ -1,4 +1,8 @@
-import { S3 } from "@aws-sdk/client-s3";
+import type * as S3Sdk from "@aws-sdk/client-s3";
+import type { S3 } from "@aws-sdk/client-s3";
+import { lazyImport } from "./lazy-import";
+
+const loadSdk = () => lazyImport<typeof S3Sdk>("@aws-sdk/client-s3");
 
 /**
  * S3 bucket client for runtime operations.
@@ -205,9 +209,10 @@ const createEntityClient = (
  * Creates an S3 BucketClient.
  * Lazily initializes the S3 SDK client on first use (cold start friendly).
  */
-export const createBucketClient = (bucketName: string): BucketClient => {
+export const createBucketClient = async (bucketName: string): Promise<BucketClient> => {
+  const { S3: S3Client } = await loadSdk();
   let client: S3 | null = null;
-  const getClient = () => (client ??= new S3({}));
+  const getClient = () => (client ??= new S3Client({}));
   return createBucketMethods(getClient, bucketName);
 };
 
@@ -215,12 +220,13 @@ export const createBucketClient = (bucketName: string): BucketClient => {
  * Creates an S3 BucketClient with typed entity clients.
  * Shares a single S3 SDK instance across raw and entity operations.
  */
-export const createBucketClientWithEntities = (
+export const createBucketClientWithEntities = async (
   bucketName: string,
   entitiesConfig: Record<string, { cacheSeconds?: number }>,
-): BucketClient & Record<string, StoreEntityClient<any>> => {
+): Promise<BucketClient & Record<string, StoreEntityClient<any>>> => {
+  const { S3: S3Client } = await loadSdk();
   let client: S3 | null = null;
-  const getClient = () => (client ??= new S3({}));
+  const getClient = () => (client ??= new S3Client({}));
 
   const base = createBucketMethods(getClient, bucketName);
   const result: any = { ...base };

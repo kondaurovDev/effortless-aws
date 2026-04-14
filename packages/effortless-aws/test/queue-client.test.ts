@@ -22,15 +22,15 @@ describe("createQueueClient", () => {
     mockGetQueueUrl.mockResolvedValue({ QueueUrl: "https://sqs.us-east-1.amazonaws.com/123/test-queue.fifo" })
   })
 
-  it("should expose the queue name", () => {
-    const client = createQueueClient("test-queue")
+  it("should expose the queue name", async () => {
+    const client = await createQueueClient("test-queue")
     expect(client.queueName).toBe("test-queue")
   })
 
   describe("send", () => {
     it("should send a message with groupId", async () => {
       mockSendMessage.mockResolvedValueOnce({})
-      const client = createQueueClient<{ orderId: string }>("orders")
+      const client = await createQueueClient<{ orderId: string }>("orders")
 
       await client.send({ body: { orderId: "123" }, groupId: "user-1" })
 
@@ -44,7 +44,7 @@ describe("createQueueClient", () => {
 
     it("should include deduplicationId when provided", async () => {
       mockSendMessage.mockResolvedValueOnce({})
-      const client = createQueueClient("orders")
+      const client = await createQueueClient("orders")
 
       await client.send({ body: { id: 1 }, groupId: "g1", deduplicationId: "dedup-1" })
 
@@ -55,7 +55,7 @@ describe("createQueueClient", () => {
 
     it("should include message attributes when provided", async () => {
       mockSendMessage.mockResolvedValueOnce({})
-      const client = createQueueClient("orders")
+      const client = await createQueueClient("orders")
 
       await client.send({
         body: { id: 1 },
@@ -76,7 +76,7 @@ describe("createQueueClient", () => {
 
     it("should cache the queue URL across calls", async () => {
       mockSendMessage.mockResolvedValue({})
-      const client = createQueueClient("orders")
+      const client = await createQueueClient("orders")
 
       await client.send({ body: { id: 1 }, groupId: "g1" })
       await client.send({ body: { id: 2 }, groupId: "g2" })
@@ -89,7 +89,7 @@ describe("createQueueClient", () => {
   describe("sendBatch", () => {
     it("should send a batch of messages", async () => {
       mockSendMessageBatch.mockResolvedValueOnce({ Failed: [] })
-      const client = createQueueClient<{ id: number }>("orders")
+      const client = await createQueueClient<{ id: number }>("orders")
 
       await client.sendBatch([
         { body: { id: 1 }, groupId: "g1" },
@@ -107,7 +107,7 @@ describe("createQueueClient", () => {
 
     it("should include deduplicationId in batch entries", async () => {
       mockSendMessageBatch.mockResolvedValueOnce({ Failed: [] })
-      const client = createQueueClient("orders")
+      const client = await createQueueClient("orders")
 
       await client.sendBatch([
         { body: { id: 1 }, groupId: "g1", deduplicationId: "d1" },
@@ -129,7 +129,7 @@ describe("createQueueClient", () => {
           { Id: "2", Message: "invalid" },
         ],
       })
-      const client = createQueueClient("orders")
+      const client = await createQueueClient("orders")
 
       await expect(
         client.sendBatch([
@@ -142,7 +142,7 @@ describe("createQueueClient", () => {
 
     it("should not throw when Failed is undefined", async () => {
       mockSendMessageBatch.mockResolvedValueOnce({})
-      const client = createQueueClient("orders")
+      const client = await createQueueClient("orders")
 
       await expect(
         client.sendBatch([{ body: { id: 1 }, groupId: "g1" }])

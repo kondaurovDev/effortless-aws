@@ -52,7 +52,7 @@ export const resolveStaticSiteRoutes = (
       const handlerInfo = allExports.get(resolvedExportName);
 
       if (handlerInfo?.type === "bucket") {
-        resolvedBucketRoutes.push({ pattern: ar.pattern, bucketExportName: resolvedExportName, access: "public" });
+        resolvedBucketRoutes.push({ pattern: ar.pattern, bucketExportName: resolvedExportName, access: ar.access ?? "public" });
       } else {
         resolvedApiRoutes.push({ pattern: ar.pattern, handlerExport: resolvedExportName });
       }
@@ -395,7 +395,7 @@ const processChain = (
         const route = extractStaticSiteRoute(step.args);
         if (route) {
           routePatterns.push(route.pattern);
-          apiRoutes.push({ pattern: route.pattern, handlerExport: route.originName });
+          apiRoutes.push({ pattern: route.pattern, handlerExport: route.originName, access: route.access as "private" | "public" | undefined });
         }
         break;
       }

@@ -6,7 +6,8 @@ import { makeTags, resolveStage, type TagContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,
-  ensureLayerAndExternal
+  ensureLayerAndExternal,
+  resolveSecrets,
 } from "./shared";
 
 // ============ Table handler deployment ============
@@ -115,11 +116,15 @@ export const deployTable = (input: DeployInput) =>
       file: input.file,
     });
 
+    // Resolve secrets into EFF_PARAM_* env vars
+    const secrets = resolveSecrets(fn.secretEntries, input.project, resolveStage(input.stage));
+
     const result = yield* deployTableFunction({
       input,
       fn,
       ...(layerArn ? { layerArn } : {}),
-      ...(external.length > 0 ? { external } : {})
+      ...(external.length > 0 ? { external } : {}),
+      ...(secrets ? { depsEnv: secrets.paramsEnv, depsPermissions: secrets.paramsPermissions } : {}),
     });
 
     return result;

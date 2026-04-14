@@ -44,7 +44,7 @@ describe("createWorkerClient", () => {
         services: [{ desiredCount: 0 }],
       })
       mockEcsSend.mockResolvedValueOnce({}) // UpdateServiceCommand
-      const client = createWorkerClient<{ taskId: string }>(depValue)
+      const client = await createWorkerClient<{ taskId: string }>(depValue)
 
       await client.send({ taskId: "abc" })
 
@@ -66,7 +66,7 @@ describe("createWorkerClient", () => {
       mockEcsSend.mockResolvedValueOnce({
         services: [{ desiredCount: 1 }],
       })
-      const client = createWorkerClient(depValue)
+      const client = await createWorkerClient(depValue)
 
       await client.send({ data: 1 })
 
@@ -80,7 +80,7 @@ describe("createWorkerClient", () => {
         services: [{ desiredCount: 0 }],
       })
       mockEcsSend.mockResolvedValueOnce({}) // UpdateService
-      const client = createWorkerClient(depValue)
+      const client = await createWorkerClient(depValue)
 
       await client.send({ data: 1 }) // first call — wakes up
       await client.send({ data: 2 }) // second call — within timeout, skips ECS
@@ -91,7 +91,7 @@ describe("createWorkerClient", () => {
 
     it("should not wake up when start: false", async () => {
       mockSendMessage.mockResolvedValueOnce({})
-      const client = createWorkerClient(depValue)
+      const client = await createWorkerClient(depValue)
 
       await client.send({ data: 1 }, { start: false })
 
@@ -100,7 +100,7 @@ describe("createWorkerClient", () => {
 
     it("should not wake up when delay is provided", async () => {
       mockSendMessage.mockResolvedValueOnce({})
-      const client = createWorkerClient(depValue)
+      const client = await createWorkerClient(depValue)
 
       await client.send({ data: 1 }, { delay: "5m" })
 
@@ -116,7 +116,7 @@ describe("createWorkerClient", () => {
       mockEcsSend.mockResolvedValueOnce({
         services: [{ runningCount: 1 }],
       })
-      const client = createWorkerClient(depValue)
+      const client = await createWorkerClient(depValue)
 
       expect(await client.status()).toBe("running")
     })
@@ -125,7 +125,7 @@ describe("createWorkerClient", () => {
       mockEcsSend.mockResolvedValueOnce({
         services: [{ runningCount: 0 }],
       })
-      const client = createWorkerClient(depValue)
+      const client = await createWorkerClient(depValue)
 
       expect(await client.status()).toBe("idle")
     })
@@ -137,7 +137,7 @@ describe("createWorkerClient", () => {
       mockEcsSend.mockResolvedValue({
         services: [{ desiredCount: 0 }],
       })
-      const client = createWorkerClient(depValue)
+      const client = await createWorkerClient(depValue)
 
       // Wake up first
       await client.send({ data: 1 })

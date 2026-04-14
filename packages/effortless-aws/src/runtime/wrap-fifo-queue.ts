@@ -66,7 +66,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
   const rt = createHandlerRuntime(handler, "fifo-queue", handler.__spec.lambda?.logLevel ?? "info");
   const handleError = handler.onError ?? (({ error }: { error: unknown }) => console.error(`[effortless:${rt.handlerName}]`, error));
 
-  return async (event: SQSEvent) => {
+  const fn = async (event: SQSEvent) => {
     const startTime = Date.now();
     rt.patchConsole();
     let ctxProps: Record<string, unknown> = {};
@@ -134,4 +134,6 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
       rt.restoreConsole();
     }
   };
+  (fn as any).__preload = () => rt.preload();
+  return fn;
 };

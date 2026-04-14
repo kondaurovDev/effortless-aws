@@ -99,6 +99,34 @@ export const formatBytes = (bytes: number): string => {
   return `${(kb / 1024).toFixed(2)}MB`;
 };
 
+// ============ Secret resolution ============
+
+import type { SecretEntry } from "~/core";
+
+const SSM_PERMISSIONS = [
+  "ssm:GetParameter",
+  "ssm:GetParameters",
+] as const;
+
+/**
+ * Resolve secret entries into EFF_PARAM_* environment variables and SSM permissions.
+ * Used by both full-project deploy and single-handler deploy.
+ */
+export const resolveSecrets = (
+  secretEntries: SecretEntry[],
+  project: string,
+  stage: string
+): { paramsEnv: Record<string, string>; paramsPermissions: readonly string[] } | undefined => {
+  if (secretEntries.length === 0) return undefined;
+
+  const paramsEnv: Record<string, string> = {};
+  for (const { propName, ssmKey } of secretEntries) {
+    paramsEnv[`EFF_PARAM_${propName}`] = `/${project}/${stage}/${ssmKey}`;
+  }
+
+  return { paramsEnv, paramsPermissions: [...SSM_PERMISSIONS] };
+};
+
 // ============ Shared utilities ============
 
 export const readSource = (input: DeployInput) =>
