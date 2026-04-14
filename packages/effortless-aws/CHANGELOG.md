@@ -1,5 +1,15 @@
 # effortless-aws
 
+## 0.37.0
+
+### Minor Changes
+
+- [`c0a72bd`](https://github.com/kondaurovDev/effortless-aws/commit/c0a72bd0edddaa9a27649ac9577383d4029e5bf4) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - - Lazy AWS SDK imports: SDK clients are now loaded via dynamic `import()` instead of static imports, reducing Lambda cold start time for handlers that don't use all SDK clients
+  - Added `preload()` method to `HandlerRuntime` and `__preload` hooks on all wrappers for INIT-phase SDK pre-loading
+  - New `eff stats` CLI command showing Lambda performance metrics (invocations, duration percentiles, cold starts, memory, concurrency, cost)
+  - Fixed `access: "private"` for bucket routes in static site extraction
+  - Fixed single-handler deploy to resolve secrets (EFF*PARAM*\* env vars)
+
 ## 0.36.1
 
 ### Patch Changes
