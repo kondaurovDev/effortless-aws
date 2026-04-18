@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import { toSeconds } from "effortless-aws";
 import { extractConfigsFromFile, type ExtractedTableFunction } from "~/discovery";
 import { Aws, ensureTable, ensureEventSourceMapping } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,
@@ -27,17 +28,18 @@ const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*"] as const;
 /** @internal */
 export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployTableFunctionInput) =>
   Effect.gen(function* () {
+    const { project, stage } = yield* DeployContext;
     const { exportName, config, hasHandler } = fn;
     const handlerName = exportName;
 
     const tagCtx: TagContext = {
-      project: input.project,
-      stage: resolveStage(input.stage),
+      project,
+      stage,
       handler: handlerName
     };
 
     yield* Effect.logDebug("Creating DynamoDB table...");
-    const tableName = `${input.project}-${tagCtx.stage}-${handlerName}`;
+    const tableName = `${project}-${stage}-${handlerName}`;
     const { tableArn, streamArn, created } = yield* ensureTable({
       name: tableName,
       billingMode: config.billingMode ?? "PAY_PER_REQUEST",
@@ -96,85 +98,83 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
   });
 
 export const deployTable = (input: DeployInput) =>
-  Effect.gen(function* () {
-    const configs = yield* extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, "table");
+  Effect.flatMap(DeployContext, ({ project, stage, region }) =>
+    Effect.gen(function* () {
+      const configs = yield* extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, "table");
 
-    if (configs.length === 0) {
-      return yield* Effect.fail(new Error("No defineTable exports found in source"));
-    }
+      if (configs.length === 0) {
+        return yield* Effect.fail(new Error("No defineTable exports found in source"));
+      }
 
-    // Find specific export or use first one
-    const targetExport = input.exportName ?? "default";
-    const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
+      // Find specific export or use first one
+      const targetExport = input.exportName ?? "default";
+      const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
 
-    // Ensure layer exists
-    const { layerArn, external } = yield* ensureLayerAndExternal({
-      project: input.project,
-      stage: resolveStage(input.stage),
-      region: input.region,
-      projectDir: input.projectDir,
-      file: input.file,
-    });
+      // Ensure layer exists
+      const { layerArn, external } = yield* ensureLayerAndExternal({
+        projectDir: input.projectDir,
+        file: input.file,
+      });
 
-    // Resolve secrets into EFF_PARAM_* env vars
-    const secrets = resolveSecrets(fn.secretEntries, input.project, resolveStage(input.stage));
+      // Resolve secrets into EFF_PARAM_* env vars
+      const secrets = resolveSecrets(fn.secretEntries, project, stage);
 
-    const result = yield* deployTableFunction({
-      input,
-      fn,
-      ...(layerArn ? { layerArn } : {}),
-      ...(external.length > 0 ? { external } : {}),
-      ...(secrets ? { depsEnv: secrets.paramsEnv, depsPermissions: secrets.paramsPermissions } : {}),
-    });
+      const result = yield* deployTableFunction({
+        input,
+        fn,
+        ...(layerArn ? { layerArn } : {}),
+        ...(external.length > 0 ? { external } : {}),
+        ...(secrets ? { depsEnv: secrets.paramsEnv, depsPermissions: secrets.paramsPermissions } : {}),
+      });
 
-    return result;
-  }).pipe(
-    Effect.provide(
-      Aws.makeClients({
-        lambda: { region: input.region },
-        iam: { region: input.region },
-        dynamodb: { region: input.region }
-      })
+      return result;
+    }).pipe(
+      Effect.provide(
+        Aws.makeClients({
+          lambda: { region },
+          iam: { region },
+          dynamodb: { region }
+        })
+      )
     )
   );
 
 export const deployAllTables = (input: DeployInput) =>
-  Effect.gen(function* () {
-    const functions = yield* extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, "table");
+  Effect.flatMap(DeployContext, ({ region }) =>
+    Effect.gen(function* () {
+      const functions = yield* extractConfigsFromFile<import("effortless-aws").TableConfig>(input.file, "table");
 
-    if (functions.length === 0) {
-      return yield* Effect.fail(new Error("No defineTable exports found in source"));
-    }
+      if (functions.length === 0) {
+        return yield* Effect.fail(new Error("No defineTable exports found in source"));
+      }
 
-    yield* Effect.logDebug(`Found ${functions.length} table handler(s) to deploy`);
+      yield* Effect.logDebug(`Found ${functions.length} table handler(s) to deploy`);
 
-    // Ensure layer exists
-    const { layerArn, external } = yield* ensureLayerAndExternal({
-      project: input.project,
-      stage: resolveStage(input.stage),
-      region: input.region,
-      projectDir: input.projectDir,
-      file: input.file,
-    });
+      // Ensure layer exists
+      const { layerArn, external } = yield* ensureLayerAndExternal({
+        projectDir: input.projectDir,
+        file: input.file,
+      });
 
-    const results = yield* Effect.forEach(
-      functions,
-      fn => deployTableFunction({
-        input,
-        fn,
-        ...(layerArn ? { layerArn } : {}),
-        ...(external.length > 0 ? { external } : {})
-      }),
-      { concurrency: 1 }
-    );
+      const results = yield* Effect.forEach(
+        functions,
+        fn => deployTableFunction({
+          input,
+          fn,
+          ...(layerArn ? { layerArn } : {}),
+          ...(external.length > 0 ? { external } : {})
+        }),
+        { concurrency: 1 }
+      );
 
-    return results;
-  }).pipe(
-    Effect.provide(
-      Aws.makeClients({
-        lambda: { region: input.region },
-        iam: { region: input.region },
-        dynamodb: { region: input.region }
-      })
+      return results;
+    }).pipe(
+      Effect.provide(
+        Aws.makeClients({
+          lambda: { region },
+          iam: { region },
+          dynamodb: { region }
+        })
+      )
     )
   );

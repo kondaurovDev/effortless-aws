@@ -9,12 +9,16 @@ import {
   ensurePublicKey,
   ensureKeyGroup,
   findDistributionByTags,
+  ensureProjectApi,
+  addRouteToApi,
+  removeStaleRoutes,
 } from "../aws";
 import { readProductionDependencies, collectLayerPackages, findDepsDir } from "../build";
-import { resolveStage, type HandlerType, type SecretEntry } from "../core";
+import { type HandlerType, type SecretEntry } from "../core";
+import { DeployContext } from "../core";
 import { findHandlerFiles, bundle } from "~/build/bundle";
-import { discoverHandlers, flattenHandlers, type DiscoveredHandlers } from "~/discovery";
-import { toSeconds } from "effortless-aws";
+import { discoverHandlers, flattenHandlers, type DiscoveredHandlers, type ExtractedApiFunction } from "~/discovery";
+import { toSeconds, type GatewayConfig } from "effortless-aws";
 import * as crypto from "crypto";
 import * as path from "path";
 import { ssm } from "~/aws/clients";
@@ -138,23 +142,18 @@ const DEPLOY_CONCURRENCY = 5;
 // ============ Layer preparation ============
 
 type PrepareLayerInput = {
-  project: string;
-  stage: string;
-  region: string;
   depsDir: string;
 };
 
 const prepareLayer = (input: PrepareLayerInput) =>
   Effect.gen(function* () {
+    const { region } = yield* DeployContext;
     const layerResult = yield* ensureLayer({
-      project: input.project,
-      stage: input.stage,
-      region: input.region,
       projectDir: input.depsDir,
     }).pipe(
       Effect.provide(
         Aws.makeClients({
-          lambda: { region: input.region }
+          lambda: { region }
         })
       )
     );
@@ -489,9 +488,11 @@ type CfSigningInfo = {
 
 type DeployTaskCtx = {
   input: DeployProjectInput;
+  project: string;
+  stage: string;
+  region: string;
   layerArn: string | undefined;
   external: string[];
-  stage: string;
   tableNameMap: Map<string, string>;
   bucketNameMap: Map<string, string>;
   mailerDomainMap: Map<string, string>;
@@ -506,9 +507,6 @@ type DeployTaskCtx = {
 const makeDeployInput = (ctx: DeployTaskCtx, file: string): DeployInput => ({
   projectDir: ctx.input.projectDir,
   file,
-  project: ctx.input.project,
-  region: ctx.input.region,
-  ...(ctx.input.stage ? { stage: ctx.input.stage } : {}),
 });
 
 const resolveHandlerEnv = (
@@ -518,7 +516,7 @@ const resolveHandlerEnv = (
 ) => {
   const resolved = mergeResolved(
     resolveDeps(depsKeys, ctx.tableNameMap, ctx.bucketNameMap, ctx.mailerDomainMap, ctx.queueNameMap, ctx.workerNameMap),
-    resolveSecrets(secretEntries, ctx.input.project, ctx.stage)
+    resolveSecrets(secretEntries, ctx.project, ctx.stage)
   );
   return {
     depsEnv: resolved?.depsEnv ?? {},
@@ -532,7 +530,7 @@ const buildTableTasks = (
   results: DeployTableResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -561,7 +559,7 @@ const buildAppTasks = (
   apiUrlMap?: Map<string, string>,
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { exports } of handlers) {
     for (const fn of exports) {
       // Resolve API routes to actual origin domains
@@ -573,8 +571,7 @@ const buildAppTasks = (
       tasks.push(
         Effect.gen(function* () {
           const result = yield* deployApp({
-            projectDir: ctx.input.projectDir, project: ctx.input.project,
-            stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
+            projectDir: ctx.input.projectDir, fn, verbose: ctx.input.verbose,
             ...(apiRoutes.length > 0 ? { apiRoutes } : {}),
           }).pipe(Effect.provide(Aws.makeClients({
             lambda: { region }, iam: { region }, s3: { region },
@@ -598,7 +595,7 @@ const buildStaticSiteTasks = (
   apiUrlMap?: Map<string, string>,
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       // Resolve bucket routes to actual bucket names
@@ -618,8 +615,7 @@ const buildStaticSiteTasks = (
       tasks.push(
         Effect.gen(function* () {
           const result = yield* deployStaticSite({
-            projectDir: ctx.input.projectDir, project: ctx.input.project,
-            stage: ctx.input.stage, region, fn, verbose: ctx.input.verbose,
+            projectDir: ctx.input.projectDir, fn, verbose: ctx.input.verbose,
             ...(fn.hasHandler ? { file } : {}),
             ...(apiRoutes.length > 0 ? { apiRoutes } : {}),
             ...(bucketRoutes.length > 0 ? { bucketRoutes } : {}),
@@ -644,7 +640,7 @@ const buildFifoQueueTasks = (
   results: DeployFifoQueueResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -672,7 +668,7 @@ const buildBucketTasks = (
   results: DeployBucketResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -700,15 +696,12 @@ const buildMailerTasks = (
   results: DeployMailerResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
         Effect.gen(function* () {
           const result = yield* deployMailer({
-            project: ctx.input.project,
-            stage: ctx.input.stage,
-            region,
             fn,
           }).pipe(Effect.provide(Aws.makeClients({ sesv2: { region } })));
           results.push(result);
@@ -720,13 +713,20 @@ const buildMailerTasks = (
   return tasks;
 };
 
-const buildApiTasks = (
+type GatewayApiResult = {
+  exportName: string;
+  functionArn: string;
+  basePath: string;
+};
+
+/** Deploy API Lambda without Function URL — will be routed through HTTP API Gateway. */
+const buildGatewayApiTasks = (
   ctx: DeployTaskCtx,
-  handlers: DiscoveredHandlers["apiHandlers"],
-  results: DeployResult[],
+  handlers: { file: string; exports: ExtractedApiFunction[] }[],
+  results: GatewayApiResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -738,7 +738,46 @@ const buildApiTasks = (
             env.depsEnv.EFF_CF_SIGNING_KEY = ctx.cfSigningInfo.cfSigningKeySsmPath;
             env.depsEnv.EFF_CF_KEY_PAIR_ID = ctx.cfSigningInfo.publicKeyId;
             env.depsEnv.EFF_CF_DOMAIN = ctx.cfDomain ?? "*";
-            // Ensure SSM read permissions are included
+            if (!env.depsPermissions.includes("ssm:GetParameter")) {
+              env.depsPermissions = [...env.depsPermissions, "ssm:GetParameter", "ssm:GetParameters"];
+            }
+          }
+
+          const { exportName, functionArn, status, bundleSize } = yield* deployApiFunction({
+            input: makeDeployInput(ctx, file), fn,
+            ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
+            ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
+            depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
+            ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
+
+          results.push({ exportName, functionArn, basePath: fn.config.basePath });
+          yield* ctx.logComplete(exportName, "api", status, bundleSize);
+        })
+      );
+    }
+  }
+  return tasks;
+};
+
+/** Deploy streaming API Lambda with Function URL (API Gateway doesn't support response streaming). */
+const buildStreamApiTasks = (
+  ctx: DeployTaskCtx,
+  handlers: { file: string; exports: ExtractedApiFunction[] }[],
+  results: DeployResult[],
+): Effect.Effect<void, unknown, any>[] => {
+  const tasks: Effect.Effect<void, unknown, any>[] = [];
+  const { region } = ctx;
+  for (const { file, exports } of handlers) {
+    for (const fn of exports) {
+      tasks.push(
+        Effect.gen(function* () {
+          const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
+
+          if (ctx.cfSigningInfo) {
+            env.depsEnv.EFF_CF_SIGNING_KEY = ctx.cfSigningInfo.cfSigningKeySsmPath;
+            env.depsEnv.EFF_CF_KEY_PAIR_ID = ctx.cfSigningInfo.publicKeyId;
+            env.depsEnv.EFF_CF_DOMAIN = ctx.cfDomain ?? "*";
             if (!env.depsPermissions.includes("ssm:GetParameter")) {
               env.depsPermissions = [...env.depsPermissions, "ssm:GetParameter", "ssm:GetParameters"];
             }
@@ -752,9 +791,9 @@ const buildApiTasks = (
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
 
-          // Setup Function URL with CORS
-          const lambdaName = `${ctx.input.project}-${ctx.stage}-${handlerName}`;
-          const { functionUrl } = yield* ensureFunctionUrl(lambdaName).pipe(
+          // Streaming APIs use Function URL with RESPONSE_STREAM invoke mode
+          const lambdaName = `${ctx.project}-${ctx.stage}-${handlerName}`;
+          const { functionUrl } = yield* ensureFunctionUrl(lambdaName, "RESPONSE_STREAM").pipe(
             Effect.provide(Aws.makeClients({ lambda: { region } }))
           );
           yield* addFunctionUrlPublicAccess(lambdaName).pipe(
@@ -770,13 +809,62 @@ const buildApiTasks = (
   return tasks;
 };
 
+type DeployGatewayResult = {
+  apiId: string;
+  apiUrl: string;
+};
+
+/** Deploy HTTP API Gateway with routes pointing to API Lambda functions. */
+const deployGateway = (
+  ctx: DeployTaskCtx,
+  gatewayApiResults: GatewayApiResult[],
+) =>
+  Effect.gen(function* () {
+    const { project, stage, region } = ctx;
+    const gatewayConfig = ctx.input.gateway;
+
+    const { apiId } = yield* ensureProjectApi({
+      projectName: project,
+      stage,
+      region,
+      cors: gatewayConfig?.cors,
+      tags: {
+        "effortless:project": project,
+        "effortless:stage": stage,
+      },
+    });
+
+    // Add catch-all route for each API handler's basePath
+    const activeRouteKeys = new Set<string>();
+    for (const { functionArn, basePath } of gatewayApiResults) {
+      const routeKey = `ANY ${basePath}/{proxy+}`;
+      activeRouteKeys.add(routeKey);
+      yield* addRouteToApi({
+        apiId,
+        region,
+        functionArn,
+        method: "ANY",
+        path: `${basePath}/{proxy+}`,
+      });
+    }
+
+    // Clean up routes that are no longer needed
+    yield* removeStaleRoutes(apiId, activeRouteKeys);
+
+    const apiUrl = `https://${apiId}.execute-api.${region}.amazonaws.com`;
+
+    yield* Effect.logDebug(`Gateway deployed: ${apiUrl}`);
+
+    return { apiId, apiUrl } satisfies DeployGatewayResult;
+  });
+
 const buildCronTasks = (
   ctx: DeployTaskCtx,
   handlers: DiscoveredHandlers["cronHandlers"],
   results: DeployCronResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -804,7 +892,7 @@ const buildWorkerTasks = (
   results: DeployWorkerResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -833,7 +921,7 @@ const buildMcpTasks = (
   results: DeployResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
-  const { region } = ctx.input;
+  const { region } = ctx;
   for (const { file, exports } of handlers) {
     for (const fn of exports) {
       tasks.push(
@@ -849,7 +937,7 @@ const buildMcpTasks = (
           }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region } })));
 
           // Setup Function URL
-          const lambdaName = `${ctx.input.project}-${ctx.stage}-${handlerName}`;
+          const lambdaName = `${ctx.project}-${ctx.stage}-${handlerName}`;
           const { functionUrl } = yield* ensureFunctionUrl(lambdaName).pipe(
             Effect.provide(Aws.makeClients({ lambda: { region } }))
           );
@@ -871,15 +959,14 @@ const buildMcpTasks = (
 export type DeployProjectInput = {
   projectDir: string;
   patterns: string[];
-  project: string;
-  stage?: string;
-  region: string;
   noSites?: boolean;
   verbose?: boolean;
   /** Suppress all stdout output (for MCP server where stdout is the transport). */
   silent?: boolean;
   /** Bundle and validate without deploying to AWS. */
   dryRun?: boolean;
+  /** HTTP API Gateway configuration from effortless.config.ts. */
+  gateway?: GatewayConfig;
 };
 
 export type DeployProjectResult = {
@@ -892,6 +979,8 @@ export type DeployProjectResult = {
   cronResults: DeployCronResult[];
   apiResults: DeployResult[];
   mcpResults: DeployResult[];
+  /** HTTP API Gateway URL (set when non-streaming API handlers exist). */
+  gatewayUrl?: string;
 };
 
 type HandlerCounts = {
@@ -903,7 +992,7 @@ type HandlerCounts = {
 
 const discoverAndValidate = (input: DeployProjectInput) =>
   Effect.gen(function* () {
-    const stage = resolveStage(input.stage);
+    const { project, stage } = yield* DeployContext;
     const files = findHandlerFiles(input.patterns, input.projectDir);
 
     if (files.length === 0) {
@@ -950,11 +1039,11 @@ const discoverAndValidate = (input: DeployProjectInput) =>
     }
 
     // Build resource maps for deps resolution
-    const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
-    const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
+    const tableNameMap = buildTableNameMap(tableHandlers, project, stage);
+    const bucketNameMap = buildBucketNameMap(bucketHandlers, project, stage);
     const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
-    const queueNameMap = buildQueueNameMap(fifoQueueHandlers, input.project, stage);
-    const workerNameMap = buildWorkerNameMap(workerHandlers, input.project, stage);
+    const queueNameMap = buildQueueNameMap(fifoQueueHandlers, project, stage);
+    const workerNameMap = buildWorkerNameMap(workerHandlers, project, stage);
 
     // Validate deps references
     const depsErrors = validateDeps(discovered, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap);
@@ -966,20 +1055,18 @@ const discoverAndValidate = (input: DeployProjectInput) =>
       return yield* Effect.fail(new Error("Unresolved deps — aborting deploy"));
     }
 
-    return { stage, files, discovered, counts, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap };
+    return { files, discovered, counts, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap };
   });
 
 // ---- Phase 2: Ensure secrets and CF signing keys ----
 
 const prepareSecrets = (input: {
   discovered: DiscoveredHandlers;
-  project: string;
-  stage: string;
-  region: string;
   noSites?: boolean;
 }) =>
   Effect.gen(function* () {
-    const { discovered, project, stage, region } = input;
+    const { project, stage, region } = yield* DeployContext;
+    const { discovered } = input;
 
     // Check for missing SSM parameters
     const requiredSecrets = collectRequiredSecrets(discovered, project, stage);
@@ -1083,9 +1170,6 @@ const prepareSecrets = (input: {
 // ---- Phase 3: Prepare Lambda layer ----
 
 const prepareLambdaLayer = (input: {
-  project: string;
-  stage: string;
-  region: string;
   files: string[];
   projectDir: string;
   needsLambda: boolean;
@@ -1097,9 +1181,6 @@ const prepareLambdaLayer = (input: {
 
     const depsDir = findDepsDir(path.dirname(input.files[0]!), input.projectDir);
     const { layerArn, layerVersion, layerStatus, external } = yield* prepareLayer({
-      project: input.project,
-      stage: input.stage,
-      region: input.region,
       depsDir,
     });
 
@@ -1115,15 +1196,14 @@ const prepareLambdaLayer = (input: {
 
 const resolveCfDomain = (input: {
   staticSiteHandlers: DiscoveredHandlers["staticSiteHandlers"];
-  project: string;
-  stage: string;
 }) =>
   Effect.gen(function* () {
+    const { stage } = yield* DeployContext;
     for (const { exports } of input.staticSiteHandlers) {
       for (const fn of exports) {
         if (fn.bucketRoutes.some(br => br.access === "private")) {
           const domainCfg = fn.config.domain;
-          const d = typeof domainCfg === "string" ? domainCfg : domainCfg?.[input.stage];
+          const d = typeof domainCfg === "string" ? domainCfg : domainCfg?.[stage];
           if (d) return d;
 
           const existing = yield* findDistributionByTags(fn.exportName).pipe(
@@ -1175,6 +1255,7 @@ const deployResources = (input: {
     const { ctx, discovered, counts } = input;
     const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
     const noSites = ctx.input.noSites;
+    const { region } = ctx;
 
     const tableResults: DeployTableResult[] = [];
     const appResults: DeployAppResult[] = [];
@@ -1187,6 +1268,19 @@ const deployResources = (input: {
     const apiResults: DeployResult[] = [];
     const mcpResults: DeployResult[] = [];
 
+    // Split API handlers: non-streaming → HTTP API Gateway, streaming → Function URL
+    const gatewayApiHandlers: { file: string; exports: ExtractedApiFunction[] }[] = [];
+    const streamApiHandlers: { file: string; exports: ExtractedApiFunction[] }[] = [];
+    for (const h of apiHandlers) {
+      const gwExports = h.exports.filter(fn => !fn.config.stream);
+      const streamExports = h.exports.filter(fn => fn.config.stream);
+      if (gwExports.length > 0) gatewayApiHandlers.push({ file: h.file, exports: gwExports });
+      if (streamExports.length > 0) streamApiHandlers.push({ file: h.file, exports: streamExports });
+    }
+
+    const hasGatewayApis = gatewayApiHandlers.length > 0;
+    const gatewayApiResults: GatewayApiResult[] = [];
+
     const staticSitesNeedApi = !noSites && staticSiteHandlers.some(
       ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
     );
@@ -1196,12 +1290,13 @@ const deployResources = (input: {
     const appsNeedApi = appHandlers.some(
       ({ exports }) => exports.some(fn => fn.routePatterns.length > 0)
     );
-    const needsTwoPhase = ((staticSitesNeedApi || appsNeedApi) && counts.api > 0) || (staticSitesNeedBuckets && counts.bucket > 0);
+    const needsMultiPhase = hasGatewayApis || ((staticSitesNeedApi || appsNeedApi) && counts.api > 0) || (staticSitesNeedBuckets && counts.bucket > 0);
 
-    if (needsTwoPhase) {
-      // Phase 1: Deploy everything except app/site (need Function URL from API handlers)
+    if (needsMultiPhase) {
+      // Phase 1: Deploy all Lambdas in parallel
       const phase1Tasks = [
-        ...buildApiTasks(ctx, apiHandlers, apiResults),
+        ...buildGatewayApiTasks(ctx, gatewayApiHandlers, gatewayApiResults),
+        ...buildStreamApiTasks(ctx, streamApiHandlers, apiResults),
         ...buildTableTasks(ctx, tableHandlers, tableResults),
         ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
@@ -1213,25 +1308,45 @@ const deployResources = (input: {
 
       yield* Effect.all(phase1Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
 
-      // Build map: API/MCP export name → Lambda Function URL domain
+      // Phase 2: Deploy HTTP API Gateway (needs Lambda ARNs from Phase 1)
+      let gatewayResult: DeployGatewayResult | undefined;
+      if (hasGatewayApis) {
+        gatewayResult = yield* deployGateway(ctx, gatewayApiResults).pipe(
+          Effect.provide(Aws.makeClients({ apigatewayv2: { region }, lambda: { region } }))
+        );
+
+        // Populate apiResults with gateway URL for each API handler
+        const gwUrl = gatewayResult.apiUrl;
+        for (const r of gatewayApiResults) {
+          apiResults.push({ exportName: r.exportName, url: gwUrl, functionArn: r.functionArn });
+        }
+      }
+
+      // Build map: API/MCP export name → origin domain (for CloudFront)
       const apiUrlMap = new Map<string, string>();
-      for (const r of [...apiResults, ...mcpResults]) {
+      if (gatewayResult) {
+        const gwDomain = `${gatewayResult.apiId}.execute-api.${region}.amazonaws.com`;
+        for (const r of gatewayApiResults) {
+          apiUrlMap.set(r.exportName, gwDomain);
+        }
+      }
+      for (const r of [...apiResults.filter(r => !gatewayApiResults.some(g => g.exportName === r.exportName)), ...mcpResults]) {
         apiUrlMap.set(r.exportName, r.url.replace("https://", "").replace(/\/$/, ""));
       }
 
-      // Phase 2: Deploy app/site handlers with API origin map
-      const phase2Tasks = [
+      // Phase 3: Deploy app/site handlers with API origin map
+      const phase3Tasks = [
         ...buildAppTasks(ctx, appHandlers, appResults, apiUrlMap),
         ...(noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults, apiUrlMap)),
       ];
 
-      if (phase2Tasks.length > 0) {
-        yield* Effect.all(phase2Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
+      if (phase3Tasks.length > 0) {
+        yield* Effect.all(phase3Tasks, { concurrency: DEPLOY_CONCURRENCY, discard: true });
       }
     } else {
-      // Single phase: deploy everything in parallel
+      // Single phase: deploy everything in parallel (no gateway APIs, no site/app routes)
       const tasks = [
-        ...buildApiTasks(ctx, apiHandlers, apiResults),
+        ...buildStreamApiTasks(ctx, streamApiHandlers, apiResults),
         ...buildTableTasks(ctx, tableHandlers, tableResults),
         ...buildAppTasks(ctx, appHandlers, appResults),
         ...(noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults)),
@@ -1264,7 +1379,11 @@ const deployResources = (input: {
       yield* Effect.logWarning(warning);
     }
 
-    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, cronResults, apiResults, mcpResults };
+    const gatewayUrl = gatewayApiResults.length > 0
+      ? apiResults.find(r => r.exportName === gatewayApiResults[0]!.exportName)?.url
+      : undefined;
+
+    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, cronResults, apiResults, mcpResults, gatewayUrl };
   });
 
 // ---- Orchestrator ----
@@ -1273,10 +1392,10 @@ const deployResources = (input: {
 
 const dryRunProject = (input: DeployProjectInput) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
     startDeployLog();
     startBundleCollector();
-    const stage = resolveStage(input.stage);
-    logDeploy(`[dry-run] Starting for ${input.project} (stage: ${stage}, region: ${input.region})`);
+    logDeploy(`[dry-run] Starting for ${project} (stage: ${stage}, region: ${region})`);
 
     const { files, discovered, counts } = yield* discoverAndValidate(input);
 
@@ -1331,14 +1450,15 @@ const dryRunProject = (input: DeployProjectInput) =>
 
     // Write state (bundles + log only, no deploy results)
     yield* writeDeployState({
-      project: input.project,
+      project,
       stage,
-      region: input.region,
+      region,
       projectDir: input.projectDir,
       results: {
         tableResults: [], appResults: [], staticSiteResults: [],
         fifoQueueResults: [], bucketResults: [], mailerResults: [],
         cronResults: [], apiResults: [], mcpResults: [],
+        gatewayUrl: undefined,
       },
       logLines: flushDeployLog(),
       bundles: flushBundleCollector(),
@@ -1348,6 +1468,7 @@ const dryRunProject = (input: DeployProjectInput) =>
       tableResults: [], appResults: [], staticSiteResults: [],
       fifoQueueResults: [], bucketResults: [], mailerResults: [],
       cronResults: [], apiResults: [], mcpResults: [],
+      gatewayUrl: undefined,
     } satisfies DeployProjectResult;
   });
 
@@ -1357,11 +1478,13 @@ export const deployProject = (input: DeployProjectInput) =>
       return yield* dryRunProject(input);
     }
 
+    const { project, stage, region } = yield* DeployContext;
+
     startDeployLog();
     startBundleCollector();
-    logDeploy(`[deploy] Starting deploy for ${input.project} (region: ${input.region})`);
+    logDeploy(`[deploy] Starting deploy for ${project} (region: ${region})`);
 
-    const { stage, files, discovered, counts, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap } =
+    const { files, discovered, counts, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap } =
       yield* discoverAndValidate(input);
 
     const countParts = (Object.entries(counts) as [string, number][])
@@ -1370,12 +1493,12 @@ export const deployProject = (input: DeployProjectInput) =>
     logDeploy(`[deploy] Discovered ${countParts.join(", ")} in ${files.length} file(s)`);
 
     const { cfSigningInfo } = yield* prepareSecrets({
-      discovered, project: input.project, stage, region: input.region, noSites: input.noSites,
+      discovered, noSites: input.noSites,
     });
 
     const needsLambda = counts.table + counts.app + counts.queue + counts.bucket + counts.mailer + counts.api + counts.cron + counts.mcp > 0;
     const { layerArn, layerVersion, external } = yield* prepareLambdaLayer({
-      project: input.project, stage, region: input.region, files, projectDir: input.projectDir, needsLambda,
+      files, projectDir: input.projectDir, needsLambda,
     });
 
     if (layerArn) {
@@ -1388,11 +1511,11 @@ export const deployProject = (input: DeployProjectInput) =>
     const logComplete = createLiveProgress(manifest, input.silent);
 
     const cfDomain = cfSigningInfo
-      ? yield* resolveCfDomain({ staticSiteHandlers: discovered.staticSiteHandlers, project: input.project, stage })
+      ? yield* resolveCfDomain({ staticSiteHandlers: discovered.staticSiteHandlers })
       : undefined;
 
     const ctx: DeployTaskCtx = {
-      input, layerArn, external, stage, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap, logComplete,
+      input, project, stage, region, layerArn, external, tableNameMap, bucketNameMap, mailerDomainMap, queueNameMap, workerNameMap, logComplete,
       ...(cfSigningInfo ? { cfSigningInfo } : {}),
       ...(cfDomain ? { cfDomain } : {}),
     };
@@ -1406,9 +1529,9 @@ export const deployProject = (input: DeployProjectInput) =>
     logDeploy(`[deploy] Complete: ${totalHandlers} handler(s) deployed`);
 
     yield* writeDeployState({
-      project: input.project,
+      project,
       stage,
-      region: input.region,
+      region,
       projectDir: input.projectDir,
       results,
       layerArn,

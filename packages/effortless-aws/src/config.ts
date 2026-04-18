@@ -1,3 +1,23 @@
+/** CORS configuration for the HTTP API Gateway. */
+export type GatewayCorsConfig = {
+  /** Allowed origins (e.g. ["https://app.site"]). @default ["*"] */
+  origins?: string[];
+  /** Allowed HTTP methods. @default ["*"] */
+  methods?: string[];
+  /** Allowed headers. @default ["*"] */
+  headers?: string[];
+  /** Max age in seconds for preflight cache. */
+  maxAge?: number;
+};
+
+/** HTTP API Gateway configuration. */
+export type GatewayConfig = {
+  /** CORS settings. If omitted, allows all origins/methods/headers. */
+  cors?: GatewayCorsConfig;
+  /** Custom domain name. Accepts a string (same domain for all stages) or a Record mapping stage names to domains. */
+  domain?: string | Record<string, string>;
+};
+
 /**
  * Configuration for an Effortless project.
  *
@@ -66,6 +86,16 @@ export type EffortlessConfig = {
      */
     runtime?: string;
   };
+
+  /**
+   * HTTP API Gateway configuration for API handlers.
+   * When present, non-streaming API handlers are deployed behind an HTTP API Gateway
+   * instead of Lambda Function URLs. If omitted, a gateway is still created with default
+   * settings (CORS allowing all origins).
+   *
+   * Streaming APIs (`stream: true`) always use Function URLs regardless of this setting.
+   */
+  gateway?: GatewayConfig;
 
 };
 

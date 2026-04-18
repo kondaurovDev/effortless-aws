@@ -1,10 +1,10 @@
 import { Command, Options, Prompt } from "@effect/cli";
 import { Effect, Console, Option } from "effect";
 
-import { Aws, listLayerVersions, deleteLayerVersion, listSchedulesByPrefix } from "../../aws";
+import { Aws, listLayerVersions, deleteLayerVersion, listSchedulesByPrefix, deleteApiByName } from "../../aws";
 import { getAllResourcesByTags, groupResourcesByHandler } from "~/aws/resource-lookup";
 import { resourceTypeFromArn, type ResourceType } from "~/core";
-import { deleteHandlerResources, HANDLER_RESOURCES, type HandlerType, type ResourceSpec } from "~/deploy/resource-registry";
+import { deleteHandlerResources, makeNameCtx, HANDLER_RESOURCES, type HandlerType, type ResourceSpec } from "~/deploy/resource-registry";
 import { findHandlerFiles } from "~/build/bundle";
 import { discoverHandlers, flattenHandlers } from "~/discovery";
 import { projectOption, stageOption, regionOption, verboseOption, dryRunOption } from "~/cli/config";
@@ -190,7 +190,7 @@ export const getCleanupPreview = (mode: { handler?: string; stale?: boolean; all
       handlersToDelete = staleHandlers.map(h => ({ ...h, reason: "not in code" }));
 
       for (const sr of staleResources) {
-        const ctx = { project, stage, handler: sr.handler, region };
+        const ctx = yield* makeNameCtx(sr.handler);
         staleResourceItems.push({ handler: sr.handler, label: sr.spec.label, name: sr.spec.deriveName(ctx) });
       }
 
@@ -276,11 +276,11 @@ export const runCleanup = (mode: { handler?: string; stale?: boolean; all?: bool
       const { staleHandlers, staleResources } = findStaleResources(byHandler, codeNames, INTERNAL);
 
       for (const { name, handlerType } of staleHandlers) {
-        yield* deleteHandlerResources(handlerType, { project, stage, handler: name, region }, { skipShared: true });
+        yield* deleteHandlerResources(handlerType, name, { skipShared: true });
       }
 
       for (const { handler, spec } of staleResources) {
-        const ctx = { project, stage, handler, region };
+        const ctx = yield* makeNameCtx(handler);
         yield* spec.cleanup(ctx).pipe(Effect.catchAll(() => Effect.void));
       }
 
@@ -338,7 +338,15 @@ export const runCleanup = (mode: { handler?: string; stale?: boolean; all?: bool
 
     const skipShared = !mode.all;
     for (const { name, handlerType } of handlersToDelete) {
-      yield* deleteHandlerResources(handlerType, { project, stage, handler: name, region }, { skipShared });
+      yield* deleteHandlerResources(handlerType, name, { skipShared });
+    }
+
+    // Delete project-level HTTP API Gateway
+    if (mode.all) {
+      const apiName = `${project}-${stage}`;
+      yield* deleteApiByName(apiName).pipe(
+        Effect.catchAll(() => Effect.void),
+      );
     }
 
     return { deleted: handlersToDelete.length };

@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import type { ExtractedFifoQueueFunction } from "~/discovery";
 import { toSeconds } from "effortless-aws";
 import { ensureFifoQueue, ensureSqsEventSourceMapping } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,
@@ -34,18 +35,19 @@ const FIFO_QUEUE_DEFAULT_PERMISSIONS = ["sqs:*", "logs:*"] as const;
 /** @internal */
 export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployFifoQueueFunctionInput) =>
   Effect.gen(function* () {
+    const { project, stage } = yield* DeployContext;
     const { exportName, config } = fn;
     const handlerName = exportName;
 
     const tagCtx: TagContext = {
-      project: input.project,
-      stage: resolveStage(input.stage),
+      project,
+      stage,
       handler: handlerName,
     };
 
     // Create SQS FIFO queue
     yield* Effect.logDebug("Creating SQS FIFO queue...");
-    const queueName = `${input.project}-${tagCtx.stage}-${handlerName}`;
+    const queueName = `${project}-${stage}-${handlerName}`;
     const timeout = toSeconds(config.lambda?.timeout ?? 30);
     const { queueUrl, queueArn, dlqUrl, dlqArn } = yield* ensureFifoQueue({
       name: queueName,

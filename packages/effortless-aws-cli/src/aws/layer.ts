@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { Architecture, Runtime } from "@aws-sdk/client-lambda";
 import { deferWarning } from "~/deploy/shared";
 import { lambda, s3 } from "./clients";
+import { DeployContext } from "../core";
 import {
   checkDependencyWarnings,
   readProductionDependencies,
@@ -11,9 +12,6 @@ import {
 } from "../build";
 
 export type LayerConfig = {
-  project: string;
-  stage: string;
-  region: string;
   projectDir: string;
   tags?: Record<string, string>;
 };
@@ -65,6 +63,7 @@ export const getExistingLayerByHash = (layerName: string, expectedHash: string) 
  */
 export const ensureLayer = (config: LayerConfig) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
     // Warn about common dependency misplacements
     const depWarnings = yield* checkDependencyWarnings(config.projectDir).pipe(
       Effect.catchAll(() => Effect.succeed([] as string[]))
@@ -95,7 +94,7 @@ export const ensureLayer = (config: LayerConfig) =>
       return null;
     }
 
-    const layerName = `${config.project}-${config.stage}-deps`;
+    const layerName = `${project}-${stage}-deps`;
 
     // Check for existing layer with same hash
     const existing = yield* getExistingLayerByHash(layerName, hash);
@@ -130,7 +129,7 @@ export const ensureLayer = (config: LayerConfig) =>
     let content: { ZipFile: Buffer } | { S3Bucket: string; S3Key: string };
 
     if (layerZip.length > MAX_DIRECT_UPLOAD) {
-      const bucketName = `${config.project}-${config.stage}-deploy-artifacts`;
+      const bucketName = `${project}-${stage}-deploy-artifacts`;
       const s3Key = `layers/${layerName}-${hash}.zip`;
 
       yield* Effect.logDebug(`Layer zip too large for direct upload (${zipSizeMB.toFixed(1)} MB), uploading to S3: s3://${bucketName}/${s3Key}`);
@@ -144,8 +143,8 @@ export const ensureLayer = (config: LayerConfig) =>
       if (!bucketExists) {
         yield* s3.make("create_bucket", {
           Bucket: bucketName,
-          ...(config.region !== "us-east-1"
-            ? { CreateBucketConfiguration: { LocationConstraint: config.region as any } }
+          ...(region !== "us-east-1"
+            ? { CreateBucketConfiguration: { LocationConstraint: region as any } }
             : {}),
         });
         yield* s3.make("put_public_access_block", {

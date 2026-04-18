@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import type { ExtractedCronFunction } from "~/discovery";
 import { toSeconds } from "effortless-aws";
 import { ensureSchedule, ensureSchedulerRole } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,
@@ -33,12 +34,13 @@ const CRON_DEFAULT_PERMISSIONS = ["logs:*"] as const;
 /** @internal */
 export const deployCronFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployCronFunctionInput) =>
   Effect.gen(function* () {
+    const { project, stage } = yield* DeployContext;
     const { exportName, config } = fn;
     const handlerName = exportName;
 
     const tagCtx: TagContext = {
-      project: input.project,
-      stage: resolveStage(input.stage),
+      project,
+      stage,
       handler: handlerName,
     };
 
@@ -62,7 +64,7 @@ export const deployCronFunction = ({ input, fn, layerArn, external, depsEnv, dep
     // Create scheduler IAM role (Scheduler → Lambda invoke)
     yield* Effect.logDebug("Creating scheduler IAM role...");
     const schedulerRoleArn = yield* ensureSchedulerRole(
-      input.project,
+      project,
       tagCtx.stage,
       handlerName,
       functionArn,
@@ -71,7 +73,7 @@ export const deployCronFunction = ({ input, fn, layerArn, external, depsEnv, dep
 
     // Create/update EventBridge Scheduler schedule
     yield* Effect.logDebug("Creating EventBridge schedule...");
-    const scheduleName = `${input.project}-${tagCtx.stage}-${handlerName}`;
+    const scheduleName = `${project}-${tagCtx.stage}-${handlerName}`;
     const { scheduleArn } = yield* ensureSchedule({
       name: scheduleName,
       schedule: config.schedule,

@@ -67,6 +67,10 @@ const formatDeploySummary = (results: DeployProjectResult): string[] => {
     lines.push(line);
   }
 
+  if (results.gatewayUrl) {
+    lines.push(`\n  ${c.dim("Gateway:")} ${c.cyan(results.gatewayUrl)}`);
+  }
+
   return lines;
 };
 
@@ -74,7 +78,7 @@ const formatDeploySummary = (results: DeployProjectResult): string[] => {
 
 const deployAll = (deployOpts: { noSites: boolean; verbose: boolean; dryRun: boolean }) =>
   Effect.gen(function* () {
-    const { project, stage, region, patterns, projectDir } = yield* CliContext;
+    const { patterns, projectDir, config } = yield* CliContext;
 
     if (!patterns) {
       yield* Console.error("Error: No target specified and no 'handlers' patterns in config");
@@ -84,12 +88,10 @@ const deployAll = (deployOpts: { noSites: boolean; verbose: boolean; dryRun: boo
     const results = yield* deployProject({
       projectDir,
       patterns,
-      project,
-      stage,
-      region,
       noSites: deployOpts.noSites,
       verbose: deployOpts.verbose,
       dryRun: deployOpts.dryRun,
+      gateway: config?.gateway,
     });
 
     if (!deployOpts.dryRun) {
@@ -102,15 +104,12 @@ const deployAll = (deployOpts: { noSites: boolean; verbose: boolean; dryRun: boo
 const deployByFilePath = (targetValue: string) =>
   Effect.gen(function* () {
     const p = yield* Path.Path;
-    const { project, stage, region, projectDir } = yield* CliContext;
+    const { projectDir } = yield* CliContext;
     const fullPath = p.isAbsolute(targetValue) ? targetValue : p.resolve(projectDir, targetValue);
 
     const input = {
       projectDir,
       file: fullPath,
-      project,
-      stage,
-      region,
     };
 
     const tableResults = yield* deployAllTables(input).pipe(
@@ -134,7 +133,7 @@ const deployByFilePath = (targetValue: string) =>
 const deployByName = (targetValue: string) =>
   Effect.gen(function* () {
     const p = yield* Path.Path;
-    const { project, stage, region, patterns, projectDir } = yield* CliContext;
+    const { patterns, projectDir } = yield* CliContext;
 
     if (!patterns) {
       yield* Console.error("Error: No 'handlers' patterns in config to search for handler name");
@@ -160,9 +159,6 @@ const deployByName = (targetValue: string) =>
     const input = {
       projectDir,
       file: found.file,
-      project,
-      stage,
-      region,
       exportName: found.exportName,
     };
 

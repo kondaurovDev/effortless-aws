@@ -17,15 +17,13 @@ import {
   findCertificate,
   ensureApiCachePolicy,
 } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 
 // ============ App (SSR) deployment ============
 
 export type DeployAppInput = {
   projectDir: string;
-  project: string;
-  stage?: string;
-  region: string;
   fn: ExtractedAppFunction;
   /** Resolved API routes: pattern → Lambda Function URL domain */
   apiRoutes?: { pattern: string; originDomain: string }[];
@@ -44,10 +42,10 @@ export type DeployAppResult = {
 /** @internal */
 export const deployApp = (input: DeployAppInput) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
     const p = yield* Path.Path;
-    const { projectDir, project, region, fn } = input;
+    const { projectDir, fn } = input;
     const { exportName, config } = fn;
-    const stage = resolveStage(input.stage);
     const handlerName = exportName;
 
     const tagCtx: TagContext = { project, stage, handler: handlerName };
@@ -95,10 +93,7 @@ export const deployApp = (input: DeployAppInput) =>
 
     // 4. Deploy Lambda
     const { functionArn } = yield* ensureLambda({
-      project,
-      stage,
       name: handlerName,
-      region,
       roleArn,
       code,
       handler: "index.handler",

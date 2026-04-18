@@ -38,6 +38,8 @@ export type DeployManifest = {
     arn: string;
     version: number;
   };
+  /** HTTP API Gateway URL (when non-streaming API handlers exist). */
+  gatewayUrl?: string;
   handlers: Record<string, {
     type: string;
     status?: string;
@@ -116,6 +118,7 @@ export const writeDeployState = ({
       projectDir,
       gitSha: getGitSha(projectDir),
       ...(layerArn ? { layer: { arn: layerArn, version: layerVersion ?? 0 } } : {}),
+      ...(results.gatewayUrl ? { gatewayUrl: results.gatewayUrl } : {}),
       handlers: resultToHandlers(results),
     };
     fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

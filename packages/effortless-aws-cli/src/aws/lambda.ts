@@ -2,6 +2,7 @@ import { Effect, Schedule } from "effect";
 import { Architecture, Runtime } from "@aws-sdk/client-lambda";
 import * as crypto from "crypto";
 import { lambda } from "./clients";
+import { DeployContext } from "../core";
 const computeCodeHash = (code: Uint8Array): string =>
   crypto.createHash("sha256").update(code).digest("base64");
 
@@ -13,10 +14,7 @@ export type LambdaResult = {
 };
 
 export type LambdaConfig = {
-  project: string;
-  stage: string;
   name: string;
-  region: string;
   roleArn: string;
   code: Uint8Array;
   /** Memory in MB. @default 256 */
@@ -50,7 +48,8 @@ export const ensureLambda = (
   config: LambdaConfig
 ) =>
   Effect.gen(function* () {
-    const functionName = `${config.project}-${config.stage}-${config.name}`;
+    const { project, stage } = yield* DeployContext;
+    const functionName = `${project}-${stage}-${config.name}`;
     const memory = config.memory;
     const timeout = config.timeout;
     const handler = config.handler ?? "index.handler";

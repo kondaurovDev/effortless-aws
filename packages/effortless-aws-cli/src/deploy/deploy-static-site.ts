@@ -20,16 +20,14 @@ import {
   findCertificate,
   ensureApiCachePolicy,
 } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import { generateSitemap, generateRobots, collectHtmlKeys, keysToUrls, submitToGoogleIndexing } from "./seo";
 
 // ============ Static site deployment ============
 
 export type DeployStaticSiteInput = {
   projectDir: string;
-  project: string;
-  stage?: string;
-  region: string;
   fn: ExtractedStaticSiteFunction;
   /** Source file path (required when middleware is present) */
   file?: string;
@@ -56,14 +54,13 @@ export type DeployStaticSiteResult = {
 /** Deploy middleware as Lambda@Edge in us-east-1 */
 const deployMiddlewareLambda = (input: {
   projectDir: string;
-  project: string;
-  stage: string;
   handlerName: string;
   file: string;
   tagCtx: TagContext;
 }) =>
   Effect.gen(function* () {
-    const { projectDir, project, stage, handlerName, file, tagCtx } = input;
+    const { project, stage } = yield* DeployContext;
+    const { projectDir, handlerName, file, tagCtx } = input;
     const middlewareName = `${handlerName}-middleware`;
 
     yield* Effect.logDebug(`Deploying middleware Lambda@Edge: ${middlewareName}`);
@@ -92,10 +89,7 @@ const deployMiddlewareLambda = (input: {
 
     // 3. Deploy Lambda to us-east-1 (x86_64, no env vars, no layers)
     yield* ensureLambda({
-      project,
-      stage,
       name: middlewareName,
-      region: "us-east-1",
       roleArn,
       code,
       memory: 128,
@@ -161,11 +155,11 @@ const generateErrorPageHtml = (): string => `<!DOCTYPE html>
 /** @internal */
 export const deployStaticSite = (input: DeployStaticSiteInput) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
     const p = yield* Path.Path;
     const fileSystem = yield* FileSystem.FileSystem;
-    const { projectDir, project, region, fn } = input;
+    const { projectDir, fn } = input;
     const { exportName, config } = fn;
-    const stage = resolveStage(input.stage);
     const handlerName = exportName;
     const hasMiddleware = fn.hasHandler;
 
@@ -256,7 +250,7 @@ export const deployStaticSite = (input: DeployStaticSiteInput) =>
     if (hasMiddleware && input.file) {
       // User-defined Lambda@Edge middleware
       const result = yield* deployMiddlewareLambda({
-        projectDir, project, stage, handlerName,
+        projectDir, handlerName,
         file: input.file, tagCtx,
       }).pipe(
         Effect.provide(Aws.makeClients({ iam: { region: "us-east-1" } }))

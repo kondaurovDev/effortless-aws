@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { apigatewayv2, lambda } from "./clients";
+import type { GatewayCorsConfig } from "effortless-aws";
 
 // Type from define-http (duplicated to avoid circular dependency)
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS" | "HEAD" | "ANY";
@@ -9,6 +10,7 @@ export type ProjectApiConfig = {
   stage: string;
   region: string;
   tags?: Record<string, string>;
+  cors?: GatewayCorsConfig;
 };
 
 export type RouteConfig = {
@@ -28,9 +30,23 @@ export const ensureProjectApi = (config: ProjectApiConfig) =>
 
     let apiId: string;
 
+    const corsConfig = {
+      AllowOrigins: config.cors?.origins ?? ["*"],
+      AllowMethods: config.cors?.methods ?? ["*"],
+      AllowHeaders: config.cors?.headers ?? ["*"],
+      ...(config.cors?.maxAge != null ? { MaxAge: config.cors.maxAge } : {}),
+    };
+
     if (existingApi) {
       yield* Effect.logDebug(`Using existing API Gateway: ${apiName}`);
       apiId = existingApi.ApiId!;
+
+      // Update CORS and tags
+      yield* apigatewayv2.make("update_api", {
+        ApiId: apiId,
+        CorsConfiguration: corsConfig,
+        ...(config.tags ? {} : {}),
+      });
 
       if (config.tags) {
         const apiArn = `arn:aws:apigateway:${config.region}::/apis/${apiId}`;
@@ -45,11 +61,7 @@ export const ensureProjectApi = (config: ProjectApiConfig) =>
       const createResult = yield* apigatewayv2.make("create_api", {
         Name: apiName,
         ProtocolType: "HTTP",
-        CorsConfiguration: {
-          AllowOrigins: ["*"],
-          AllowMethods: ["*"],
-          AllowHeaders: ["*"]
-        },
+        CorsConfiguration: corsConfig,
         Tags: config.tags
       });
 
@@ -200,4 +212,15 @@ export const deleteApi = (apiId: string) =>
         () => Effect.logDebug(`API ${apiId} not found, skipping`)
       )
     );
+  });
+
+export const deleteApiByName = (apiName: string) =>
+  Effect.gen(function* () {
+    const existingApis = yield* apigatewayv2.make("get_apis", {});
+    const api = existingApis.Items?.find(a => a.Name === apiName);
+    if (api?.ApiId) {
+      yield* deleteApi(api.ApiId);
+    } else {
+      yield* Effect.logDebug(`API Gateway "${apiName}" not found, skipping`);
+    }
   });

@@ -11,4 +11,4 @@ export type { ExtractedConfig, SecretEntry, ParamEntry, ApiRouteEntry, BucketRou
 
 // Effect context services
 export { DeployContext, makeDeployContext, CliContext, MissingProjectError, ProjectConfig } from "./context";
-export type { DeployContextShape, CliContextShape, ProjectConfigShape } from "./context";
+export type { CliContextShape, ProjectConfigShape } from "./context";

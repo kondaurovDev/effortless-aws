@@ -4,7 +4,7 @@ import type { EffortlessConfig } from "effortless-aws";
 
 // ============ DeployContext ============
 
-export type DeployContextShape = {
+type DeployContextShape = {
   project: string;
   stage: string;
   region: string;

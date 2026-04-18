@@ -11,7 +11,7 @@ export { ensureTable, deleteTable, ensureEventSourceMapping } from "./dynamodb";
 export type { EnsureTableInput, EnsureTableResult, EnsureEventSourceMappingInput, StreamView } from "./dynamodb";
 
 // API Gateway
-export { ensureProjectApi, addRouteToApi, removeStaleRoutes, deleteApi } from "./apigateway";
+export { ensureProjectApi, addRouteToApi, removeStaleRoutes, deleteApi, deleteApiByName } from "./apigateway";
 export type { ProjectApiConfig, RouteConfig, HttpMethod } from "./apigateway";
 
 // Layer (AWS operations only)

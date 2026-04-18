@@ -2,7 +2,8 @@ import { Effect } from "effect";
 import { Path, FileSystem } from "@effect/platform";
 import { ensureRole, ensureLambda, type LambdaStatus, ensureLayer } from "../aws";
 import { readProductionDependencies, collectLayerPackages, findDepsDir } from "../build";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import { bundle, zip, resolveStaticFiles, type BundleInput } from "~/build/bundle";
 import * as path from "path";
 
@@ -86,9 +87,6 @@ export type DeployAllResult = {
 };
 
 export type DeployInput = BundleInput & {
-  project: string;
-  stage?: string;
-  region: string;
   exportName?: string;
 };
 
@@ -148,22 +146,17 @@ export type LayerInfo = {
 };
 
 export const ensureLayerAndExternal = (input: {
-  project: string;
-  stage: string;
-  region: string;
   projectDir: string;
   /** Handler file path — used to find the correct package.json in monorepos */
   file?: string;
 }) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
     const depsDir = input.file
       ? findDepsDir(path.dirname(path.resolve(input.projectDir, input.file)), input.projectDir)
       : input.projectDir;
 
     const layerResult = yield* ensureLayer({
-      project: input.project,
-      stage: input.stage,
-      region: input.region,
       projectDir: depsDir,
     });
 
@@ -221,9 +214,11 @@ export const deployCoreLambda = ({
   staticGlobs
 }: DeployCoreLambdaInput) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
+
     const tagCtx: TagContext = {
-      project: input.project,
-      stage: resolveStage(input.stage),
+      project,
+      stage,
       handler: handlerName
     };
 
@@ -242,8 +237,8 @@ export const deployCoreLambda = ({
     ];
 
     const roleArn = yield* ensureRole(
-      input.project,
-      tagCtx.stage,
+      project,
+      stage,
       handlerName,
       mergedPermissions.length > 0 ? mergedPermissions : undefined,
       makeTags(tagCtx)
@@ -275,17 +270,14 @@ export const deployCoreLambda = ({
     const code = yield* zip({ content: bundleResult.code, staticFiles });
 
     const environment: Record<string, string> = {
-      EFF_PROJECT: input.project,
-      EFF_STAGE: tagCtx.stage,
+      EFF_PROJECT: project,
+      EFF_STAGE: stage,
       EFF_HANDLER: handlerName,
       ...depsEnv
     };
 
     const { functionArn, status } = yield* ensureLambda({
-      project: input.project,
-      stage: tagCtx.stage,
       name: handlerName,
-      region: input.region,
       roleArn,
       code,
       memory,

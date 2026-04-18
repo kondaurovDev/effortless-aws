@@ -1,7 +1,8 @@
 import { Effect, Console } from "effect";
 import type { ExtractedMailerFunction } from "~/discovery";
 import { ensureSesIdentity, type DkimRecord } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import { c } from "~/cli/colors";
 
 export type DeployMailerResult = {
@@ -12,22 +13,19 @@ export type DeployMailerResult = {
 };
 
 type DeployMailerInput = {
-  project: string;
-  stage?: string;
-  region: string;
   fn: ExtractedMailerFunction;
 };
 
 /** @internal */
-export const deployMailer = ({ project, stage, region: _region, fn }: DeployMailerInput) =>
+export const deployMailer = ({ fn }: DeployMailerInput) =>
   Effect.gen(function* () {
+    const { project, stage } = yield* DeployContext;
     const { exportName, config } = fn;
     const handlerName = exportName;
-    const resolvedStage = resolveStage(stage);
 
     const tagCtx: TagContext = {
       project,
-      stage: resolvedStage,
+      stage,
       handler: handlerName,
     };
 

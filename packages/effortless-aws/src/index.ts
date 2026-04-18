@@ -1,5 +1,5 @@
 // Config
-export type { EffortlessConfig } from "./config"
+export type { EffortlessConfig, GatewayConfig, GatewayCorsConfig } from "./config"
 export { defineConfig } from "./config"
 
 // Handlers

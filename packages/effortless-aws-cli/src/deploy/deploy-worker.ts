@@ -11,7 +11,8 @@ import {
   ensureEcsExecutionRole,
   getDefaultVpcSubnets,
 } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import { sqs, s3 } from "../aws/clients";
 import type { DeployInput } from "./shared";
 
@@ -52,23 +53,23 @@ const WORKER_IMAGE = "kondaurov/effortless-aws-runner:latest";
 /** @internal */
 export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, staticGlobs }: DeployWorkerFunctionInput) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
     const { exportName, config } = fn;
     const handlerName = exportName;
-    const stage = resolveStage(input.stage);
 
     const tagCtx: TagContext = {
-      project: input.project,
+      project,
       stage,
       handler: handlerName,
     };
     const tags = makeTags(tagCtx);
 
-    const clusterName = `${input.project}-${stage}`;
-    const serviceName = `${input.project}-${stage}-${handlerName}`;
-    const queueName = `${input.project}-${stage}-${handlerName}-worker`;
+    const clusterName = `${project}-${stage}`;
+    const serviceName = `${project}-${stage}-${handlerName}`;
+    const queueName = `${project}-${stage}-${handlerName}-worker`;
     const logGroupName = `/ecs/${serviceName}`;
-    const s3Key = `effortless/${input.project}/${stage}/${handlerName}/worker.zip`;
-    const s3Bucket = `${input.project}-${stage}-effortless`;
+    const s3Key = `effortless/${project}/${stage}/${handlerName}/worker.zip`;
+    const s3Bucket = `${project}-${stage}-effortless`;
 
     const [cpu, memory] = parseFargateSize(config.size ?? "0.5vCPU-1gb");
     const idleTimeoutSec = config.idleTimeout ? toSeconds(config.idleTimeout) : 300;
@@ -163,11 +164,11 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
     ];
 
     const taskRoleArn = yield* ensureEcsTaskRole(
-      input.project, stage, handlerName, taskPermissions, tags
+      project, stage, handlerName, taskPermissions, tags
     );
 
     const executionRoleArn = yield* ensureEcsExecutionRole(
-      input.project, stage, tags
+      project, stage, tags
     );
 
     // 7. Register task definition
@@ -190,12 +191,12 @@ export const deployWorkerFunction = ({ input, fn, depsEnv, depsPermissions, stat
       taskRoleArn,
       executionRoleArn,
       logGroup: logGroupName,
-      region: input.region,
+      region,
       tags: tags,
     });
 
     // 8. Discover default VPC subnets
-    const subnets = yield* getDefaultVpcSubnets(input.region);
+    const subnets = yield* getDefaultVpcSubnets(region);
 
     // 9. Create/update ECS service (starts with desiredCount: 0)
     const serviceArn = yield* ensureService({

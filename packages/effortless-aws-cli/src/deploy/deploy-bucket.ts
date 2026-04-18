@@ -9,7 +9,8 @@ import {
   syncFiles,
   seedFiles,
 } from "../aws";
-import { makeTags, resolveStage, type TagContext } from "../core";
+import { makeTags, type TagContext } from "../core";
+import { DeployContext } from "../core";
 import {
   type DeployInput,
   deployCoreLambda,
@@ -39,21 +40,22 @@ const BUCKET_DEFAULT_PERMISSIONS = ["s3:*", "logs:*"] as const;
 /** @internal */
 export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployBucketFunctionInput) =>
   Effect.gen(function* () {
+    const { project, stage, region } = yield* DeployContext;
     const { exportName, config, hasHandler } = fn;
     const handlerName = exportName;
 
     const tagCtx: TagContext = {
-      project: input.project,
-      stage: resolveStage(input.stage),
+      project,
+      stage,
       handler: handlerName,
     };
 
     // Create S3 bucket
     yield* Effect.logDebug("Creating S3 bucket...");
-    const bucketName = `${input.project}-${tagCtx.stage}-${handlerName}`.toLowerCase();
+    const bucketName = `${project}-${stage}-${handlerName}`.toLowerCase();
     const { bucketArn, created } = yield* ensureBucket({
       name: bucketName,
-      region: input.region,
+      region,
       tags: makeTags(tagCtx),
     });
 

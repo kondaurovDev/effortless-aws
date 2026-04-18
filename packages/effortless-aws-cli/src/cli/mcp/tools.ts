@@ -133,7 +133,7 @@ export const handleDeploy = async (args: {
 }): Promise<CallToolResult> =>
   runToolEffect(
     Effect.gen(function* () {
-      const { project, stage, region, patterns, projectDir } = yield* CliContext;
+      const { patterns, projectDir, config } = yield* CliContext;
 
       if (!patterns) {
         return { error: "No 'handlers' patterns in effortless.config.ts" };
@@ -142,11 +142,9 @@ export const handleDeploy = async (args: {
       const results = yield* deployProject({
         projectDir,
         patterns,
-        project,
-        stage,
-        region,
         noSites: args.noSites,
         silent: true,
+        gateway: config?.gateway,
       });
 
       const summary = {
@@ -162,7 +160,7 @@ export const handleDeploy = async (args: {
       };
 
       const total = Object.values(summary).reduce((acc, arr) => acc + arr.length, 0);
-      return { deployed: total, ...summary };
+      return { deployed: total, ...summary, ...(results.gatewayUrl ? { gatewayUrl: results.gatewayUrl } : {}) };
     }).pipe(
       makeContext((region) => Aws.makeClients({
         lambda: { region },

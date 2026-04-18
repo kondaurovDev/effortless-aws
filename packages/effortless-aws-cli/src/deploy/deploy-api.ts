@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { toSeconds } from "effortless-aws";
 import { extractConfigsFromFile, type ExtractedApiFunction } from "~/discovery";
 import { Aws, ensureFunctionUrl, addFunctionUrlPublicAccess } from "../aws";
-import { resolveStage, type TagContext } from "../core";
+import { DeployContext, type TagContext } from "../core";
 import {
   type DeployInput,
   type DeployResult,
@@ -48,61 +48,60 @@ export const deployApiFunction = ({ input, fn, layerArn, external, depsEnv, deps
   });
 
 export const deploy = (input: DeployInput) =>
-  Effect.gen(function* () {
-    const configs = yield* extractConfigsFromFile<import("effortless-aws").ApiConfig>(input.file, "api");
+  Effect.flatMap(DeployContext, ({ project, stage, region }) =>
+    Effect.gen(function* () {
+      const configs = yield* extractConfigsFromFile<import("effortless-aws").ApiConfig>(input.file, "api");
 
-    if (configs.length === 0) {
-      return yield* Effect.fail(new Error("Could not extract defineApi config from source"));
-    }
+      if (configs.length === 0) {
+        return yield* Effect.fail(new Error("Could not extract defineApi config from source"));
+      }
 
-    const targetExport = input.exportName ?? "default";
-    const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
-    const handlerName = fn.exportName;
+      const targetExport = input.exportName ?? "default";
+      const fn = configs.find(c => c.exportName === targetExport) ?? configs[0]!;
+      const handlerName = fn.exportName;
 
-    const tagCtx: TagContext = {
-      project: input.project,
-      stage: resolveStage(input.stage),
-      handler: handlerName
-    };
+      const tagCtx: TagContext = {
+        project,
+        stage,
+        handler: handlerName
+      };
 
-    yield* Effect.logDebug(`Deploying API handler ${handlerName} to ${input.region}`);
+      yield* Effect.logDebug(`Deploying API handler ${handlerName} to ${region}`);
 
-    const { layerArn, external } = yield* ensureLayerAndExternal({
-      project: input.project,
-      stage: tagCtx.stage,
-      region: input.region,
-      projectDir: input.projectDir,
-      file: input.file,
-    });
+      const { layerArn, external } = yield* ensureLayerAndExternal({
+        projectDir: input.projectDir,
+        file: input.file,
+      });
 
-    // Resolve secrets into EFF_PARAM_* env vars
-    const secrets = resolveSecrets(fn.secretEntries, input.project, resolveStage(input.stage));
+      // Resolve secrets into EFF_PARAM_* env vars
+      const secrets = resolveSecrets(fn.secretEntries, project, stage);
 
-    const { functionArn } = yield* deployApiFunction({
-      input,
-      fn,
-      ...(layerArn ? { layerArn } : {}),
-      ...(external.length > 0 ? { external } : {}),
-      ...(secrets ? { depsEnv: secrets.paramsEnv, depsPermissions: secrets.paramsPermissions } : {}),
-    });
+      const { functionArn } = yield* deployApiFunction({
+        input,
+        fn,
+        ...(layerArn ? { layerArn } : {}),
+        ...(external.length > 0 ? { external } : {}),
+        ...(secrets ? { depsEnv: secrets.paramsEnv, depsPermissions: secrets.paramsPermissions } : {}),
+      });
 
-    // Setup Function URL
-    const lambdaName = `${input.project}-${tagCtx.stage}-${handlerName}`;
-    const { functionUrl } = yield* ensureFunctionUrl(lambdaName, fn.config.stream ? "RESPONSE_STREAM" : undefined);
-    yield* addFunctionUrlPublicAccess(lambdaName);
+      // Setup Function URL
+      const lambdaName = `${project}-${stage}-${handlerName}`;
+      const { functionUrl } = yield* ensureFunctionUrl(lambdaName, fn.config.stream ? "RESPONSE_STREAM" : undefined);
+      yield* addFunctionUrlPublicAccess(lambdaName);
 
-    yield* Effect.logDebug(`Deployment complete! URL: ${functionUrl}`);
+      yield* Effect.logDebug(`Deployment complete! URL: ${functionUrl}`);
 
-    return {
-      exportName: fn.exportName,
-      url: functionUrl,
-      functionArn
-    } satisfies DeployResult;
-  }).pipe(
-    Effect.provide(
-      Aws.makeClients({
-        lambda: { region: input.region },
-        iam: { region: input.region }
-      })
+      return {
+        exportName: fn.exportName,
+        url: functionUrl,
+        functionArn
+      } satisfies DeployResult;
+    }).pipe(
+      Effect.provide(
+        Aws.makeClients({
+          lambda: { region },
+          iam: { region }
+        })
+      )
     )
   );

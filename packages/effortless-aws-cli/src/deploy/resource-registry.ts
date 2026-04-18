@@ -13,6 +13,7 @@
  */
 
 import { Effect } from "effect";
+import { DeployContext } from "../core";
 import {
   deleteLambda,
   deleteRole,
@@ -218,12 +219,17 @@ export const HANDLER_RESOURCES: Record<HandlerType, ResourceSpec[]> = {
  * Delete all resources for a handler using name-based lookup.
  * No dependency on tagging API — derives names from naming convention.
  */
+/** Build a NameCtx from DeployContext + handler name. */
+export const makeNameCtx = (handler: string) =>
+  Effect.map(DeployContext, ({ project, stage, region }): NameCtx => ({ project, stage, handler, region }));
+
 export const deleteHandlerResources = (
   handlerType: HandlerType,
-  ctx: NameCtx,
+  handler: string,
   options?: { skipShared?: boolean },
 ) =>
   Effect.gen(function* () {
+    const ctx = yield* makeNameCtx(handler);
     const specs = HANDLER_RESOURCES[handlerType];
     const sorted = [...specs].sort((a, b) => a.cleanupOrder - b.cleanupOrder);
 
