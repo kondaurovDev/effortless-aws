@@ -1,5 +1,89 @@
 # @effortless-aws/cli
 
+## 0.22.0
+
+### Minor Changes
+
+- [`4bcd7ed`](https://github.com/kondaurovDev/effortless-aws/commit/4bcd7ed7cb3c51dc3c3b02248b83ef25c81893b3) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Reconcile stale resources on deploy when a handler switches to resource-only mode, and add `.build()` to `defineQueue`.
+
+  **The problem.** The deploy pipeline was forward-only — it created whatever the config asked for, but didn't remove what a previous deploy had created when the config shrank. Switching `defineTable().onRecord(...)` → `defineTable().build()` (or the bucket equivalent) left the Lambda, DLQ, IAM role, and event-source mapping orphaned in AWS. Users had to run `cleanup --stale` to get rid of them.
+
+  **What changes.**
+
+  - **Resource registry** (`@effortless-aws/cli`): `ResourceSpec` gains a `requiresHandler` flag marking resources that only exist when a handler function is attached. A new `cleanupStaleHandlerResources(handlerType, ctx)` helper deletes just those.
+  - **Deploy paths** (`@effortless-aws/cli`): `deploy-table.ts`, `deploy-bucket.ts`, and `deploy-queue.ts` call the helper in their `!hasHandler` branches. The primary resource (table / bucket / queue) is preserved; Lambda + IAM (+ DLQ for tables) are removed if they existed from a previous deploy.
+  - **Bucket notification** (`@effortless-aws/cli`): added `clearBucketNotification` — in resource-only mode the S3 bucket's `NotificationConfiguration` is cleared so it no longer points at a deleted Lambda.
+  - **Stream reconcile** (`@effortless-aws/cli`): `ensureTable` now reconciles the DynamoDB stream spec (enable / disable / change view) rather than only enabling it. Combined with the above, switching a table to `.build()` correctly disables the stream.
+  - **`defineQueue.build()`** (`effortless-aws`): new terminal on the queue builder that finalizes a resource-only SQS queue (no Lambda). Useful when the queue is consumed by an external system — an ECS worker, another account, etc.
+  - **MCP warning** (`@effortless-aws/cli`): `deploy` now logs a warning when an MCP handler has no tools, resources, or prompts registered.
+
+  **Behavioral note.** Resource-only tables and buckets will, on the next deploy, actively remove any satellite resources left over from previous deploys. If you had a stream or notification wired to something outside of this CLI's management, re-check after deploying.
+
+- [`4bcd7ed`](https://github.com/kondaurovDev/effortless-aws/commit/4bcd7ed7cb3c51dc3c3b02248b83ef25c81893b3) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Rename `defineFifoQueue` → `defineQueue` with `fifo` as a queue option, and move event-source-mapping settings into a dedicated `.poller({...})` builder method.
+
+  **Rationale**: the new shape prepares the ground for standard (non-FIFO) queue support and cleanly separates queue-resource properties from poller/ESM properties (which in AWS live on a different resource — the Event Source Mapping).
+
+  **Breaking — no compatibility alias**:
+
+  - `defineFifoQueue(...)` → `defineQueue({ fifo: true, ... })`
+  - Top-level `batchSize`/`batchWindow` options move into `.poller({ batchSize, batchWindow })`, called before the terminal `.onMessage` / `.onMessageBatch`
+  - Exported types renamed: `FifoQueueHandler` → `QueueHandler`, `FifoQueueMessage` → `QueueMessage`, `FifoQueueConfig` → `QueueConfig`; new `QueuePollerConfig` exported
+  - Handler brand changed from `"effortless-fifo-queue"` to `"effortless-queue"`
+
+  Migration:
+
+  ```ts
+  // before
+  export const orderQueue = defineFifoQueue<Order>({ batchSize: 5 })
+    .onMessage(async ({ message }) => { ... })
+
+  // after
+  export const orderQueue = defineQueue<Order>({ fifo: true })
+    .poller({ batchSize: 5 })
+    .onMessage(async ({ message }) => { ... })
+  ```
+
+  Only `fifo: true` is currently supported; standard-queue semantics (including the typed client `.send()` signature without `messageGroupId`) will arrive in a follow-up release.
+
+- [`4bcd7ed`](https://github.com/kondaurovDev/effortless-aws/commit/4bcd7ed7cb3c51dc3c3b02248b83ef25c81893b3) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Fix silent failures in DynamoDB table stream handlers and split stream options into a dedicated `.stream()` builder method.
+
+  **Previously** table stream errors were silently swallowed: the runtime returned `batchItemFailures` but the event source mapping was created without `FunctionResponseTypes: ["ReportBatchItemFailures"]`, so AWS ignored the response, there was no retry, and no DLQ.
+
+  **Now**:
+
+  - Event source mapping sets `FunctionResponseTypes: ["ReportBatchItemFailures"]`, `BisectBatchOnFunctionError: true`, `MaximumRetryAttempts` (from `maxRetries`, default 1) and an `OnFailure` destination.
+  - Every table with a stream handler gets a standard SQS DLQ `{project}-{stage}-{handler}-dlq`, created automatically and cleaned up on teardown.
+  - Failed records are retried with AWS's built-in exponential backoff; once retries are exhausted AWS sends a pointer to the failed record into the DLQ.
+
+  **Breaking**: stream-related options moved out of `defineTable({...})` into a new `.stream({...})` builder method. Affected options: `batchSize`, `batchWindow`, `concurrency`, `startingPosition`, `streamView`.
+
+  Migration:
+
+  ```ts
+  // before
+  export const orders = defineTable<Order>({
+    batchSize: 10,
+    concurrency: 5,
+    streamView: "NEW_AND_OLD_IMAGES",
+  })
+    .onRecord(async ({ record }) => { ... })
+
+  // after
+  export const orders = defineTable<Order>()
+    .stream({
+      batchSize: 10,
+      concurrency: 5,
+      maxRetries: 1,
+      streamView: "NEW_AND_OLD_IMAGES",
+    })
+    .onRecord(async ({ record }) => { ... })
+  ```
+
+### Patch Changes
+
+- Updated dependencies [[`4bcd7ed`](https://github.com/kondaurovDev/effortless-aws/commit/4bcd7ed7cb3c51dc3c3b02248b83ef25c81893b3), [`4bcd7ed`](https://github.com/kondaurovDev/effortless-aws/commit/4bcd7ed7cb3c51dc3c3b02248b83ef25c81893b3), [`4bcd7ed`](https://github.com/kondaurovDev/effortless-aws/commit/4bcd7ed7cb3c51dc3c3b02248b83ef25c81893b3)]:
+  - effortless-aws@0.38.0
+
 ## 0.21.0
 
 ### Minor Changes
