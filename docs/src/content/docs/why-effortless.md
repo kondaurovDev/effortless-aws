@@ -39,26 +39,27 @@ Each handler definition creates all the AWS resources it needs. `deps` wires the
 // src/orders.ts
 import { defineTable, defineApi } from "effortless-aws";
 
-type Order = { id: string; product: string; amount: number };
+type Order = { tag: "order"; product: string; amount: number };
 
-export const orders = defineTable<Order>({
-  onRecord: async ({ record }) => {
-    console.log("New order:", record.new!.product);
-  },
-});
+export const orders = defineTable<Order>()
+  .onRecord(async ({ record }) => {
+    if (record.eventName === "INSERT" && record.new) {
+      console.log("New order:", record.new.data.product);
+    }
+  });
 
-export const api = defineApi({
-  basePath: "/orders",
-  deps: () => ({ orders }),
-})
+export const api = defineApi({ basePath: "/orders" })
+  .deps(() => ({ orders }))
   .setup(({ deps }) => ({ orders: deps.orders }))
-  .post("/", async ({ req, orders }) => {
+  .post({ path: "/" }, async ({ req, orders }) => {
+    const body = req.body as { product: string; amount: number };
+    const id = crypto.randomUUID();
     await orders.put({
-      id: crypto.randomUUID(),
-      product: req.body.product,
-      amount: req.body.amount,
+      pk: "ORDER",
+      sk: id,
+      data: { tag: "order", product: body.product, amount: body.amount },
     });
-    return { status: 201, body: { ok: true } };
+    return { status: 201, body: { ok: true, id } };
   });
 ```
 
@@ -84,16 +85,15 @@ All in the same project, all deployed with one command, all with automatic IAM w
 
 ```typescript
 // One project. One deploy. A complete product backend.
-export const orders   = defineTable<Order>({ onRecord: processOrder });
-export const uploads  = defineBucket({ onObjectCreated: processImage });
+export const orders   = defineTable<Order>().onRecord(processOrder);
+export const uploads  = defineBucket().onObjectCreated(processImage);
 export const queue    = defineQueue<Job>({ fifo: true }).onMessage(processJob);
-export const mailer   = defineMailer({ domain: "myapp.com" });
-export const api      = defineApi({
-  basePath: "/api",
-  deps: () => ({ orders, uploads, queue, mailer }),
+export const mailer   = defineMailer()({ domain: "myapp.com" });
+export const api      = defineApi({ basePath: "/api" })
+  .deps(() => ({ orders, uploads, queue, mailer }))
   // all deps are typed, all IAM permissions are automatic
-});
-export const site     = defineStaticSite({ dir: "dist", build: "npm run build" });
+  .get({ path: "/health" }, async ({ ok }) => ok({ status: "ok" }));
+export const site     = defineStaticSite({ dir: "dist", build: "npm run build" }).build();
 ```
 
 You can deliver an entire serverless product from TypeScript alone — and get back to building the product itself.
@@ -108,30 +108,31 @@ The most common Lambda pattern: HTTP endpoints that read/write from DynamoDB.
 import { defineTable, defineApi } from "effortless-aws";
 import { z } from "zod";
 
-type User = { id: string; email: string; name: string; createdAt: string };
+type User = { tag: "user"; email: string; name: string; createdAt: string };
 
-export const users = defineTable<User>();
+export const users = defineTable<User>().build();
 
-export const api = defineApi({
-  basePath: "/users",
-  deps: () => ({ users }),
-})
+const NewUser = z.object({ email: z.string(), name: z.string() });
+
+export const api = defineApi({ basePath: "/users" })
+  .deps(() => ({ users }))
   .setup(({ deps }) => ({ users: deps.users }))
-  .get("/{id}", async ({ req, users }) => {
-    const user = await users.get({ id: req.params.id });
+  .get({ path: "/{id}" }, async ({ req, users }) => {
+    const pk = `USER#${req.params.id}`;
+    const user = await users.get({ pk, sk: "PROFILE" });
     if (!user) return { status: 404, body: { error: "Not found" } };
-    return { status: 200, body: user };
+    return { status: 200, body: user.data };
   })
-  .post("/", async ({ input, users }) => {
-    const data = z.object({ email: z.string(), name: z.string() }).parse(input);
-    const user: User = {
-      id: crypto.randomUUID(),
-      email: data.email,    // typed from schema
-      name: data.name,
+  .post({ path: "/", input: NewUser }, async ({ input, users }) => {
+    const id = crypto.randomUUID();
+    const data: User = {
+      tag: "user",
+      email: input.email,    // typed from schema
+      name: input.name,
       createdAt: new Date().toISOString(),
     };
-    await users.put(user);  // typed client, auto IAM
-    return { status: 201, body: user };
+    await users.put({ pk: `USER#${id}`, sk: "PROFILE", data });  // typed client, auto IAM
+    return { status: 201, body: { id, ...data } };
   });
 ```
 
@@ -148,28 +149,26 @@ DynamoDB streams let you react to data changes without polling.
 ```typescript
 import { defineTable } from "effortless-aws";
 
-type Order = { id: string; product: string; amount: number; status: string };
+type Order = { tag: "order"; product: string; amount: number; status: string };
 
-export const orders = defineTable<Order>({
+export const orders = defineTable<Order>()
   // Stream processor — runs on every insert/update/delete
-  onRecord: async ({ record }) => {
-    if (record.eventName === "INSERT") {
+  .onRecord(async ({ record }) => {
+    if (record.eventName === "INSERT" && record.new) {
       // Send confirmation email, update analytics, notify warehouse
-      console.log(`New order: ${record.new!.product} — $${record.new!.amount}`);
+      console.log(`New order: ${record.new.data.product} — $${record.new.data.amount}`);
     }
-  },
-});
+  });
 
 // Or process records in batches for efficiency
-type AnalyticsEvent = { id: string; event: string; timestamp: number };
+type AnalyticsEvent = { tag: "event"; event: string; timestamp: number };
 
-export const analytics = defineTable<AnalyticsEvent>({
-  batchSize: 100,
-  onRecordBatch: async ({ records }) => {
-    const inserts = records.filter(r => r.eventName === "INSERT");
-    await bulkIndexToElasticsearch(inserts.map(r => r.new!));
-  },
-});
+export const analytics = defineTable<AnalyticsEvent>()
+  .stream({ batchSize: 100 })
+  .onRecordBatch(async ({ records }) => {
+    const inserts = records.filter((r) => r.eventName === "INSERT");
+    await bulkIndexToElasticsearch(inserts.map((r) => r.new!.data));
+  });
 ```
 
 The stream, event source mapping, batch size config, and partial failure reporting are all handled automatically.
@@ -182,7 +181,7 @@ Deploy Nuxt, Astro SSR, or any framework with server-side rendering — CloudFro
 import { defineApp, defineApi } from "effortless-aws";
 
 // SSR app via CloudFront + Lambda Function URL
-export const app = defineApp({
+export const app = defineApp()({
   server: ".output/server",
   assets: ".output/public",
   build: "nuxt build",
@@ -191,7 +190,7 @@ export const app = defineApp({
 
 // API endpoints in the same project
 export const api = defineApi({ basePath: "/api" })
-  .get("/items", async () => {
+  .get({ path: "/items" }, async () => {
     return { status: 200, body: await fetchItems() };
   });
 ```
@@ -204,8 +203,8 @@ import { defineStaticSite } from "effortless-aws";
 export const site = defineStaticSite({
   dir: "dist",
   build: "npm run build",
-  spa: true,
-});
+  errorPage: "index.html",   // SPA mode
+}).build();
 ```
 
 ### Secrets and configuration
@@ -213,17 +212,15 @@ export const site = defineStaticSite({
 Pull secrets from SSM Parameter Store at cold start — cached, typed, auto-permissioned.
 
 ```typescript
-import { defineApi, param } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const checkout = defineApi({
-  basePath: "/checkout",
-  config: {
-    stripeKey: param("stripe/secret-key"),
-    webhookSecret: param("stripe/webhook-secret"),
-  },
-})
+export const checkout = defineApi({ basePath: "/checkout" })
+  .config(({ defineSecret }) => ({
+    stripeKey: defineSecret({ key: "stripe/secret-key" }),
+    webhookSecret: defineSecret({ key: "stripe/webhook-secret" }),
+  }))
   .setup(({ config }) => ({ stripeKey: config.stripeKey }))
-  .post("/", async ({ stripeKey }) => {
+  .post({ path: "/" }, async ({ stripeKey }) => {
     // stripeKey is fetched from SSM once, cached across invocations
     const stripe = new Stripe(stripeKey);
     // ...

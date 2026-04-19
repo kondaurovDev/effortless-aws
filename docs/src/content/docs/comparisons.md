@@ -145,15 +145,15 @@ const tableName = Resource.Orders.name;
 
 ```typescript
 // Effortless — infrastructure IS the code
-export const orders = defineTable<{ id: string; amount: number }>({
-  primaryKey: "id",
-  onInsert: async ({ newItem }) => {
-    // typed: newItem.amount is number
-  },
-});
+export const orders = defineTable<{ tag: "order"; amount: number }>()
+  .onRecord(async ({ record }) => {
+    if (record.eventName === "INSERT" && record.new) {
+      // typed: record.new.data.amount is number
+    }
+  });
 
 // In another handler — typed client, auto IAM, no config
-await orders.put({ id: "abc", amount: 99 });
+await orders.put({ pk: "ORDER", sk: "abc", data: { tag: "order", amount: 99 } });
 ```
 
 Key differences:
@@ -195,9 +195,7 @@ api("main").post("/orders", async (ctx) => {
 
 ```typescript
 // Effortless — AWS-native, schema-driven
-export const orders = defineTable<{ id: string; amount: number }>({
-  primaryKey: "id",
-});
+export const orders = defineTable<{ tag: "order"; amount: number }>().build();
 // orders.put() is typed, validated, auto-IAM'd
 ```
 
@@ -253,17 +251,13 @@ const worker = await Worker("api", {
 
 ```typescript
 // Effortless — infrastructure IS the code
-export const orders = defineTable<{ id: string; amount: number }>({
-  primaryKey: "id",
-});
+export const orders = defineTable<{ tag: "order"; amount: number }>().build();
 
-export const api = defineApi({
-  basePath: "/orders",
-  deps: () => ({ orders }),  // ← auto IAM, typed client
-})
+export const api = defineApi({ basePath: "/orders" })
+  .deps(() => ({ orders }))                // ← auto IAM, typed client
   .setup(({ deps }) => ({ orders: deps.orders }))
-  .get("/", async ({ orders }) => {
-    const items = await orders.query(/* fully typed */);
+  .get({ path: "/" }, async ({ orders }) => {
+    const items = await orders.query({ pk: "ORDER" });  // fully typed
     return { status: 200, body: items };
   });
 // No resource declarations — Lambda, IAM, Function URL all inferred

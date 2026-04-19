@@ -15,8 +15,10 @@ Define a mailer with your sending domain:
 // src/mailer.ts
 import { defineMailer } from "effortless-aws";
 
-export const mailer = defineMailer({ domain: "myapp.com" });
+export const mailer = defineMailer()({ domain: "myapp.com" });
 ```
+
+`defineMailer` is a curried factory — the extra `()` is how deploy-time extraction picks up the handler.
 
 On first deploy, Effortless creates an SES email identity and prints DKIM DNS records to the console:
 
@@ -44,17 +46,15 @@ Import the mailer into any handler and add it to `deps`. The framework injects a
 import { defineApi } from "effortless-aws";
 import { mailer } from "./mailer";
 
-export const signup = defineApi({
-  basePath: "/signup",
-  deps: () => ({ mailer }),
-})
+export const signup = defineApi({ basePath: "/signup" })
+  .deps(() => ({ mailer }))
   .setup(({ deps }) => ({ mailer: deps.mailer }))
-  .post("/", async ({ req, mailer }) => {
+  .post({ path: "/" }, async ({ req, mailer }) => {
     // ... create user ...
 
     await mailer.send({
       from: "hello@myapp.com",
-      to: req.body.email,
+      to: (req.body as { email: string }).email,
       subject: "Welcome to MyApp!",
       html: "<h1>Welcome!</h1><p>Your account is ready.</p>",
     });
@@ -104,14 +104,12 @@ import { mailer } from "./mailer";
 
 type User = { tag: string; name: string; email: string };
 
-export const users = defineTable<User>();
+export const users = defineTable<User>().build();
 
-export const invite = defineApi({
-  basePath: "/invite",
-  deps: () => ({ users, mailer }),
-})
+export const invite = defineApi({ basePath: "/invite" })
+  .deps(() => ({ users, mailer }))
   .setup(({ deps }) => ({ users: deps.users, mailer: deps.mailer }))
-  .post("/{userId}", async ({ req, users, mailer }) => {
+  .post({ path: "/{userId}" }, async ({ req, users, mailer }) => {
     const user = await users.get({
       pk: `USER#${req.params.userId}`,
       sk: "PROFILE",
@@ -143,8 +141,9 @@ type EmailJob = { to: string; subject: string; html: string };
 
 export const emailQueue = defineQueue<EmailJob>({ fifo: true })
   .deps(() => ({ mailer }))
-  .onMessage(async ({ message, deps }) => {
-    await deps.mailer.send({
+  .setup(({ deps }) => ({ mailer: deps.mailer }))
+  .onMessage(async ({ message, mailer }) => {
+    await mailer.send({
       from: "no-reply@myapp.com",
       to: message.body.to,
       subject: message.body.subject,
@@ -165,19 +164,19 @@ import { mailer } from "./mailer";
 
 type Order = { tag: string; email: string; amount: number; status: string };
 
-export const orders = defineTable<Order>({
-  deps: () => ({ mailer }),
-  onRecord: async ({ record, deps }) => {
+export const orders = defineTable<Order>()
+  .deps(() => ({ mailer }))
+  .setup(({ deps }) => ({ mailer: deps.mailer }))
+  .onRecord(async ({ record, mailer }) => {
     if (record.eventName === "INSERT" && record.new) {
-      await deps.mailer.send({
+      await mailer.send({
         from: "orders@myapp.com",
         to: record.new.data.email,
         subject: "Order confirmed",
         html: `<p>Your order of $${record.new.data.amount} has been confirmed.</p>`,
       });
     }
-  },
-});
+  });
 ```
 
 ## Using with templates
@@ -188,23 +187,22 @@ Combine `defineMailer` with `static` files to use email templates:
 import { defineApi } from "effortless-aws";
 import { mailer } from "./mailer";
 
-export const sendInvoice = defineApi({
-  basePath: "/send-invoice",
-  deps: () => ({ mailer }),
-  static: ["src/templates/invoice.html"],
-})
+export const sendInvoice = defineApi({ basePath: "/send-invoice" })
+  .deps(() => ({ mailer }))
+  .include("src/templates/invoice.html")
   .setup(({ deps, files }) => ({
     mailer: deps.mailer,
     template: files.read("src/templates/invoice.html"),
   }))
-  .post("/", async ({ req, mailer, template }) => {
+  .post({ path: "/" }, async ({ req, mailer, template }) => {
+    const body = req.body as { name: string; amount: string; email: string };
     const html = template
-      .replace("{{name}}", req.body.name)
-      .replace("{{amount}}", req.body.amount);
+      .replace("{{name}}", body.name)
+      .replace("{{amount}}", body.amount);
 
     await mailer.send({
       from: "billing@myapp.com",
-      to: req.body.email,
+      to: body.email,
       subject: "Your invoice",
       html,
     });

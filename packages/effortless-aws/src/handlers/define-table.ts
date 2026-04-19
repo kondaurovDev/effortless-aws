@@ -229,18 +229,6 @@ interface TableBuilder<
  * `data (M)`, and `ttl (N)` attributes. TTL is always enabled.
  *
  * @see {@link https://effortless-aws.website/use-cases/database | Database guide}
- *
- * @example
- * ```typescript
- * export const orders = defineTable<OrderData>()
- *   .stream({ batchSize: 10, concurrency: 5, maxRetries: 3 })
- *   .setup(({ table }) => ({ table }))
- *   .onRecord(async ({ record, table }) => {
- *     if (record.eventName === "INSERT") {
- *       console.log("New order:", record.new?.data);
- *     }
- *   })
- * ```
  */
 export function defineTable<T = Record<string, unknown>>(): TableBuilder<T>;
 export function defineTable<T = Record<string, unknown>>(

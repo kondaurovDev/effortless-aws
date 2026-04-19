@@ -135,17 +135,7 @@ interface WorkerBuilder<
  *
  * @typeParam T - Type of messages the worker receives via its queue
  *
- * @example
- * ```typescript
- * type Job = { type: "export"; userId: string }
- *
- * export const worker = defineWorker<Job>({ memory: 2048, concurrency: 5 })
- *   .deps(() => ({ orders }))
- *   .setup(async ({ deps }) => ({ db: deps.orders }))
- *   .onMessage(async (msg, { db }) => {
- *     await processJob(msg, db)
- *   })
- * ```
+ * @see {@link https://effortless-aws.website/definitions#defineworker | Worker reference}
  */
 export function defineWorker<T = unknown>(options?: WorkerOptions): WorkerBuilder<T> {
   const spec: WorkerConfig = {

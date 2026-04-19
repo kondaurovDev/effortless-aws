@@ -15,7 +15,7 @@ You want to store user uploads. Define the bucket and use it from an HTTP handle
 // src/uploads.ts
 import { defineBucket } from "effortless-aws";
 
-export const uploads = defineBucket({});
+export const uploads = defineBucket().build();
 ```
 
 After deploy, you get an S3 bucket named `{project}-{stage}-uploads`. Other handlers can reference it via `deps` and get a typed `BucketClient` for `.put()`, `.get()`, `.delete()`, and `.list()`.
@@ -25,22 +25,18 @@ After deploy, you get an S3 bucket named `{project}-{stage}-uploads`. Other hand
 import { defineApi } from "effortless-aws";
 import { uploads } from "./uploads";
 
-export const uploadFile = defineApi({
-  basePath: "/upload",
-  deps: () => ({ uploads }),
-})
+export const uploadFile = defineApi({ basePath: "/upload" })
+  .deps(() => ({ uploads }))
   .setup(({ deps }) => ({ uploads: deps.uploads }))
-  .post("/{filename}", async ({ req, uploads }) => {
-    await uploads.put(req.params.filename, req.body);
+  .post({ path: "/{filename}" }, async ({ req, uploads }) => {
+    await uploads.put(req.params.filename, req.body as Buffer);
     return { status: 201, body: { key: req.params.filename } };
   });
 
-export const getFile = defineApi({
-  basePath: "/files",
-  deps: () => ({ uploads }),
-})
+export const getFile = defineApi({ basePath: "/files" })
+  .deps(() => ({ uploads }))
   .setup(({ deps }) => ({ uploads: deps.uploads }))
-  .get("/{filename}", async ({ req, uploads }) => {
+  .get({ path: "/{filename}" }, async ({ req, uploads }) => {
     const file = await uploads.get(req.params.filename);
     if (!file) return { status: 404, body: { error: "Not found" } };
     return {
@@ -90,10 +86,9 @@ Add `onObjectCreated` and your function runs for every new object.
 // src/images.ts
 import { defineBucket } from "effortless-aws";
 
-export const images = defineBucket({
-  prefix: "uploads/",
-  suffix: ".jpg",
-  onObjectCreated: async ({ event, bucket }) => {
+export const images = defineBucket({ prefix: "uploads/", suffix: ".jpg" })
+  .setup(({ bucket }) => ({ bucket }))
+  .onObjectCreated(async ({ event, bucket }) => {
     console.log(`New image: ${event.key}, size: ${event.size} bytes`);
     const file = await bucket.get(event.key);
     if (file) {
@@ -102,8 +97,7 @@ export const images = defineBucket({
         contentType: "image/jpeg",
       });
     }
-  },
-});
+  });
 ```
 
 Use `prefix` and `suffix` to filter which objects trigger the Lambda. Only matching objects invoke your function — the rest are ignored.
@@ -118,20 +112,40 @@ The `event` object gives you:
 
 ## Reacting to deletions
 
-Use `onObjectRemoved` to clean up when objects are deleted.
+A single bucket handler has **one** terminal callback — either `.onObjectCreated(...)` or `.onObjectRemoved(...)`, not both. To react to both events, define two buckets: a primary resource-only bucket and a secondary handler that observes the same resource.
+
+Start with a resource-only bucket:
 
 ```typescript
-export const documents = defineBucket({
-  onObjectCreated: async ({ event }) => {
-    await indexDocument(event.key);
-  },
-  onObjectRemoved: async ({ event }) => {
-    await removeFromIndex(event.key);
-  },
-});
+// src/documents.ts
+import { defineBucket } from "effortless-aws";
+
+export const documents = defineBucket().build();
 ```
 
-You can define both callbacks on the same bucket — each event type routes to the right handler.
+Then wire each event to its own handler, taking the bucket as a dep:
+
+```typescript
+// src/index-document.ts
+import { defineBucket } from "effortless-aws";
+import { documents } from "./documents";
+
+export const indexDocument = defineBucket()
+  .deps(() => ({ documents }))
+  .setup(({ deps }) => ({ documents: deps.documents }))
+  .onObjectCreated(async ({ event, documents }) => {
+    const file = await documents.get(event.key);
+    if (file) await indexDocumentContent(event.key, file.body);
+  });
+
+// src/remove-from-index.ts
+export const removeFromIndex = defineBucket()
+  .onObjectRemoved(async ({ event }) => {
+    await deleteFromIndex(event.key);
+  });
+```
+
+Each handler-bucket pair maps to its own S3 event notification filter and its own Lambda. The underlying S3 bucket can be shared via `deps` when you need the client inside the callback.
 
 ## Processing with a database
 
@@ -143,13 +157,13 @@ import { defineTable, defineBucket } from "effortless-aws";
 
 type Invoice = { tag: string; key: string; size: number; uploadedAt: string };
 
-export const invoiceRecords = defineTable<Invoice>();
+export const invoiceRecords = defineTable<Invoice>().build();
 
-export const invoices = defineBucket({
-  prefix: "invoices/",
-  deps: () => ({ invoiceRecords }),
-  onObjectCreated: async ({ event, deps }) => {
-    await deps.invoiceRecords.put({
+export const invoices = defineBucket({ prefix: "invoices/" })
+  .deps(() => ({ invoiceRecords }))
+  .setup(({ deps }) => ({ invoiceRecords: deps.invoiceRecords }))
+  .onObjectCreated(async ({ event, invoiceRecords }) => {
+    await invoiceRecords.put({
       pk: "INVOICE",
       sk: `FILE#${event.key}`,
       data: {
@@ -159,8 +173,7 @@ export const invoices = defineBucket({
         uploadedAt: event.eventTime ?? new Date().toISOString(),
       },
     });
-  },
-});
+  });
 ```
 
 Each Lambda gets only the IAM permissions it needs — S3 for its own bucket, DynamoDB for the referenced table.
@@ -172,19 +185,19 @@ Buckets compose with any handler type, not just HTTP. A table stream handler can
 ```typescript
 import { defineTable, defineBucket } from "effortless-aws";
 
-export const reports = defineBucket({});
+export const reports = defineBucket().build();
 
 type Order = { tag: string; amount: number; status: string };
 
-export const orders = defineTable<Order>({
-  deps: () => ({ reports }),
-  onRecord: async ({ record, deps }) => {
+export const orders = defineTable<Order>()
+  .deps(() => ({ reports }))
+  .setup(({ deps }) => ({ reports: deps.reports }))
+  .onRecord(async ({ record, reports }) => {
     if (record.eventName === "INSERT" && record.new) {
       const csv = `${record.new.pk},${record.new.data.amount},${record.new.data.status}\n`;
-      await deps.reports.put(`orders/${record.new.pk}.csv`, csv);
+      await reports.put(`orders/${record.new.pk}.csv`, csv);
     }
-  },
-});
+  });
 ```
 
 ## Resource-only bucket
@@ -192,7 +205,7 @@ export const orders = defineTable<Order>({
 When you don't need event processing — just a bucket that other handlers write to — omit the callbacks entirely. No Lambda is created.
 
 ```typescript
-export const assets = defineBucket({});
+export const assets = defineBucket().build();
 // No onObjectCreated/onObjectRemoved — just a bucket.
 // Reference it with deps from other handlers.
 ```

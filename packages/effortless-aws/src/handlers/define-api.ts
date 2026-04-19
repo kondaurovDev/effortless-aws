@@ -239,16 +239,6 @@ interface ApiBuilder<
  * Define an API with typed routes using a builder pattern.
  *
  * @see {@link https://effortless-aws.website/use-cases/http-api | HTTP API guide}
- *
- * @example
- * ```typescript
- * export const api = defineApi({ basePath: "/api" })
- *   .deps(() => ({ users }))
- *   .config(({ defineSecret }) => ({ authSecret: defineSecret() }))
- *   .auth<Session>(({ config }) => ({ secret: config.authSecret, expiresIn: "1h" }))
- *   .get({ path: "/me" }, async ({ users, auth, ok }) => ok(auth.session))
- *   .post({ path: "/login", public: true }, async ({ auth, ok }) => ok(await auth.createSession()))
- * ```
  */
 export function defineApi<const O extends ApiOptions>(
   options: O,

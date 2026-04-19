@@ -52,7 +52,7 @@ Here's what the simplest handler looks like:
 import { defineApi } from "effortless-aws";
 
 export const hello = defineApi({ basePath: "/hello" })
-  .get("/", async () => ({
+  .get({ path: "/" }, async () => ({
     status: 200,
     body: { message: "Hello World!" },
   }));
@@ -96,17 +96,15 @@ With **effortless-aws**, the same thing is:
 // That's it. One file.
 import { defineApi, defineTable } from "effortless-aws";
 
-export const orders = defineTable({
-  pk: "id",
-});
+type Order = { tag: "order"; amount: number };
 
-export const api = defineApi({
-  basePath: "/orders",
-  deps: () => ({ orders }),
-})
+export const orders = defineTable<Order>().build();
+
+export const api = defineApi({ basePath: "/orders" })
+  .deps(() => ({ orders }))
   .setup(({ deps }) => ({ orders: deps.orders }))
-  .get("/", async ({ orders }) => {
-    const items = await orders.scan();
+  .get({ path: "/" }, async ({ orders }) => {
+    const items = await orders.query({ pk: "ORDER" });
     return { status: 200, body: items };
   });
 ```

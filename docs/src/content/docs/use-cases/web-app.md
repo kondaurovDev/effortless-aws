@@ -39,7 +39,7 @@ Your app uses server-side rendering — Nuxt, Next.js, or any framework that pro
 // src/app.ts
 import { defineApp } from "effortless-aws";
 
-export const app = defineApp({
+export const app = defineApp()({
   server: ".output/server",
   assets: ".output/public",
   build: "nuxt build",
@@ -64,7 +64,7 @@ Any framework that builds into a server handler + static assets works with `defi
 The best-supported framework. Nuxt uses [Nitro](https://nitro.build/) which has a built-in `aws-lambda` preset that produces a Lambda handler directly.
 
 ```typescript
-export const app = defineApp({
+export const app = defineApp()({
   server: ".output/server",
   assets: ".output/public",
   build: "nuxt build",
@@ -87,7 +87,7 @@ export default defineNuxtConfig({
 Next.js doesn't produce a Lambda handler natively. [OpenNext](https://opennext.js.org/) is an open-source adapter that transforms Next.js output into Lambda-compatible packages.
 
 ```typescript
-export const app = defineApp({
+export const app = defineApp()({
   server: ".open-next/server-function",
   assets: ".open-next/assets",
   build: "npx open-next build",
@@ -95,6 +95,8 @@ export const app = defineApp({
 ```
 
 OpenNext runs `next build` internally and produces `.open-next/server-function/index.mjs` (Lambda handler) and `.open-next/assets` (static files for S3).
+
+Note the extra `()` on `defineApp()` — it's a curried factory so deploy-time extraction can find the handler. Apply the same pattern everywhere you see `defineApp(...)`.
 
 #### Other Nitro-powered frameworks
 
@@ -107,7 +109,7 @@ If your framework doesn't have a Lambda adapter, you can write a thin wrapper yo
 ### Custom domain
 
 ```typescript
-export const app = defineApp({
+export const app = defineApp()({
   server: ".output/server",
   assets: ".output/public",
   build: "nuxt build",
@@ -120,7 +122,7 @@ Effortless automatically finds your ACM certificate in us-east-1 and configures 
 Stage-specific domains are also supported:
 
 ```typescript
-export const app = defineApp({
+export const app = defineApp()({
   server: ".output/server",
   assets: ".output/public",
   build: "nuxt build",
@@ -139,11 +141,11 @@ Your Nuxt/Astro app and API handlers deploy together.
 // src/app.ts
 import { defineApp } from "effortless-aws";
 
-export const frontend = defineApp({
+export const frontend = defineApp()({
   server: ".output/server",
   assets: ".output/public",
   build: "nuxt build",
-  memory: 1024,
+  lambda: { memory: 1024 },
 });
 ```
 
@@ -151,18 +153,16 @@ export const frontend = defineApp({
 // src/api.ts
 import { defineApi, defineTable } from "effortless-aws";
 
-type Item = { id: string; name: string };
+type Item = { tag: string; name: string };
 
-export const items = defineTable<Item>();
+export const items = defineTable<Item>().build();
 
-export const api = defineApi({
-  basePath: "/api/items",
-  deps: () => ({ items }),
-})
+export const api = defineApi({ basePath: "/api/items" })
+  .deps(() => ({ items }))
   .setup(({ deps }) => ({ items: deps.items }))
-  .get("/", async ({ items }) => ({
+  .get({ path: "/" }, async ({ items }) => ({
     status: 200,
-    body: await items.query({}),
+    body: await items.query({ pk: "ITEM" }),
   }));
 ```
 
@@ -185,8 +185,10 @@ import { defineStaticSite } from "effortless-aws";
 export const blog = defineStaticSite({
   dir: "dist",
   build: "npm run build",
-});
+}).build();
 ```
+
+`defineStaticSite` returns a builder — call `.route(...)` and `.middleware(...)` as needed, then `.build()` to finalize.
 
 On deploy, Effortless:
 1. Runs `npm run build`
@@ -207,7 +209,7 @@ export const site = defineStaticSite({
   dir: "dist",
   build: "npm run build",
   domain: "example.com",
-});
+}).build();
 ```
 
 Effortless automatically finds your ACM certificate in us-east-1 and configures SSL. If the certificate also covers `www.example.com`, a 301 redirect from `www` to the non-www domain is set up automatically — no extra config needed.
@@ -227,14 +229,14 @@ Effortless automatically finds your ACM certificate in us-east-1 and configures 
 
 ### SPA mode
 
-For client-side routed apps (React, Vue, Angular), enable `spa: true` — all routes return `index.html`:
+For client-side routed apps (React, Vue, Angular), set `errorPage` to the same file as `index` — missing paths fall back to `index.html` so the client-side router can handle them:
 
 ```typescript
 export const app = defineStaticSite({
   dir: "build",
   build: "npm run build",
-  spa: true,
-});
+  errorPage: "index.html",   // SPA mode: any unknown path → index.html (HTTP 200)
+}).build();
 ```
 
 Behind the scenes, CloudFront returns `index.html` for any path that doesn't match a real file (via custom error response for 403/404).
@@ -250,10 +252,10 @@ export const docs = defineStaticSite({
   dir: "dist",
   build: "npm run build",
   errorPage: "404.html",  // relative to dist/
-});
+}).build();
 ```
 
-For SPA sites (`spa: true`), error pages are not used — all paths are routed to `index.html` for client-side routing.
+For SPA sites (`errorPage` equals `index`), error pages are not used — all paths are routed to `index.html` for client-side routing.
 
 ### API route proxying
 
@@ -264,18 +266,17 @@ import { api } from "./api";
 
 export const app = defineStaticSite({
   dir: "dist",
-  spa: true,
+  errorPage: "index.html",     // SPA mode
   build: "npm run build",
   domain: "example.com",
-  routes: {
-    "/api/*": api,  // proxied to API Gateway
-  },
-});
+})
+  .route("/api/*", api)        // proxied to API Gateway
+  .build();
 ```
 
-With `routes`, requests to `/api/*` go directly to your API Gateway. Everything else is served from S3. Same domain, no CORS headers needed.
+With `.route(...)`, requests to `/api/*` go directly to your API Gateway. Everything else is served from S3. Same domain, no CORS headers needed.
 
-The `api` value is a reference to a `defineApi` handler — Effortless resolves the Function URL domain automatically at deploy time.
+The `api` value is a reference to a `defineApi` handler — Effortless resolves the Function URL domain automatically at deploy time. Call `.route(...)` multiple times to proxy additional patterns.
 
 ### Middleware — protect pages with auth
 
@@ -288,7 +289,8 @@ export const admin = defineStaticSite({
   dir: "admin/dist",
   domain: "admin.example.com",
   build: "npm run build",
-  middleware: async (request) => {
+})
+  .middleware(async (request) => {
     // Check for session cookie
     if (!request.cookies.session) {
       return { redirect: "https://example.com/login" };
@@ -301,15 +303,15 @@ export const admin = defineStaticSite({
     }
 
     // No return → serve the page
-  },
-});
+  })
+  .build();
 ```
 
 The middleware receives a simplified request with `uri`, `method`, `querystring`, `headers`, and `cookies`. Return nothing to serve the page, `{ redirect: url }` to redirect, or `{ status: 403 }` to block.
 
 This runs as Lambda@Edge — full Node.js runtime, so you can validate JWTs, call external APIs, check databases. It's deployed to us-east-1 and replicated to all CloudFront edge locations worldwide.
 
-When middleware is set, it replaces the default CloudFront Function. URL rewriting (`/path/` → `/path/index.html`) is handled automatically inside the middleware wrapper.
+When `.middleware(...)` is set, it replaces the default CloudFront Function. URL rewriting (`/path/` → `/path/index.html`) is handled automatically inside the middleware wrapper.
 
 **A common pattern** — separate public and protected sites into different domains:
 
@@ -318,18 +320,19 @@ When middleware is set, it replaces the default CloudFront Function. URL rewriti
 export const landing = defineStaticSite({
   dir: "landing/dist",
   domain: "example.com",
-});
+}).build();
 
 // Protected admin — with JWT validation
 export const admin = defineStaticSite({
   dir: "admin/dist",
   domain: "admin.example.com",
-  middleware: async (request) => {
+})
+  .middleware(async (request) => {
     if (!request.cookies.session) {
       return { redirect: "https://example.com/login" };
     }
-  },
-});
+  })
+  .build();
 ```
 
 Each `defineStaticSite` creates its own CloudFront distribution, so there's no performance penalty for the public site.
@@ -349,7 +352,7 @@ export const docs = defineStaticSite({
     sitemap: "sitemap.xml",
     googleIndexing: "~/google-service-account.json",
   },
-});
+}).build();
 ```
 
 The `sitemap` field is the filename for the generated sitemap. Effortless walks your `dir`, finds all HTML files, and generates a sitemap XML with clean URLs (`/about/` instead of `/about/index.html`). If you already have a `sitemap.xml` in your build output (from Astro, Next.js, etc.), the auto-generated one is skipped.

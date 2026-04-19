@@ -134,19 +134,19 @@ The build system has two phases: **static analysis** (ts-morph) and **bundling**
 // src/api.ts
 export const users = defineApi({
   basePath: "/api",          // ← static config (extracted by ts-morph)
-  memory: 512,               // ← static config
 })
-  .setup(({ deps }) => ({    // ← runtime
-    users: deps.users,
-  }))
-  .get("/users", async ({ req, users }) => ...)        // ← runtime
-  .get("/users/{id}", async ({ req, users }) => ...)   // ← runtime
-  .post("/users", async ({ input, users }) => ...);    // ← runtime
+  .setup(                    // ← runtime + lambda settings
+    ({ deps }) => ({ users: deps.users }),
+    { memory: 512 },         // ← static lambda config
+  )
+  .get({ path: "/users" }, async ({ req, users }) => ...)         // ← runtime
+  .get({ path: "/users/{id}" }, async ({ req, users }) => ...)    // ← runtime
+  .post({ path: "/users" }, async ({ input, users }) => ...);     // ← runtime
 ```
 
 ### Phase 1: Static analysis (ts-morph)
 
-`extractHandlerConfigs()` parses the source code as AST and extracts only the serializable config properties (basePath, memory, timeout, permissions). Runtime properties (functions, closures) are stripped via the `RUNTIME_PROPS` list.
+`extractHandlerConfigs()` parses the source code as AST and extracts only the serializable config properties (basePath, lambda settings, etc.). Runtime properties (functions, closures) are stripped via the `RUNTIME_PROPS` list.
 
 ```
 RUNTIME_PROPS = ["onRecord", "onRecordBatch", "onMessage", "onMessageBatch",

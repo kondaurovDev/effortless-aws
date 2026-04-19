@@ -67,9 +67,9 @@ Most queue processors need to read or write data. Define a table and reference i
 // src/fulfillment.ts
 import { defineTable, defineQueue } from "effortless-aws";
 
-type Order = { id: string; product: string; amount: number; status: string };
+type Order = { tag: string; product: string; amount: number; status: string };
 
-export const orders = defineTable<Order>();
+export const orders = defineTable<Order>().build();
 
 type FulfillmentEvent = { orderId: string; warehouse: string };
 
@@ -78,12 +78,13 @@ export const fulfillment = defineQueue<FulfillmentEvent>({ fifo: true })
   .setup(({ deps }) => ({ orders: deps.orders }))
   .onMessage(async ({ message, orders }) => {
     // orders is TableClient<Order> — typed from the table's generic
-    const order = await orders.get({ id: message.body.orderId });
+    const pk = `ORDER#${message.body.orderId}`;
+    const order = await orders.get({ pk, sk: "DETAIL" });
     if (!order) return;
 
-    await orders.put({ ...order, status: "fulfilling" });
-    await shipFromWarehouse(message.body.warehouse, order);
-    await orders.put({ ...order, status: "shipped" });
+    await orders.update({ pk, sk: "DETAIL" }, { set: { status: "fulfilling" } });
+    await shipFromWarehouse(message.body.warehouse, order.data);
+    await orders.update({ pk, sk: "DETAIL" }, { set: { status: "shipped" } });
   });
 ```
 
@@ -113,17 +114,17 @@ With `onMessageBatch`, if the handler throws, all messages in the batch are repo
 
 ## Using secrets
 
-Your queue processor calls an external API that requires authentication. Use `param()` to reference an SSM Parameter Store key — Effortless fetches the value once on cold start, caches it, and injects it as a typed argument.
+Your queue processor calls an external API that requires authentication. Use `.config(({ defineSecret }) => ...)` to reference an SSM Parameter Store key — Effortless fetches the value once on cold start, caches it, and injects it as a typed argument.
 
 ```typescript
-import { defineQueue, param } from "effortless-aws";
+import { defineQueue } from "effortless-aws";
 
 type WebhookEvent = { url: string; payload: Record<string, unknown> };
 
 export const webhookQueue = defineQueue<WebhookEvent>({ fifo: true })
-  .config({
-    apiKey: param("webhook/api-key"),
-  })
+  .config(({ defineSecret }) => ({
+    apiKey: defineSecret({ key: "webhook/api-key" }),
+  }))
   .setup(({ config }) => ({ apiKey: config.apiKey }))
   .onMessage(async ({ message, apiKey }) => {
     await fetch(message.body.url, {
@@ -159,22 +160,21 @@ FIFO queues have several knobs you can adjust:
 ```typescript
 export const importQueue = defineQueue<ImportEvent>({
   fifo: true,
-  visibilityTimeout: 120, // seconds before retry (default: max of timeout or 30)
-  retentionPeriod: 86400, // message retention in seconds (default: 345600 = 4 days)
-  timeout: 60,            // Lambda timeout in seconds (default: 30)
-  memory: 512,            // Lambda memory in MB (default: 256)
+  visibilityTimeout: "120s",      // before retry (default: max of Lambda timeout or 30s)
+  retentionPeriod: "1d",          // message retention (default: 4d)
   contentBasedDeduplication: true, // default: true
 })
   .poller({
-    batchSize: 5,    // messages per Lambda invocation (1-10, default: 10)
-    batchWindow: 10, // seconds to wait gathering messages (0-300, default: 0)
+    batchSize: 5,          // messages per Lambda invocation (1-10, default: 10)
+    batchWindow: "10s",    // gather messages before invoking (0s-300s, default: 0)
   })
+  .setup({ memory: 512, timeout: "60s" })   // Lambda memory + timeout
   .onMessage(async ({ message }) => {
     await processImport(message.body);
   });
 ```
 
-The `visibilityTimeout` is automatically set to at least your Lambda timeout — this prevents messages from being retried while still being processed.
+The `visibilityTimeout` is automatically set to at least your Lambda timeout — this prevents messages from being retried while still being processed. Lambda-side settings (`memory`, `timeout`, `permissions`, `logLevel`) go inside `.setup({...})`; queue-level settings (`visibilityTimeout`, `retentionPeriod`, etc.) stay in the options object.
 
 ## See also
 

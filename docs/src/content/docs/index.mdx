@@ -69,35 +69,32 @@ Each tab adds a layer — every export creates real AWS infrastructure.
     import { todos } from "./db";
     import { Command } from "./todo";
 
-    export const todoApi = defineApi({
-      basePath: "/todos",
-      deps: () => ({ todos }),
-    })
+    export const todoApi = defineApi({ basePath: "/todos" })
+      .deps(() => ({ todos }))
       .setup(({ deps }) => ({ todos: deps.todos }))
-      .get("/", async ({ todos }) => ({
+      .get({ path: "/" }, async ({ todos }) => ({
         status: 200,
         body: await todos.query({ pk: "TODO" }),
       }))
-      .get("/{id}", async ({ req, todos }) => {
+      .get({ path: "/{id}" }, async ({ req, todos }) => {
         const todo = await todos.get({ pk: "TODO", sk: req.params.id });
         if (!todo) return { status: 404, body: { error: "Not found" } };
         return { status: 200, body: todo.data };
       })
-      .post("/", async ({ input, todos }) => {
-        const data = Command.parse(input);
-        if (data.action === "create") {
+      .post({ path: "/", input: Command }, async ({ input, todos }) => {
+        if (input.action === "create") {
           const id = crypto.randomUUID();
           await todos.put({
             pk: "TODO", sk: id,
-            data: { id, title: data.title, done: false },
+            data: { tag: "todo", id, title: input.title, done: false },
           });
           return { status: 201, body: { id } };
         }
         await todos.update(
-          { pk: "TODO", sk: data.id },
-          { set: { done: data.done } },
+          { pk: "TODO", sk: input.id },
+          { set: { done: input.done } },
         );
-        return { status: 200, body: { id: data.id, done: data.done } };
+        return { status: 200, body: { id: input.id, done: input.done } };
       });
     ```
   </TabItem>
@@ -106,21 +103,22 @@ Each tab adds a layer — every export creates real AWS infrastructure.
 
     ```typescript
     // src/db.ts
-    import { defineTable, typed, param } from "effortless-aws";
+    import { defineTable } from "effortless-aws";
     import type { Todo } from "./todo";
 
-    export const todos = defineTable({
-      schema: typed<Todo>(),
-      config: { slackUrl: param("slack/webhook") },
-      onRecord: async ({ record, config }) => {
+    export const todos = defineTable<Todo & { tag: "todo" }>()
+      .config(({ defineSecret }) => ({
+        slackUrl: defineSecret({ key: "slack/webhook" }),
+      }))
+      .setup(({ config }) => ({ slackUrl: config.slackUrl }))
+      .onRecord(async ({ record, slackUrl }) => {
         if (record.eventName === "MODIFY" && record.new?.data.done) {
-          await fetch(config.slackUrl, {
+          await fetch(slackUrl, {
             method: "POST",
             body: JSON.stringify({ text: `Done: ${record.new.data.title}` }),
           });
         }
-      },
-    });
+      });
     ```
   </TabItem>
 </Tabs>

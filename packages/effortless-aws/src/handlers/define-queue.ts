@@ -220,15 +220,6 @@ interface QueueBuilder<
  * object.
  *
  * @see {@link https://effortless-aws.website/use-cases/queue | Queue guide}
- *
- * @example
- * ```typescript
- * export const notifications = defineQueue<Notif>({ fifo: true })
- *   .poller({ batchSize: 5, batchWindow: "2s" })
- *   .onMessageBatch(async ({ messages }) => {
- *     await sendAll(messages.map(m => m.body));
- *   })
- * ```
  */
 export function defineQueue<T = unknown>(): QueueBuilder<T>;
 export function defineQueue<T = unknown>(

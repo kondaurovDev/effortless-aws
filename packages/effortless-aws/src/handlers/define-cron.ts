@@ -151,19 +151,7 @@ interface CronBuilder<
 /**
  * Define a cron job — scheduled Lambda invocation via EventBridge Scheduler.
  *
- * @example
- * ```typescript
- * export const sync = defineCron({ schedule: "cron(0 9 * * ? *)" })
- *   .deps(() => ({ orders }))
- *   .config(({ defineSecret }) => ({ apiKey: defineSecret() }))
- *   .include("templates/*.html")
- *   .setup(async ({ deps, config, files }) => ({
- *     db: deps.orders, key: config.apiKey, tpl: files,
- *   }), { memory: 512 })
- *   .onTick(async ({ db, key, tpl }) => {
- *     const html = tpl.read("templates/report.html")
- *   })
- * ```
+ * @see {@link https://effortless-aws.website/definitions#definecron | Cron reference}
  */
 export function defineCron(options: CronOptions): CronBuilder {
   const { schedule, timezone } = options;

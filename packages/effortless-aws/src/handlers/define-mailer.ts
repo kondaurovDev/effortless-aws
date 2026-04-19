@@ -25,28 +25,6 @@ export type MailerHandler = {
  * Add them to your DNS provider to verify the domain.
  *
  * @see {@link https://effortless-aws.website/use-cases/email | Email guide}
- *
- * @param options - Mailer configuration with the domain to send from
- * @returns Handler object used by the deployment system and as a `deps` value
- *
- * @example Basic mailer with HTTP handler
- * ```typescript
- * export const mailer = defineMailer({ domain: "myapp.com" });
- *
- * export const api = defineApi({
- *   basePath: "/signup",
- *   deps: { mailer },
- *   post: async ({ req, deps }) => {
- *     await deps.mailer.send({
- *       from: "hello@myapp.com",
- *       to: req.body.email,
- *       subject: "Welcome!",
- *       html: "<h1>Hi!</h1>",
- *     });
- *     return { status: 200, body: { ok: true } };
- *   },
- * });
- * ```
  */
 export const defineMailer = () => (options: MailerConfig): MailerHandler => ({
   __brand: "effortless-mailer",

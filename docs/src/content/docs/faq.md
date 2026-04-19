@@ -10,7 +10,7 @@ description: Common questions about Effortless AWS — deployment, pricing, cold
 A TypeScript framework for AWS Lambda. You export handler functions — Effortless creates Lambda functions, DynamoDB tables, API Gateway routes, IAM roles, and everything else automatically. No YAML, no CloudFormation, no state files.
 
 ```typescript
-export const orders = defineTable<Order>();
+export const orders = defineTable<Order>().build();
 ```
 
 This single export creates: a DynamoDB table, a typed client for `.put()` / `.get()`, and IAM permissions when used as a dependency. See [Why Effortless?](/why-effortless/) for the full story.
@@ -161,9 +161,9 @@ Export a `defineTable` call. That's it.
 ```typescript
 import { defineTable } from "effortless-aws";
 
-type User = { id: string; email: string; name: string };
+type User = { tag: "user"; email: string; name: string };
 
-export const users = defineTable<User>();
+export const users = defineTable<User>().build();
 ```
 
 This creates the table, a typed client (`.put()`, `.get()`, `.delete()`), and wires IAM permissions when used as `deps`. See [Database guide](/use-cases/database/).
@@ -173,7 +173,7 @@ This creates the table, a typed client (`.put()`, `.get()`, `.delete()`), and wi
 Yes:
 
 ```typescript
-export const messages = defineTable<Message>();
+export const messages = defineTable<Message>().build();
 ```
 
 ### How do I react to data changes?
@@ -181,13 +181,12 @@ export const messages = defineTable<Message>();
 Add `onRecord` to process each change, or `onRecordBatch` for batch processing:
 
 ```typescript
-export const orders = defineTable<Order>({
-  onRecord: async ({ record }) => {
-    if (record.eventName === "INSERT") {
-      console.log("New order:", record.new!.id);
+export const orders = defineTable<Order>()
+  .onRecord(async ({ record }) => {
+    if (record.eventName === "INSERT" && record.new) {
+      console.log("New order:", record.new.pk);
     }
-  },
-});
+  });
 ```
 
 This creates a DynamoDB Stream and a Lambda that processes changes in real time. See [Database — Reacting to data changes](/use-cases/database/#reacting-to-data-changes).
@@ -199,12 +198,10 @@ Yes, via `deps`. This automatically wires IAM permissions:
 ```typescript
 import { orders } from "./db";
 
-export const api = defineApi({
-  basePath: "/orders",
-  deps: () => ({ orders }),
-})
+export const api = defineApi({ basePath: "/orders" })
+  .deps(() => ({ orders }))
   .setup(({ deps }) => ({ orders: deps.orders }))
-  .get("/", async ({ orders }) => {
+  .get({ path: "/" }, async ({ orders }) => {
     // orders has typed .get(), .put(), .delete()
   });
 ```
@@ -215,18 +212,17 @@ export const api = defineApi({
 
 ### How do I validate request bodies?
 
-Use the `schema` option with any validation library (e.g. Zod):
+Pass an `input` schema (any Standard Schema validator like Zod) to the route def — effortless validates the body and you get a typed `input`:
 
 ```typescript
 import { z } from "zod";
+import { defineApi } from "effortless-aws";
 
-const userSchema = (input: unknown) =>
-  z.object({ email: z.string(), name: z.string() }).parse(input);
+const User = z.object({ email: z.string(), name: z.string() });
 
 export const users = defineApi({ basePath: "/users" })
-  .post("/", async ({ input }) => {
-    const data = userSchema(input);
-    // data.email and data.name are typed and validated
+  .post({ path: "/", input: User }, async ({ input }) => {
+    // input is typed as { email: string, name: string }
   });
 ```
 
@@ -238,24 +234,24 @@ They come from `req.params`:
 
 ```typescript
 export const users = defineApi({ basePath: "/users" })
-  .get("/{id}", async ({ req }) => {
+  .get({ path: "/{id}" }, async ({ req }) => {
     const userId = req.params.id;
   });
 ```
 
 ### Can I use secrets (API keys, tokens)?
 
-Yes, via `param()` which reads from SSM Parameter Store:
+Yes, via `.config(({ defineSecret }) => ...)` which reads from SSM Parameter Store:
 
 ```typescript
-import { param } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const checkout = defineApi({
-  basePath: "/checkout",
-  config: { stripeKey: param("stripe/secret-key") },
-})
+export const checkout = defineApi({ basePath: "/checkout" })
+  .config(({ defineSecret }) => ({
+    stripeKey: defineSecret({ key: "stripe/secret-key" }),
+  }))
   .setup(({ config }) => ({ stripeKey: config.stripeKey }))
-  .post("/", async ({ stripeKey }) => {
+  .post({ path: "/" }, async ({ stripeKey }) => {
     // stripeKey fetched once at cold start, cached after
   });
 ```
@@ -284,11 +280,9 @@ Other AWS configuration services and why they're not used:
 If you need Secrets Manager for a specific use case (e.g., RDS credentials with rotation), you can call it directly from your handler code with the appropriate `permissions`:
 
 ```typescript
-export const data = defineApi({
-  basePath: "/data",
-  permissions: ["secretsmanager:GetSecretValue"],
-})
-  .get("/", async ({ req }) => {
+export const data = defineApi({ basePath: "/data" })
+  .setup({ permissions: ["secretsmanager:GetSecretValue"] })
+  .get({ path: "/" }, async ({ req }) => {
     // Call Secrets Manager directly when you need rotation support
   });
 ```
@@ -303,7 +297,7 @@ Yes, two options:
 
 **SSR framework** (via CloudFront + Lambda Function URL + S3):
 ```typescript
-export const app = defineApp({
+export const app = defineApp()({
   server: ".output/server",
   assets: ".output/public",
   build: "nuxt build",
@@ -315,8 +309,8 @@ export const app = defineApp({
 export const site = defineStaticSite({
   dir: "dist",
   build: "npm run build",
-  spa: true,
-});
+  errorPage: "index.html",   // SPA mode
+}).build();
 ```
 
 See [Website guide](/use-cases/web-app/) for the full comparison.

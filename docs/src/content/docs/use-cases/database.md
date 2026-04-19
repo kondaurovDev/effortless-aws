@@ -31,7 +31,7 @@ import { defineTable } from "effortless-aws";
 
 type User = { tag: string; email: string; name: string; createdAt: string };
 
-export const users = defineTable<User>();
+export const users = defineTable<User>().build();
 ```
 
 After deploy, you get a DynamoDB table named `{project}-{stage}-users`. Other handlers can reference this table via `deps` and get a typed client for `.put()`, `.get()`, `.delete()`, `.update()`, and `.query()`.
@@ -64,7 +64,7 @@ type Order = { type: "order"; amount: number; status: string };
 
 export const orders = defineTable<Order>({
   tagField: "type",  // → extracts data.type as the DynamoDB tag attribute
-});
+}).build();
 ```
 
 ## Multiple entity types
@@ -118,8 +118,8 @@ import { defineTable } from "effortless-aws";
 
 type Order = { tag: string; product: string; amount: number; status: string };
 
-export const orders = defineTable<Order>({
-  onRecord: async ({ record }) => {
+export const orders = defineTable<Order>()
+  .onRecord(async ({ record }) => {
     if (record.eventName === "INSERT" && record.new) {
       console.log(`New order: ${record.new.data.product} — $${record.new.data.amount}`);
       // Send confirmation email, update analytics, notify warehouse...
@@ -130,8 +130,7 @@ export const orders = defineTable<Order>({
     if (record.eventName === "REMOVE") {
       // Clean up related resources
     }
-  },
-});
+  });
 ```
 
 The `record` follows the `TableItem<T>` structure:
@@ -154,26 +153,25 @@ import { defineTable } from "effortless-aws";
 
 type ClickEvent = { tag: string; page: string; userId: string; timestamp: string };
 
-export const clickEvents = defineTable<ClickEvent>({
-  batchSize: 100,
-  onRecordBatch: async ({ records }) => {
+export const clickEvents = defineTable<ClickEvent>()
+  .stream({ batchSize: 100 })
+  .onRecordBatch(async ({ records }) => {
     const inserts = records
-      .filter(r => r.eventName === "INSERT")
-      .map(r => r.new!.data);
+      .filter((r) => r.eventName === "INSERT")
+      .map((r) => r.new!.data);
 
     if (inserts.length > 0) {
       await bulkIndexToElasticsearch(inserts);
     }
-  },
-});
+  });
 ```
 
 If the handler throws, all records in the batch are reported as failed. For partial failure support, return `{ failures: string[] }` with the sequence numbers of failed records:
 
 ```typescript
-export const payments = defineTable<Payment>({
-  batchSize: 50,
-  onRecordBatch: async ({ records }) => {
+export const payments = defineTable<Payment>()
+  .stream({ batchSize: 50 })
+  .onRecordBatch(async ({ records }) => {
     const failures: string[] = [];
     for (const record of records) {
       try {
@@ -183,8 +181,7 @@ export const payments = defineTable<Payment>({
       }
     }
     if (failures.length > 0) return { failures };
-  },
-});
+  });
 ```
 
 ## Updating without reading
@@ -265,12 +262,10 @@ The real power of `defineTable` is how it composes with other handlers. Any HTTP
 import { defineApi } from "effortless-aws";
 import { users } from "./users";
 
-export const getUser = defineApi({
-  basePath: "/users",
-  deps: () => ({ users }),
-})
+export const getUser = defineApi({ basePath: "/users" })
+  .deps(() => ({ users }))
   .setup(({ deps }) => ({ users: deps.users }))
-  .get("/{id}", async ({ req, users }) => {
+  .get({ path: "/{id}" }, async ({ req, users }) => {
     const user = await users.get({
       pk: `USER#${req.params.id}`,
       sk: "PROFILE",
@@ -287,7 +282,7 @@ export const getUser = defineApi({
 Sometimes you need a table but don't need stream processing — it's just a data store. Skip the `onRecord`/`onRecordBatch` handler and you get a table without a stream Lambda.
 
 ```typescript
-export const cache = defineTable<CacheEntry>();
+export const cache = defineTable<CacheEntry>().build();
 // No onRecord — just a table. Reference it with deps from other handlers.
 ```
 

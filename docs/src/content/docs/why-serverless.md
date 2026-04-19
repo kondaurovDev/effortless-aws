@@ -140,8 +140,8 @@ Effortless auto-wires the connective tissue that you'd normally configure manual
 
 - **IAM roles and policies** — every Lambda gets its own role with least-privilege permissions
 - **CloudWatch Logs** — attached to every handler automatically
-- **DynamoDB access** — table handlers get full access; `deps: () => ({ orders })` grants access to dependent tables
-- **SSM access** — `config: { key: param("...") }` grants `ssm:GetParameter` and `ssm:GetParameters`
+- **DynamoDB access** — table handlers get full access; `.deps(() => ({ orders }))` grants access to dependent tables
+- **SSM access** — `.config(({ defineSecret }) => ({ key: defineSecret({...}) }))` grants `ssm:GetParameter` and `ssm:GetParameters`
 - **SQS access** — queue handlers get permissions to receive and delete messages
 - **Lambda Function URLs** — HTTPS endpoints with CORS attached to your Lambda functions
 - **Event source mappings** — DynamoDB Streams → Lambda and SQS → Lambda with partial batch failure reporting

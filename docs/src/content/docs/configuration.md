@@ -105,39 +105,46 @@ export default defineConfig({
 
 ## Per-handler Overrides
 
-Every handler accepts `memory`, `timeout`, and `permissions` to override project defaults. You can also add IAM permissions for specific AWS services a handler needs to access.
+Every Lambda-backed handler accepts per-Lambda overrides (`memory`, `timeout`, `permissions`, `logLevel`) via `.setup({...})`. Pass an options object to `.setup()` directly for settings-only, or add it as a second argument after a setup factory function.
 
 ```typescript
 import { defineApi } from "effortless-aws";
 
-export const processImage = defineApi({
-  basePath: "/images",
-  memory: 1024,                    // needs more memory for image processing
-  timeout: 120,                    // 2 minutes (in seconds)
-  permissions: ["s3:GetObject", "s3:PutObject"],
-})
-  .post("/resize", async ({ req }) => {
+export const processImage = defineApi({ basePath: "/images" })
+  .setup({
+    memory: 1024,                              // needs more memory for image processing
+    timeout: "2m",                             // 2 minutes
+    permissions: ["s3:GetObject", "s3:PutObject"],
+  })
+  .post({ path: "/resize" }, async ({ req }) => {
     // ...
   });
 ```
 
+If you also need cold-start init, pass both a factory and settings:
+
+```typescript
+.setup(
+  async ({ deps }) => ({ bucket: deps.images }),
+  { memory: 1024, timeout: "2m" },
+)
+```
+
 ### `memory` and `timeout`
 
-Override the project defaults for a specific handler. Timeout is in **seconds** at the handler level (unlike the config file which uses human-readable strings).
+Override the project defaults for a specific handler. Timeout accepts a `Duration` — a plain number of seconds or a string like `"30s"`, `"2m"`, `"1h"`.
 
 ### `permissions`
 
 Additional IAM permissions for the Lambda's execution role. Use the `service:action` shorthand:
 
 ```typescript
-permissions: [
-  "s3:GetObject",
-  "s3:PutObject",
-  "ses:SendEmail",
-]
+.setup({
+  permissions: ["s3:GetObject", "s3:PutObject", "ses:SendEmail"],
+})
 ```
 
-These are added on top of any permissions Effortless manages automatically (e.g., DynamoDB access for `deps`, SSM access for `params`).
+These are added on top of any permissions Effortless manages automatically (e.g., DynamoDB access for `deps`, SSM access for `config`).
 
 :::note
 Effortless auto-manages permissions for built-in features. You only need `permissions` for AWS services you call directly in your handler code.
@@ -154,7 +161,7 @@ Controls the verbosity of structured logs emitted to CloudWatch. Defaults to `"i
 | `"debug"` | Info + input/output args (truncated) |
 
 ```typescript
-logLevel: "debug"   // log everything including input/output
+.setup({ logLevel: "debug" })   // log everything including input/output
 ```
 
 Developer `console.*` calls are also filtered by this level — `console.debug()` is suppressed at `"info"`, and `console.log()`/`console.info()` are suppressed at `"error"`. `console.error` and `console.warn` always pass through.

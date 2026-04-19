@@ -37,27 +37,27 @@ Every `export const x = define*({...})` creates AWS resources. The export name b
 
 ### deps = automatic IAM wiring
 
-Reference other handlers via `deps: () => ({ orders, uploads, mailer })`. The framework injects typed clients and creates IAM permissions automatically.
+Reference other handlers via `.deps(() => ({ orders, uploads, mailer }))`. The framework injects typed clients and creates IAM permissions automatically.
 
 ### config = SSM secrets
 
-Use `defineSecret()` inside a config callback to declare SSM secrets:
+Use `defineSecret()` inside the `.config()` builder to declare SSM secrets:
 
 ```typescript
-config: ({ defineSecret }) => ({
+.config(({ defineSecret }) => ({
   apiKey: defineSecret(),                          // string, key inferred from property name
   port: defineSecret({ transform: Number }),       // number
   config: defineSecret({ transform: JSON.parse }), // parsed JSON
   token: defineSecret({ generate: "hex:32" }),     // auto-generated on first deploy
   id: defineSecret({ generate: "uuid" }),          // auto-generated UUID
-})
+}))
 ```
 
 SSM path: `/${project}/${stage}/${key}`. The legacy `param()` function is deprecated — use `defineSecret()` instead.
 
 ### setup = cold-start factory
 
-`setup: async ({ deps, config }) => ({ db: createPool(config.dbUrl) })` runs once per cold start. Return value properties are **spread directly into callback args** (no `ctx` wrapper). `deps`, `config`, and `files` are available in `setup` only — not in callbacks.
+`.setup(async ({ deps, config }) => ({ db: createPool(config.dbUrl) }))` runs once per cold start. Return value properties are **spread directly into callback args** (no `ctx` wrapper). `deps`, `config`, and `files` are available in `.setup()` only — not in callbacks. Pass Lambda options as a second arg: `.setup(fn, { memory: 512 })`, or alone: `.setup({ memory: 512 })`.
 
 ### schema = validation
 
@@ -151,8 +151,9 @@ export const orders = defineTable<Order>().build();
 export const orders = defineTable<Order>({ tagField: "type" }).build();
 
 // With stream handler (builder chain)
-export const orders = defineTable<Order>({ batchSize: 100, concurrency: 5 })
+export const orders = defineTable<Order>()
   .deps(() => ({ customers }))
+  .stream({ batchSize: 100, concurrency: 5 })
   .setup(({ deps }) => ({ customers: deps.customers }))
   .onRecord(async ({ record, customers }) => {
     // record.eventName: "INSERT" | "MODIFY" | "REMOVE"
@@ -162,7 +163,8 @@ export const orders = defineTable<Order>({ batchSize: 100, concurrency: 5 })
 // OR: .onRecordBatch (return { failures: string[] } for partial batch failure)
 ```
 
-**Table options:** `billingMode`, `streamView`, `batchSize`, `batchWindow`, `startingPosition`, `concurrency` (parallel processing, default 1), `tagField` (custom discriminant field name, default "tag").
+**Table options:** `billingMode`, `tagField` (custom discriminant field name, default "tag"), `schema` (Standard Schema validator).
+**Stream options** (via `.stream({...})`): `streamView`, `batchSize`, `batchWindow`, `startingPosition`, `concurrency` (parallel processing, default 1), `maxRetries`.
 
 **TableClient API** (via `deps`):
 
@@ -192,10 +194,10 @@ type OrderEvent = { orderId: string; action: "created" | "shipped" };
 
 export const orderQueue = defineQueue<OrderEvent>({
   fifo: true,
-  visibilityTimeout: 120,
+  visibilityTimeout: "120s",
   contentBasedDeduplication: true,
 })
-  .poller({ batchSize: 10, batchWindow: 10 })
+  .poller({ batchSize: 10, batchWindow: "10s" })
   .onMessage(async ({ message }) => {
     // message.body — typed as OrderEvent
     // message.messageId, message.messageGroupId
@@ -205,7 +207,7 @@ export const orderQueue = defineQueue<OrderEvent>({
 
 **Queue options:** `fifo` (enable FIFO semantics), `visibilityTimeout`, `retentionPeriod`, `delay`, `contentBasedDeduplication`, `maxReceiveCount`.
 
-**Poller options** (via `.poller({ ... })`): `batchSize` (1-10), `batchWindow` (seconds).
+**Poller options** (via `.poller({ ... })`): `batchSize` (1-10), `batchWindow` (Duration — `"5s"`, `"1m"`, etc.).
 
 **Sending** (via `deps`):
 
@@ -273,7 +275,8 @@ export const sync = defineCron({ schedule: "cron(0 9 * * ? *)", timezone: "Europ
 Creates SES email identity with DKIM. Resource-only, used via `deps`.
 
 ```typescript
-export const mailer = defineMailer({ domain: "myapp.com" });
+// defineMailer is curried — call defineMailer() to get the config function
+export const mailer = defineMailer()({ domain: "myapp.com" });
 // Via deps: await mailer.send({ from, to, subject, html?, text? })
 ```
 
@@ -369,13 +372,14 @@ export default defineMcp({ name: "my-tools", version: "1.0.0", instructions: "A 
 Creates CloudFront + Lambda Function URL + S3 for SSR frameworks.
 
 ```typescript
-export const frontend = defineApp({
-  server: ".output/server",   // directory with index.mjs handler
-  assets: ".output/public",   // static assets → S3
+// defineApp is curried — call defineApp() to get the config function
+export const frontend = defineApp()({
+  server: ".output/server",         // directory with index.mjs handler
+  assets: ".output/public",         // static assets → S3
   build: "nuxt build",
-  path: "/",                  // base URL path (default: "/")
-  domain: "app.example.com",  // optional (needs ACM cert in us-east-1)
-  memory: 1024,
+  path: "/",                        // base URL path (default: "/")
+  domain: "app.example.com",        // optional (needs ACM cert in us-east-1)
+  lambda: { memory: 1024 },         // Lambda settings live under `lambda`
   routes: { "/api/*": apiHandler }, // proxy API routes via CloudFront
 });
 // Stage-specific: domain: { prod: "app.example.com", staging: "staging.example.com" }
@@ -490,13 +494,13 @@ Handler callbacks receive a single object (or positional args for `defineWorker`
 ### config with defineSecret
 
 ```typescript
-config: ({ defineSecret }) => ({
+.config(({ defineSecret }) => ({
   apiKey: defineSecret(),                                  // string
   port: defineSecret({ transform: Number }),               // number
   config: defineSecret({ transform: JSON.parse }),         // parsed JSON
   secret: defineSecret({ generate: "hex:32" }),            // auto-generate on first deploy
   id: defineSecret({ generate: "uuid" }),                  // auto-generate UUID
-})
+}))
 ```
 
 The legacy `param("key")` and `param("key", transform)` still work but are deprecated.

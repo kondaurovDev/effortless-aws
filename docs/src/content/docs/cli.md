@@ -202,7 +202,7 @@ eff cleanup --roles --all
 
 Manage SSM Parameter Store values used by your handlers. See [Architecture → Three-Phase Pattern](/architecture/#three-phase-pattern) for how config params flow from code to runtime.
 
-Handlers declare config parameters via `config: { stripeKey: param("stripe/secret-key") }`. The CLI discovers all declared parameters from your code and helps you create, list, and update them in AWS.
+Handlers declare config parameters via `.config(({ defineSecret }) => ({ stripeKey: defineSecret({ key: "stripe/secret-key" }) }))`. The CLI discovers all declared parameters from your code and helps you create, list, and update them in AWS.
 
 ```bash
 # Interactive setup — prompts for each missing parameter
@@ -221,7 +221,7 @@ eff config set stripe/secret-key
 eff config [options]
 ```
 
-Discovers all `param()` declarations from your handlers, checks which SSM parameters exist, and interactively prompts for missing ones. Each value is stored as `SecureString`.
+Discovers all `defineSecret()` declarations from your handlers, checks which SSM parameters exist, and interactively prompts for missing ones. Each value is stored as `SecureString`.
 
 ```
 Missing parameters (my-service / dev)

@@ -299,8 +299,8 @@ interface McpBuilder<
  * Creates a Lambda-backed MCP server that exposes tools, resources, and prompts
  * for AI models and MCP-compatible clients via Streamable HTTP (JSON-RPC over POST).
  *
- * @see https://modelcontextprotocol.io/specification/2025-03-26 — MCP specification
- * @see https://effortless-aws.com/use-cases/mcp-server/ — full documentation with examples
+ * @see {@link https://effortless-aws.website/use-cases/mcp-server | MCP Server guide}
+ * @see {@link https://modelcontextprotocol.io/specification/2025-03-26 | MCP specification}
  */
 export function defineMcp(options: McpOptions): McpBuilder {
   const spec: McpConfig = {

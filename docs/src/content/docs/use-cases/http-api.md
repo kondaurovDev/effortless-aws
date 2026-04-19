@@ -16,7 +16,7 @@ You want to return a JSON response at `GET /hello/{name}`.
 import { defineApi } from "effortless-aws";
 
 export const hello = defineApi({ basePath: "/hello" })
-  .get("/{name}", async ({ req }) => ({
+  .get({ path: "/{name}" }, async ({ req }) => ({
     status: 200,
     body: { message: `Hello, ${req.params.name}!` },
   }));
@@ -29,7 +29,7 @@ The `req` object gives you everything from the HTTP request:
 - `req.query` — query string parameters
 - `req.headers` — request headers
 
-For POST/PUT/PATCH routes, the parsed request body is available as `input`. Routes are defined using chained method calls (`.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`) with path patterns as the first argument.
+For POST/PUT/PATCH routes, the parsed request body is available as `input`. Routes are defined using chained method calls (`.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`). Each method takes a `RouteDef` object (`{ path, input?, public?, cache? }`) as the first argument and the handler as the second.
 
 ## CRUD with a database
 
@@ -45,23 +45,21 @@ import { defineTable, defineApi } from "effortless-aws";
 
 type Task = { tag: string; title: string; done: boolean; createdAt: string };
 
-export const tasks = defineTable<Task>();
+export const tasks = defineTable<Task>().build();
 
-export default defineApi({
-  basePath: "/tasks",
-  deps: () => ({ tasks }),
-})
+export default defineApi({ basePath: "/tasks" })
+  .deps(() => ({ tasks }))
   .setup(({ deps }) => ({ tasks: deps.tasks }))
-  .get("/", async ({ tasks }) => ({
+  .get({ path: "/" }, async ({ tasks }) => ({
     status: 200,
     body: await tasks.query({ pk: "TASKS", sk: { begins_with: "TASK#" } }),
   }))
-  .get("/{id}", async ({ req, tasks }) => {
+  .get({ path: "/{id}" }, async ({ req, tasks }) => {
     const item = await tasks.get({ pk: `TASK#${req.params.id}`, sk: "DETAIL" });
     if (!item) return { status: 404, body: { error: "Not found" } };
     return { status: 200, body: { id: req.params.id, ...item.data } };
   })
-  .post("/create", async ({ input, tasks }) => {
+  .post({ path: "/create" }, async ({ input, tasks }) => {
     const { title } = input as { title: string };
     const id = crypto.randomUUID();
     await tasks.put({
@@ -85,25 +83,23 @@ Notice that `deps` and `config` are only available inside `.setup()`, not in ind
 - **Fewer resources** — one Lambda, one Function URL, one IAM role
 - **Simpler deploys** — one bundle to build and upload
 
-Routes are defined using chained method calls (`.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`) with path patterns as the first argument, and routing is handled internally.
+Routes are defined via chained method calls (`.get()`, `.post()`, `.put()`, `.delete()`, `.patch()`). Each method takes a `RouteDef` object (`{ path, input?, public?, cache? }`) and the handler; routing is dispatched internally.
 
 ## Using secrets
 
 Your API calls Stripe, SendGrid, or another service that requires an API key. You don't want to hardcode secrets or manage environment variables.
 
-With `param()`, you reference an SSM Parameter Store key. Effortless fetches the value once at Lambda cold start, caches it, and injects it via `.setup()`. IAM permissions for SSM are added automatically.
+With `.config(({ defineSecret }) => ...)`, you reference an SSM Parameter Store key. Effortless fetches the value once at Lambda cold start, caches it, and injects it via `.setup()`. IAM permissions for SSM are added automatically.
 
 ```typescript
-import { defineApi, param } from "effortless-aws";
+import { defineApi } from "effortless-aws";
 
-export const payments = defineApi({
-  basePath: "/payments",
-  config: {
-    stripeKey: param("stripe/secret-key"),
-  },
-})
+export const payments = defineApi({ basePath: "/payments" })
+  .config(({ defineSecret }) => ({
+    stripeKey: defineSecret({ key: "stripe/secret-key" }),
+  }))
   .setup(({ config }) => ({ stripeKey: config.stripeKey }))
-  .post("/charge", async ({ input, stripeKey }) => {
+  .post({ path: "/charge" }, async ({ input, stripeKey }) => {
     const { amount, currency } = input as { amount: number; currency: string };
     // stripeKey is fetched from SSM at cold start, cached across invocations
     const stripe = new Stripe(stripeKey);

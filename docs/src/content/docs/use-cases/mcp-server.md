@@ -7,6 +7,8 @@ You want to expose your backend to AI models — Claude, ChatGPT, Cursor, or any
 
 With `defineMcp` you declare what your server offers, export the handler, and get a production MCP endpoint backed by a Lambda Function URL. One Lambda handles all MCP protocol methods — initialize, tools, resources, prompts — over Streamable HTTP (JSON-RPC over POST).
 
+Each tool, resource, and prompt is registered individually via singular builder methods: `.tool(def, handler)`, `.resource(def, handler)`, `.prompt(def, handler)`. All three are chainable and can be called repeatedly.
+
 ## A simple MCP server
 
 You want to expose a "hello" tool that AI models can call.
@@ -19,36 +21,44 @@ export const greeter = defineMcp({
   name: "greeter",
   instructions: "A friendly greeter. Use say_hello to greet someone by name.",
 })
-  .tools(() => ({
-    say_hello: {
+  .tool(
+    {
+      name: "say_hello",
       description: "Say hello to someone",
       input: {
         type: "object",
         properties: { name: { type: "string" } },
         required: ["name"],
       },
-      handler: async (input) => ({
-        content: [{ type: "text", text: `Hello, ${input.name}!` }],
-      }),
     },
-  }));
+    async (input) => ({
+      content: [{ type: "text", text: `Hello, ${input.name}!` }],
+    }),
+  );
 ```
 
 After `eff deploy`, you get a Function URL. Any MCP client can connect and discover the `say_hello` tool.
 
 ## Tools
 
-Tools are functions that the AI model decides when to call. Each tool has a `description` (how the model understands it), an `input` (JSON Schema for parameters), and a `handler` (your code).
+Tools are functions the AI model decides when to call. Each tool has a `description` (how the model understands it), an `input` (JSON Schema — raw `McpInputSchema` or a `StandardJSONSchemaV1` like Zod's `z.object(...)`), and a handler (your code).
 
 ```typescript
+import { defineMcp, defineTable } from "effortless-aws";
+
+type Task = { tag: "task"; title: string; priority: "low" | "medium" | "high" };
+
+export const tasksTable = defineTable<Task>().build();
+
 export const api = defineMcp({
   name: "tasks",
   instructions: "Task manager. Use create_task to add tasks with title and priority.",
 })
   .deps(() => ({ tasks: tasksTable }))
   .setup(({ deps }) => ({ db: deps.tasks }))
-  .tools(({ db }) => ({
-    create_task: {
+  .tool(
+    {
+      name: "create_task",
       description: "Create a new task",
       input: {
         type: "object",
@@ -58,28 +68,35 @@ export const api = defineMcp({
         },
         required: ["title"],
       },
-      handler: async (input) => {
-        const id = crypto.randomUUID();
-        await db.put({
-          pk: "tasks", sk: `task#${id}`,
-          data: { tag: "task", title: input.title, priority: input.priority ?? "medium" },
-        });
-        return { content: [{ type: "text", text: `Created task ${id}` }] };
-      },
     },
-  }));
+    async (input, { db }) => {
+      const id = crypto.randomUUID();
+      await db.put({
+        pk: "tasks", sk: `task#${id}`,
+        data: { tag: "task", title: input.title, priority: input.priority ?? "medium" },
+      });
+      return { content: [{ type: "text", text: `Created task ${id}` }] };
+    },
+  );
 ```
 
 Tool handlers return `McpToolResult` — an array of content blocks (`text`, `image`, or `resource`). If something goes wrong, return `isError: true`:
 
 ```typescript
-handler: async (input) => {
-  const item = await db.get({ pk: input.id, sk: "profile" });
-  if (!item) {
-    return { content: [{ type: "text", text: "Not found" }], isError: true };
-  }
-  return { content: [{ type: "text", text: JSON.stringify(item.data) }] };
-}
+.tool(
+  {
+    name: "get_task",
+    description: "Get a task by id",
+    input: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+  },
+  async (input, { db }) => {
+    const item = await db.get({ pk: input.id, sk: "profile" });
+    if (!item) {
+      return { content: [{ type: "text", text: "Not found" }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(item.data) }] };
+  },
+);
 ```
 
 ## Resources
@@ -89,36 +106,40 @@ Resources are data that clients can pull into the model's context. They're read-
 **Static resources** have a fixed URI:
 
 ```typescript
-.resources(() => ({
-  "resource://schema": {
+.resource(
+  {
+    uri: "resource://schema",
     name: "Database Schema",
     description: "Available fields and types",
     mimeType: "application/json",
-    handler: () => ({
-      uri: "resource://schema",
-      text: JSON.stringify({ pk: "string", sk: "string", data: "object" }),
-    }),
   },
-}))
+  () => ({
+    uri: "resource://schema",
+    text: JSON.stringify({ pk: "string", sk: "string", data: "object" }),
+  }),
+)
 ```
 
 **Resource templates** use URI parameters (RFC 6570) for dynamic data:
 
 ```typescript
-.resources(({ db }) => ({
-  "resource://users/{id}": {
+.resource(
+  {
+    uri: "resource://users/{id}",
     name: "User Profile",
     description: "Fetch a user by ID",
-    handler: async (params) => {
-      const user = await db.get({ pk: params.id, sk: "profile" });
-      return {
-        uri: `resource://users/${params.id}`,
-        text: user ? JSON.stringify(user.data) : "not found",
-      };
-    },
   },
-}))
+  async (params, { db }) => {
+    const user = await db.get({ pk: params.id, sk: "profile" });
+    return {
+      uri: `resource://users/${params.id}`,
+      text: user ? JSON.stringify(user.data) : "not found",
+    };
+  },
+)
 ```
+
+Pass `params` in the resource def (a Standard Schema like Zod) to get typed params in the handler — otherwise `params` is `Record<string, string>`.
 
 Resources can return text or binary (`blob` with base64-encoded data). Handlers can return a single content object or an array.
 
@@ -127,27 +148,28 @@ Resources can return text or binary (`blob` with base64-encoded data). Handlers 
 Prompts are reusable templates that the client sends to its own LLM — your server doesn't run any model. Use prompts to share expert knowledge, domain-specific instructions, or multi-step workflows.
 
 ```typescript
-.prompts(() => ({
-  code_review: {
+.prompt(
+  {
+    name: "code_review",
     description: "Review code for best practices",
-    arguments: [
+    args: [
       { name: "code", description: "The code to review", required: true },
       { name: "language", description: "Programming language" },
     ],
-    handler: async (args) => ({
-      messages: [{
-        role: "user",
-        content: {
-          type: "text",
-          text: `You are a senior ${args.language ?? "TypeScript"} developer. Review this code for bugs, performance, and best practices:\n\n${args.code}`,
-        },
-      }],
-    }),
   },
-}))
+  async (args) => ({
+    messages: [{
+      role: "user",
+      content: {
+        type: "text",
+        text: `You are a senior ${args.language ?? "TypeScript"} developer. Review this code for bugs, performance, and best practices:\n\n${args.code}`,
+      },
+    }],
+  }),
+)
 ```
 
-Clients discover prompts via `prompts/list` and present them to users (e.g., as slash commands in Claude).
+If the handler returns a plain string, it's auto-wrapped as a user message. Clients discover prompts via `prompts/list` and present them to users (e.g., as slash commands in Claude).
 
 ## Server instructions
 
@@ -164,7 +186,7 @@ Good instructions help the model decide when to use your MCP server versus other
 
 ## Authentication
 
-MCP servers are public by default. To restrict access, use `enableAuth` in `.setup()` with a Bearer token — the same pattern as `defineApi`.
+MCP servers are public by default. To restrict access, chain `.auth(...)` — the same builder used by `defineApi`. Pair it with a secret in `.config(...)` for the token:
 
 ```typescript
 export const mcp = defineMcp({
@@ -174,18 +196,16 @@ export const mcp = defineMcp({
   .config(({ defineSecret }) => ({
     token: defineSecret({ key: "mcp-token", generate: "hex:32" }),
   }))
-  .setup(({ config, enableAuth }) => ({
-    auth: enableAuth({
-      secret: config.token,
-      apiToken: {
-        verify: async (value) => {
-          if (value === config.token) return { role: "mcp-client" };
-          return null;
-        },
-      },
-    }),
+  .auth<{ role: string }>(({ config }) => ({
+    secret: config.token,
+    apiToken: {
+      verify: (value) => (value === config.token ? { role: "mcp-client" } : null),
+    },
   }))
-  .tools(() => ({ /* ... */ }));
+  .tool(
+    { name: "protected_tool", description: "...", input: { type: "object", properties: {} } },
+    async () => ({ content: [{ type: "text", text: "ok" }] }),
+  );
 ```
 
 The token is auto-generated on first deploy and stored in SSM Parameter Store. Unauthenticated requests receive HTTP 401, per the [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-03-26/basic/authorization).
@@ -215,63 +235,67 @@ import { defineMcp, defineTable } from "effortless-aws";
 
 type Contact = { tag: "contact"; name: string; email: string; company?: string };
 
-export const db = defineTable<Contact>().build();
+export const contacts = defineTable<Contact>().build();
 
 export const mcp = defineMcp({
   name: "contacts",
   version: "1.0.0",
   instructions: "Contacts CRM. Manage contacts and generate outreach messages.",
 })
-  .deps(() => ({ db }))
+  .deps(() => ({ contacts }))
   .config(({ defineSecret }) => ({
     token: defineSecret({ key: "mcp-token", generate: "hex:32" }),
   }))
-  .setup(({ deps, config, enableAuth }) => ({
-    db: deps.db,
-    auth: enableAuth({
-      secret: config.token,
-      apiToken: {
-        verify: async (t) => t === config.token ? { role: "client" } : null,
-      },
-    }),
+  .auth<{ role: string }>(({ config }) => ({
+    secret: config.token,
+    apiToken: {
+      verify: (t) => (t === config.token ? { role: "client" } : null),
+    },
   }))
-  .resources(({ db }) => ({
-    "resource://schema": {
+  .setup(({ deps }) => ({ db: deps.contacts }))
+  .resource(
+    {
+      uri: "resource://schema",
       name: "Schema",
       mimeType: "application/json",
-      handler: () => ({
-        uri: "resource://schema",
-        text: JSON.stringify({ name: "string", email: "string", company: "string?" }),
-      }),
     },
-    "resource://contacts/{id}": {
+    () => ({
+      uri: "resource://schema",
+      text: JSON.stringify({ name: "string", email: "string", company: "string?" }),
+    }),
+  )
+  .resource(
+    {
+      uri: "resource://contacts/{id}",
       name: "Contact",
-      handler: async (params) => {
-        const item = await db.get({ pk: params.id, sk: "profile" });
-        return { uri: `resource://contacts/${params.id}`, text: JSON.stringify(item?.data) };
-      },
     },
-  }))
-  .prompts(({ db }) => ({
-    outreach: {
+    async (params, { db }) => {
+      const item = await db.get({ pk: params.id, sk: "profile" });
+      return { uri: `resource://contacts/${params.id}`, text: JSON.stringify(item?.data) };
+    },
+  )
+  .prompt(
+    {
+      name: "outreach",
       description: "Generate a personalized outreach message",
-      arguments: [{ name: "contactId", required: true }],
-      handler: async (args) => {
-        const item = await db.get({ pk: args.contactId, sk: "profile" });
-        return {
-          messages: [{
-            role: "user",
-            content: {
-              type: "text",
-              text: `Draft a short outreach email for:\n${JSON.stringify(item?.data)}`,
-            },
-          }],
-        };
-      },
+      args: [{ name: "contactId", required: true }],
     },
-  }))
-  .tools(({ db }) => ({
-    create_contact: {
+    async (args, { db }) => {
+      const item = await db.get({ pk: args.contactId, sk: "profile" });
+      return {
+        messages: [{
+          role: "user",
+          content: {
+            type: "text",
+            text: `Draft a short outreach email for:\n${JSON.stringify(item?.data)}`,
+          },
+        }],
+      };
+    },
+  )
+  .tool(
+    {
+      name: "create_contact",
       description: "Create a new contact",
       input: {
         type: "object",
@@ -283,28 +307,31 @@ export const mcp = defineMcp({
         },
         required: ["id", "name", "email"],
       },
-      handler: async (input) => {
-        await db.put({
-          pk: input.id, sk: "profile",
-          data: { tag: "contact", name: input.name, email: input.email, company: input.company },
-        });
-        return { content: [{ type: "text", text: `Created ${input.id}` }] };
-      },
     },
-    get_contact: {
+    async (input, { db }) => {
+      await db.put({
+        pk: input.id, sk: "profile",
+        data: { tag: "contact", name: input.name, email: input.email, company: input.company },
+      });
+      return { content: [{ type: "text", text: `Created ${input.id}` }] };
+    },
+  )
+  .tool(
+    {
+      name: "get_contact",
       description: "Get a contact by ID",
       input: {
         type: "object",
         properties: { id: { type: "string" } },
         required: ["id"],
       },
-      handler: async (input) => {
-        const item = await db.get({ pk: input.id, sk: "profile" });
-        if (!item) return { content: [{ type: "text", text: "Not found" }], isError: true };
-        return { content: [{ type: "text", text: JSON.stringify(item.data) }] };
-      },
     },
-  }));
+    async (input, { db }) => {
+      const item = await db.get({ pk: input.id, sk: "profile" });
+      if (!item) return { content: [{ type: "text", text: "Not found" }], isError: true };
+      return { content: [{ type: "text", text: JSON.stringify(item.data) }] };
+    },
+  );
 ```
 
 ## Connecting clients
@@ -349,4 +376,4 @@ Add to `claude_desktop_config.json`:
 - [MCP Specification](https://modelcontextprotocol.io/specification/2025-03-26) — the full protocol reference
 - [Definitions reference — defineMcp](/definitions/#definemcp) — all configuration options
 - [Database](/use-cases/database/) — single-table design for `deps`
-- [Authentication](/use-cases/authentication/) — `enableAuth` patterns
+- [Authentication](/use-cases/authentication/) — `.auth()` patterns

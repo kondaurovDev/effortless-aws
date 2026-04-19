@@ -179,14 +179,6 @@ interface BucketBuilder<
  * Define an S3 bucket with optional event handlers.
  *
  * @see {@link https://effortless-aws.website/use-cases/storage | Storage guide}
- *
- * @example
- * ```typescript
- * export const uploads = defineBucket({ prefix: "images/", suffix: ".jpg" })
- *   .onObjectCreated(async ({ event, bucket }) => {
- *     console.log("New upload:", event.key);
- *   })
- * ```
  */
 export function defineBucket(): BucketBuilder;
 export function defineBucket(

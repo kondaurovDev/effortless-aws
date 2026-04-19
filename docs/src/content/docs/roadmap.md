@@ -36,7 +36,7 @@ export const payments = defineApi({
     ttl: "1 hour",
   },
 })
-  .post("/", async ({ req }) => {
+  .post({ path: "/" }, async ({ req }) => {
     await chargeCustomer(req.body);
     return { status: 200, body: { ok: true } };
   });
@@ -67,36 +67,34 @@ export const processOrders = defineQueue({
 
 **Problem**: Lambdas need config values (DB URLs, API keys, feature flags) from SSM Parameter Store, Secrets Manager, or AppConfig. Without caching, every invocation makes an API call — slow and expensive.
 
-**Approach**: Declare parameters in the handler definition. Effortless fetches and caches them at runtime, and auto-adds IAM permissions on deploy.
+**Approach**: Declare parameters in the handler via the `.config()` builder. Effortless fetches and caches them at runtime, and auto-adds IAM permissions on deploy. SSM Parameter Store is live today via `defineSecret()`; Secrets Manager and AppConfig helpers are planned additions that would live alongside it inside the same factory.
 
 ```typescript
-export const api = defineApi({
-  basePath: "/orders",
-  config: {
-    dbUrl: param("/prod/database-url"),
-    stripeKey: secret("prod/stripe-api-key"),
-    features: appConfig("my-app", "feature-flags"),
-  },
-})
+export const api = defineApi({ basePath: "/orders" })
+  .config(({ defineSecret, defineManagedSecret, defineAppConfig }) => ({
+    dbUrl: defineSecret({ key: "database-url" }),                  // SSM — shipping
+    stripeKey: defineManagedSecret({ name: "prod/stripe-api-key" }), // Secrets Manager — planned
+    features: defineAppConfig({ app: "my-app", profile: "feature-flags" }), // AppConfig — planned
+  }))
   .setup(({ config }) => ({
     dbUrl: config.dbUrl,
     stripeKey: config.stripeKey,
     features: config.features,
   }))
-  .get("/", async ({ dbUrl, stripeKey, features }) => {
-    // dbUrl    — string, cached, from SSM Parameter Store
+  .get({ path: "/" }, async ({ dbUrl, stripeKey, features }) => {
+    // dbUrl     — string, cached, from SSM Parameter Store
     // stripeKey — string, cached, from Secrets Manager
     // features  — object, cached, from AppConfig
   });
 ```
 
 **What effortless auto-adds on deploy**:
-- `ssm:GetParameter` permission for each param path
-- `secretsmanager:GetSecretValue` permission for each secret ARN
-- `appconfig:GetConfiguration` permission for each app/profile
+- `ssm:GetParameter` permission for each `defineSecret`
+- `secretsmanager:GetSecretValue` permission for each `defineManagedSecret`
+- `appconfig:GetConfiguration` permission for each `defineAppConfig`
 - Cache with configurable TTL (default 5 minutes)
 
-**Status**: Planned
+**Status**: `defineSecret` shipping; `defineManagedSecret` and `defineAppConfig` planned
 
 ---
 
@@ -114,7 +112,7 @@ export const api = defineApi({
     sampleRate: 0.1,  // 10% of requests also log DEBUG
   },
 })
-  .post("/", async ({ req, log }) => {
+  .post({ path: "/" }, async ({ req, log }) => {
     log.info("Processing order", { orderId: req.body.id });
     // output: {"level":"INFO","message":"Processing order","orderId":"abc-123",
     //          "requestId":"xxx","functionName":"createOrder","coldStart":false,
@@ -150,7 +148,7 @@ export const api = defineApi({
     namespace: "MyApp",  // or default to project name
   },
 })
-  .post("/", async ({ req, metrics }) => {
+  .post({ path: "/" }, async ({ req, metrics }) => {
     const order = await createOrder(req.body);
 
     metrics.add("OrderCreated", 1);
@@ -177,7 +175,7 @@ export const api = defineApi({
   basePath: "/users",
   tracing: true,
 })
-  .get("/{id}", async ({ req, tracer }) => {
+  .get({ path: "/{id}" }, async ({ req, tracer }) => {
     // handler automatically traced as a segment
 
     const user = await tracer.trace("fetchUser", () =>
@@ -216,7 +214,7 @@ export const api = defineApi({
     rateLimit({ max: 100, window: "1 minute" }),  // uses DynamoDB counter
   ],
 })
-  .post("/", async ({ req }) => {
+  .post({ path: "/" }, async ({ req }) => {
     return { status: 200, body: { ok: true } };
   });
 ```
@@ -243,7 +241,7 @@ export const processOrder = defineQueue({
   });
 
 export const orders = defineApi({ basePath: "/orders" })
-  .post("/", async ({ req }) => {
+  .post({ path: "/" }, async ({ req }) => {
     // type-safe — payload shape inferred from processOrder's messageSchema
     await processOrder.send({ orderId: "abc-123", amount: 99 });
     return { status: 202, body: { queued: true } };
@@ -341,7 +339,7 @@ export const processOrder = defineFunction({
 });
 
 export const orders = defineApi({ basePath: "/orders" })
-  .post("/", async ({ req }) => {
+  .post({ path: "/" }, async ({ req }) => {
     const execId = await processOrder.start({ orderId: req.body.id });
     return { status: 202, body: { executionId: execId } };
   });
