@@ -37,12 +37,11 @@ Each handler definition creates all the AWS resources it needs. `deps` wires the
 
 ```typescript
 // src/orders.ts
-import { defineTable, defineApi, unsafeAs } from "effortless-aws";
+import { defineTable, defineApi } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number };
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   onRecord: async ({ record }) => {
     console.log("New order:", record.new!.product);
   },
@@ -75,7 +74,7 @@ One command creates everything: DynamoDB table, stream processor Lambda, API Lam
 |---|---|---|
 | REST API | `defineApi` | Lambda + Function URL + IAM |
 | Database | `defineTable` | DynamoDB + optional stream Lambda |
-| Background jobs | `defineFifoQueue` | SQS FIFO + consumer Lambda |
+| Background jobs | `defineQueue` | SQS FIFO + consumer Lambda |
 | File storage | `defineBucket` | S3 + optional event Lambda |
 | Transactional email | `defineMailer` | SES + DKIM identity |
 | Website / SSR app | `defineApp` | CloudFront + Lambda + S3 |
@@ -85,9 +84,9 @@ All in the same project, all deployed with one command, all with automatic IAM w
 
 ```typescript
 // One project. One deploy. A complete product backend.
-export const orders   = defineTable({ schema: unsafeAs<Order>(), onRecord: processOrder });
+export const orders   = defineTable<Order>({ onRecord: processOrder });
 export const uploads  = defineBucket({ onObjectCreated: processImage });
-export const queue    = defineFifoQueue({ schema: unsafeAs<Job>(), onMessage: processJob });
+export const queue    = defineQueue<Job>({ fifo: true }).onMessage(processJob);
 export const mailer   = defineMailer({ domain: "myapp.com" });
 export const api      = defineApi({
   basePath: "/api",
@@ -106,14 +105,12 @@ You can deliver an entire serverless product from TypeScript alone — and get b
 The most common Lambda pattern: HTTP endpoints that read/write from DynamoDB.
 
 ```typescript
-import { defineTable, defineApi, unsafeAs } from "effortless-aws";
+import { defineTable, defineApi } from "effortless-aws";
 import { z } from "zod";
 
 type User = { id: string; email: string; name: string; createdAt: string };
 
-export const users = defineTable({
-  schema: unsafeAs<User>(),
-});
+export const users = defineTable<User>();
 
 export const api = defineApi({
   basePath: "/users",
@@ -149,12 +146,11 @@ What you get without writing any infrastructure:
 DynamoDB streams let you react to data changes without polling.
 
 ```typescript
-import { defineTable, unsafeAs } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number; status: string };
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   // Stream processor — runs on every insert/update/delete
   onRecord: async ({ record }) => {
     if (record.eventName === "INSERT") {
@@ -167,8 +163,7 @@ export const orders = defineTable({
 // Or process records in batches for efficiency
 type AnalyticsEvent = { id: string; event: string; timestamp: number };
 
-export const analytics = defineTable({
-  schema: unsafeAs<AnalyticsEvent>(),
+export const analytics = defineTable<AnalyticsEvent>({
   batchSize: 100,
   onRecordBatch: async ({ records }) => {
     const inserts = records.filter(r => r.eventName === "INSERT");

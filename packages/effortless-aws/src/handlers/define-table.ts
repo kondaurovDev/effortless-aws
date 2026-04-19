@@ -22,16 +22,10 @@ export type TableKey = {
 export type StreamView = "NEW_AND_OLD_IMAGES" | "NEW_IMAGE" | "OLD_IMAGE" | "KEYS_ONLY";
 
 /**
- * Configuration options for defineTable (single-table design).
- *
- * Tables always use `pk (S)` + `sk (S)` keys, `tag (S)` discriminator,
- * `data (M)` for domain fields, and `ttl (N)` for optional expiration.
+ * Stream event source mapping configuration.
+ * @internal
  */
-export type TableConfig = {
-  /** Lambda function settings (memory, timeout, permissions, etc.) */
-  lambda?: { memory?: number; timeout?: Duration; logLevel?: LogLevel; permissions?: Permission[] };
-  /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
-  billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
+export type TableStreamConfig = {
   /** Stream view type - what data to include in stream records (default: "NEW_AND_OLD_IMAGES") */
   streamView?: StreamView;
   /** Number of records to process in each Lambda invocation (1-10000, default: 100) */
@@ -42,12 +36,29 @@ export type TableConfig = {
   startingPosition?: "LATEST" | "TRIM_HORIZON";
   /** Number of records to process concurrently within a batch (default: 1 — sequential) */
   concurrency?: number;
+  /** Max retry attempts for failed records before sending to DLQ (default: 1) */
+  maxRetries?: number;
+};
+
+/**
+ * Configuration options for defineTable (single-table design).
+ *
+ * Tables always use `pk (S)` + `sk (S)` keys, `tag (S)` discriminator,
+ * `data (M)` for domain fields, and `ttl (N)` for optional expiration.
+ */
+export type TableConfig = {
+  /** Lambda function settings (memory, timeout, permissions, etc.) */
+  lambda?: { memory?: number; timeout?: Duration; logLevel?: LogLevel; permissions?: Permission[] };
+  /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
+  billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
   /**
    * Name of the field in `data` that serves as the entity type discriminant.
    * Effortless auto-copies `data[tagField]` to the top-level DynamoDB `tag` attribute on `put()`.
    * Defaults to `"tag"`.
    */
   tagField?: string;
+  /** Stream event source mapping config — set via `.stream({...})` builder method. */
+  stream?: TableStreamConfig;
 };
 
 /**
@@ -131,20 +142,10 @@ export type TableHandler<T = Record<string, unknown>, C = any> = {
 
 // ============ Builder options ============
 
-/** Options passed to `defineTable()` — resource config only, no Lambda settings */
+/** Options passed to `defineTable()` — resource config only. Stream options go in `.stream({...})`. */
 type TableOptions<T> = {
   /** DynamoDB billing mode (default: "PAY_PER_REQUEST") */
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED";
-  /** Stream view type (default: "NEW_AND_OLD_IMAGES") */
-  streamView?: StreamView;
-  /** Number of records to process in each Lambda invocation (1-10000, default: 100) */
-  batchSize?: number;
-  /** Maximum time to gather records before invoking (default: "2s") */
-  batchWindow?: Duration;
-  /** Where to start reading the stream (default: "LATEST") */
-  startingPosition?: "LATEST" | "TRIM_HORIZON";
-  /** Number of records to process concurrently within a batch (default: 1) */
-  concurrency?: number;
   /** Name of the field in `data` that serves as the entity type discriminant (default: "tag") */
   tagField?: Extract<keyof T, string>;
   /** Decode/validate function for the `data` portion of stream records */
@@ -159,45 +160,51 @@ interface TableBuilder<
   P = undefined,
   C = undefined,
   HasFiles extends boolean = false,
+  HasStream extends boolean = false,
 > {
   /** Declare handler dependencies (tables, queues, buckets, mailers) */
   deps<D2 extends Record<string, AnyDepHandler>>(
     fn: () => D2
-  ): TableBuilder<T, D2, P, C, HasFiles>;
+  ): TableBuilder<T, D2, P, C, HasFiles, HasStream>;
 
   /** Declare SSM secrets */
   config<P2 extends Record<string, AnySecretRef>>(
     fn: ConfigFactory<P2>
-  ): TableBuilder<T, D, P2, C, HasFiles>;
+  ): TableBuilder<T, D, P2, C, HasFiles, HasStream>;
 
   /** Include static files in the Lambda bundle. Chainable — call multiple times. */
-  include(glob: string): TableBuilder<T, D, P, C, true>;
+  include(glob: string): TableBuilder<T, D, P, C, true, HasStream>;
+
+  /** Configure the DynamoDB stream event source mapping (batch size, retries, concurrency, etc.). */
+  stream: HasStream extends true
+    ? never
+    : (opts: TableStreamConfig) => TableBuilder<T, D, P, C, HasFiles, true>;
 
   /** Configure Lambda settings only (memory, timeout, permissions, etc.) */
   setup(
     lambda: LambdaOptions
-  ): TableBuilder<T, D, P, C, HasFiles>;
+  ): TableBuilder<T, D, P, C, HasFiles, HasStream>;
 
   /** Initialize shared state on cold start. Receives table (self-client), deps, config, files. */
   setup<C2>(
     fn: (args: SetupArgs<T, D, P, HasFiles>) => C2 | Promise<C2>
-  ): TableBuilder<T, D, P, C2, HasFiles>;
+  ): TableBuilder<T, D, P, C2, HasFiles, HasStream>;
 
   /** Initialize shared state on cold start + configure Lambda settings. */
   setup<C2>(
     fn: (args: SetupArgs<T, D, P, HasFiles>) => C2 | Promise<C2>,
     lambda: LambdaOptions
-  ): TableBuilder<T, D, P, C2, HasFiles>;
+  ): TableBuilder<T, D, P, C2, HasFiles, HasStream>;
 
   /** Handle errors thrown by onRecord/onRecordBatch */
   onError(
     fn: (args: { error: unknown } & SpreadCtx<C>) => void | Promise<void>
-  ): TableBuilder<T, D, P, C, HasFiles>;
+  ): TableBuilder<T, D, P, C, HasFiles, HasStream>;
 
   /** Cleanup callback — runs after each invocation, before Lambda freezes */
   onCleanup(
     fn: (args: SpreadCtx<C>) => void | Promise<void>
-  ): TableBuilder<T, D, P, C, HasFiles>;
+  ): TableBuilder<T, D, P, C, HasFiles, HasStream>;
 
   /** Per-record stream handler (terminal — returns finalized handler) */
   onRecord(
@@ -225,7 +232,8 @@ interface TableBuilder<
  *
  * @example
  * ```typescript
- * export const orders = defineTable<OrderData>({ batchSize: 10, concurrency: 5 })
+ * export const orders = defineTable<OrderData>()
+ *   .stream({ batchSize: 10, concurrency: 5, maxRetries: 3 })
  *   .setup(({ table }) => ({ table }))
  *   .onRecord(async ({ record, table }) => {
  *     if (record.eventName === "INSERT") {
@@ -295,6 +303,10 @@ export function defineTable<T = Record<string, unknown>>(
     },
     include(glob) {
       state.static = [...(state.static ?? []), glob];
+      return builder as any;
+    },
+    stream(opts: TableStreamConfig) {
+      state.spec = { ...state.spec, stream: { ...state.spec.stream, ...opts } };
       return builder as any;
     },
     setup(fnOrLambda: any, maybeLambda?: LambdaOptions) {

@@ -99,14 +99,12 @@ await deps.mailer.send({
 Mailers compose with tables, buckets, and queues — just add them all to `deps`:
 
 ```typescript
-import { defineApi, defineTable, unsafeAs } from "effortless-aws";
+import { defineApi, defineTable } from "effortless-aws";
 import { mailer } from "./mailer";
 
 type User = { tag: string; name: string; email: string };
 
-export const users = defineTable({
-  schema: unsafeAs<User>(),
-});
+export const users = defineTable<User>();
 
 export const invite = defineApi({
   basePath: "/invite",
@@ -138,23 +136,21 @@ Each Lambda gets only the permissions it needs — DynamoDB for the table, SES f
 Email sending works from any handler type. Use a FIFO queue for reliable, ordered email delivery:
 
 ```typescript
-import { defineFifoQueue, unsafeAs } from "effortless-aws";
+import { defineQueue } from "effortless-aws";
 import { mailer } from "./mailer";
 
 type EmailJob = { to: string; subject: string; html: string };
 
-export const emailQueue = defineFifoQueue({
-  schema: unsafeAs<EmailJob>(),
-  deps: () => ({ mailer }),
-  onMessage: async ({ message, deps }) => {
+export const emailQueue = defineQueue<EmailJob>({ fifo: true })
+  .deps(() => ({ mailer }))
+  .onMessage(async ({ message, deps }) => {
     await deps.mailer.send({
       from: "no-reply@myapp.com",
       to: message.body.to,
       subject: message.body.subject,
       html: message.body.html,
     });
-  },
-});
+  });
 ```
 
 If SES returns an error, the message stays in the queue and is retried automatically.
@@ -164,13 +160,12 @@ If SES returns an error, the message stays in the queue and is retried automatic
 React to database changes and send emails:
 
 ```typescript
-import { defineTable, unsafeAs } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 import { mailer } from "./mailer";
 
 type Order = { tag: string; email: string; amount: number; status: string };
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   deps: () => ({ mailer }),
   onRecord: async ({ record, deps }) => {
     if (record.eventName === "INSERT" && record.new) {

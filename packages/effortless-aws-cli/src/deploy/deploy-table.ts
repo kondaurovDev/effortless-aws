@@ -1,8 +1,9 @@
 import { Effect } from "effect";
 import { toSeconds } from "effortless-aws";
 import { extractConfigsFromFile, type ExtractedTableFunction } from "~/discovery";
-import { Aws, ensureTable, ensureEventSourceMapping } from "../aws";
+import { Aws, ensureTable, ensureEventSourceMapping, ensureStandardQueue } from "../aws";
 import { makeTags, resolveStage, type TagContext } from "../core";
+import { cleanupStaleHandlerResources } from "./resource-registry";
 import {
   type DeployInput,
   deployCoreLambda,
@@ -22,7 +23,7 @@ type DeployTableFunctionInput = {
   staticGlobs?: string[];
 };
 
-const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*"] as const;
+const TABLE_DEFAULT_PERMISSIONS = ["dynamodb:*", "logs:*", "sqs:SendMessage"] as const;
 
 /** @internal */
 export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployTableFunctionInput) =>
@@ -41,12 +42,19 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
     const { tableArn, streamArn, created } = yield* ensureTable({
       name: tableName,
       billingMode: config.billingMode ?? "PAY_PER_REQUEST",
-      streamView: config.streamView ?? "NEW_AND_OLD_IMAGES",
+      // Stream is only needed when a handler consumes it. Resource-only tables get no stream.
+      ...(hasHandler ? { streamView: config.stream?.streamView ?? "NEW_AND_OLD_IMAGES" } : {}),
       tags: makeTags(tagCtx)
     });
 
     // Resource-only mode: no Lambda, just the table
     if (!hasHandler) {
+      yield* cleanupStaleHandlerResources("table", {
+        project: input.project,
+        stage: tagCtx.stage,
+        handler: handlerName,
+        region: input.region,
+      });
       yield* Effect.logDebug(`Table deployment complete (resource-only)! Table: ${tableArn}`);
       return {
         exportName,
@@ -74,13 +82,26 @@ export const deployTableFunction = ({ input, fn, layerArn, external, depsEnv, de
       ...(staticGlobs && staticGlobs.length > 0 ? { staticGlobs } : {})
     });
 
+    yield* Effect.logDebug("Creating DLQ for stream failures...");
+    const dlqName = `${tableName}-dlq`;
+    const { queueArn: dlqArn } = yield* ensureStandardQueue({
+      name: dlqName,
+      tags: makeTags(tagCtx)
+    });
+
+    if (!streamArn) {
+      return yield* Effect.fail(new Error(`Table ${tableName} has a handler but no stream ARN — this should not happen`));
+    }
+
     yield* Effect.logDebug("Setting up event source mapping...");
     yield* ensureEventSourceMapping({
       functionArn,
       streamArn,
-      batchSize: config.batchSize ?? 100,
-      batchWindow: toSeconds(config.batchWindow ?? 2),
-      startingPosition: config.startingPosition ?? "LATEST"
+      batchSize: config.stream?.batchSize ?? 100,
+      batchWindow: toSeconds(config.stream?.batchWindow ?? 2),
+      startingPosition: config.stream?.startingPosition ?? "LATEST",
+      onFailureArn: dlqArn,
+      ...(config.stream?.maxRetries !== undefined ? { maximumRetryAttempts: config.stream.maxRetries } : {})
     });
 
     yield* Effect.logDebug(`Table deployment complete! Table: ${tableArn}`);
@@ -133,7 +154,8 @@ export const deployTable = (input: DeployInput) =>
       Aws.makeClients({
         lambda: { region: input.region },
         iam: { region: input.region },
-        dynamodb: { region: input.region }
+        dynamodb: { region: input.region },
+        sqs: { region: input.region }
       })
     )
   );
@@ -174,7 +196,8 @@ export const deployAllTables = (input: DeployInput) =>
       Aws.makeClients({
         lambda: { region: input.region },
         iam: { region: input.region },
-        dynamodb: { region: input.region }
+        dynamodb: { region: input.region },
+        sqs: { region: input.region }
       })
     )
   );

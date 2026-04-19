@@ -75,7 +75,7 @@ Quick reference for navigating the codebase. All paths are relative to `src/`.
 
 | Directory            | Role                                                                      |
 |----------------------|---------------------------------------------------------------------------|
-| `handlers/`          | **User-facing API** — `defineApi`, `defineTable`, `defineFifoQueue`, `defineApp`, `defineStaticSite`, `param`, `secret` |
+| `handlers/`          | **User-facing API** — `defineApi`, `defineTable`, `defineQueue`, `defineApp`, `defineStaticSite`, `param`, `secret` |
 | `build/`             | **Build phase** — ts-morph AST parsing (`handler-registry.ts`) + esbuild bundling (`bundle.ts`) |
 | `deploy/`            | **Deploy phase** — orchestration (`deploy.ts`), core Lambda (`shared.ts`), per-type deployers |
 | `runtime/`           | **Runtime phase** — Lambda wrappers (`wrap-*.ts`), shared utils (`handler-utils.ts`), clients |
@@ -98,7 +98,7 @@ Quick reference for navigating the codebase. All paths are relative to `src/`.
 │                                                             │
 │  deployAll() ─────┬─► deployApiFunction()                  │
 │                    ├─► deployTableFunction()                │
-│                    ├─► deployFifoQueueFunction()            │
+│                    ├─► deployQueueFunction()                │
 │                    └─► deployAppLambda()                    │
 └──────────────────────────────┬──────────────────────────────┘
                ┌───────────────┼───────────────┐
@@ -264,7 +264,7 @@ All `resolve*` results are combined via `mergeResolved()` into a single `{ env, 
 
 ## Adding a New Handler Type
 
-Use `defineFifoQueue` as a template — it's the most recently added handler type and follows all current patterns.
+Use `defineQueue` as a template — it's the most recently added handler type and follows all current patterns.
 
 ### Step 1: Handler definition (`handlers/define-<type>.ts`)
 
@@ -412,8 +412,8 @@ Environment variables injected into Lambda functions at deploy time:
 | `EFF_TABLE_<key>` | `resolveDeps()` | DynamoDB table name for each dependency |
 | `EFF_TABLE_SELF` | `deploy-table.ts` | Own table name (table stream handlers only) |
 | `EFF_PARAM_<prop>` | `resolveParams()` | SSM path: `/${project}/${stage}/${ssmKey}` |
-| `EFF_QUEUE_URL` | `deploy-fifo-queue.ts` | SQS queue URL (queue handlers only) |
-| `EFF_QUEUE_ARN` | `deploy-fifo-queue.ts` | SQS queue ARN (queue handlers only) |
+| `EFF_QUEUE_URL` | `deploy-queue.ts` | SQS queue URL (queue handlers only) |
+| `EFF_QUEUE_ARN` | `deploy-queue.ts` | SQS queue ARN (queue handlers only) |
 
 ---
 

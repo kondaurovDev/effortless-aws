@@ -69,7 +69,7 @@ const resultToHandlers = (results: DeployProjectResult): DeployManifest["handler
   for (const r of results.staticSiteResults) {
     handlers[r.exportName] = { type: "site", url: r.url };
   }
-  for (const r of results.fifoQueueResults) {
+  for (const r of results.queueResults) {
     handlers[r.exportName] = { type: "queue", functionArn: r.functionArn, status: r.status, queueUrl: r.queueUrl, bundleSize: r.bundleSize };
   }
   for (const r of results.bucketResults) {

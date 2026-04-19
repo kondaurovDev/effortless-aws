@@ -39,7 +39,7 @@ import { type DeployInput, type DeployResult, type DeployTableResult, flushDefer
 import { deployTableFunction } from "./deploy-table";
 import { deployApp, type DeployAppResult } from "./deploy-app";
 import { deployStaticSite, type DeployStaticSiteResult } from "./deploy-static-site";
-import { deployFifoQueueFunction, type DeployFifoQueueResult } from "./deploy-fifo-queue";
+import { deployQueueFunction, type DeployQueueResult } from "./deploy-queue";
 import { deployBucketFunction, type DeployBucketResult } from "./deploy-bucket";
 import { deployMailer, type DeployMailerResult } from "./deploy-mailer";
 import { deployCronFunction, type DeployCronResult } from "./deploy-cron";
@@ -271,16 +271,16 @@ const buildBucketNameMap = (
 };
 
 /**
- * Build a map of all FIFO queue handler export names to their resolved queue names.
+ * Build a map of all queue handler export names to their resolved queue names.
  * Queue names are deterministic: ${project}-${stage}-${handlerName}
  */
 const buildQueueNameMap = (
-  fifoQueueHandlers: DiscoveredHandlers["fifoQueueHandlers"],
+  queueHandlers: DiscoveredHandlers["queueHandlers"],
   project: string,
   stage: string,
 ): Map<string, string> => {
   const map = new Map<string, string>();
-  for (const { exports } of fifoQueueHandlers) {
+  for (const { exports } of queueHandlers) {
     for (const fn of exports) {
       map.set(fn.exportName, `${project}-${stage}-${fn.exportName}`);
     }
@@ -319,7 +319,7 @@ const validateHandlerNames = (discovered: DiscoveredHandlers): string[] => {
     { type: "table", handlers: discovered.tableHandlers },
     { type: "app", handlers: discovered.appHandlers },
     { type: "site", handlers: discovered.staticSiteHandlers },
-    { type: "queue", handlers: discovered.fifoQueueHandlers },
+    { type: "queue", handlers: discovered.queueHandlers },
     { type: "bucket", handlers: discovered.bucketHandlers },
     { type: "mailer", handlers: discovered.mailerHandlers },
     { type: "api", handlers: discovered.apiHandlers },
@@ -360,7 +360,7 @@ const validateDeps = (
   const allGroups = [
     ...discovered.apiHandlers,
     ...discovered.tableHandlers,
-    ...discovered.fifoQueueHandlers,
+    ...discovered.queueHandlers,
     ...discovered.bucketHandlers,
     ...discovered.staticSiteHandlers,
     ...discovered.appHandlers,
@@ -544,7 +544,7 @@ const buildTableTasks = (
             ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
             depsEnv: env.depsEnv, depsPermissions: env.depsPermissions,
             ...(fn.staticGlobs.length > 0 ? { staticGlobs: fn.staticGlobs } : {}),
-          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, dynamodb: { region } })));
+          }).pipe(Effect.provide(Aws.makeClients({ lambda: { region }, iam: { region }, dynamodb: { region }, sqs: { region } })));
           results.push(result);
           yield* ctx.logComplete( fn.exportName, "table", result.status, result.bundleSize);
         })
@@ -638,10 +638,10 @@ const buildStaticSiteTasks = (
   return tasks;
 };
 
-const buildFifoQueueTasks = (
+const buildQueueTasks = (
   ctx: DeployTaskCtx,
-  handlers: DiscoveredHandlers["fifoQueueHandlers"],
-  results: DeployFifoQueueResult[],
+  handlers: DiscoveredHandlers["queueHandlers"],
+  results: DeployQueueResult[],
 ): Effect.Effect<void, unknown, any>[] => {
   const tasks: Effect.Effect<void, unknown, any>[] = [];
   const { region } = ctx.input;
@@ -650,7 +650,7 @@ const buildFifoQueueTasks = (
       tasks.push(
         Effect.gen(function* () {
           const env = resolveHandlerEnv(fn.depsKeys, fn.secretEntries, ctx);
-          const result = yield* deployFifoQueueFunction({
+          const result = yield* deployQueueFunction({
             input: makeDeployInput(ctx, file), fn,
             ...(ctx.layerArn ? { layerArn: ctx.layerArn } : {}),
             ...(ctx.external.length > 0 ? { external: ctx.external } : {}),
@@ -886,7 +886,7 @@ export type DeployProjectResult = {
   tableResults: DeployTableResult[];
   appResults: DeployAppResult[];
   staticSiteResults: DeployStaticSiteResult[];
-  fifoQueueResults: DeployFifoQueueResult[];
+  queueResults: DeployQueueResult[];
   bucketResults: DeployBucketResult[];
   mailerResults: DeployMailerResult[];
   cronResults: DeployCronResult[];
@@ -913,13 +913,13 @@ const discoverAndValidate = (input: DeployProjectInput) =>
     yield* Effect.logDebug(`Found ${files.length} file(s) matching patterns`);
 
     const discovered = yield* discoverHandlers(files);
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
+    const { tableHandlers, appHandlers, staticSiteHandlers, queueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
 
     const counts: HandlerCounts = {
       table: tableHandlers.reduce((acc, h) => acc + h.exports.length, 0),
       app: appHandlers.reduce((acc, h) => acc + h.exports.length, 0),
       site: input.noSites ? 0 : staticSiteHandlers.reduce((acc, h) => acc + h.exports.length, 0),
-      queue: fifoQueueHandlers.reduce((acc, h) => acc + h.exports.length, 0),
+      queue: queueHandlers.reduce((acc, h) => acc + h.exports.length, 0),
       bucket: bucketHandlers.reduce((acc, h) => acc + h.exports.length, 0),
       mailer: mailerHandlers.reduce((acc, h) => acc + h.exports.length, 0),
       api: apiHandlers.reduce((acc, h) => acc + h.exports.length, 0),
@@ -953,7 +953,7 @@ const discoverAndValidate = (input: DeployProjectInput) =>
     const tableNameMap = buildTableNameMap(tableHandlers, input.project, stage);
     const bucketNameMap = buildBucketNameMap(bucketHandlers, input.project, stage);
     const mailerDomainMap = buildMailerDomainMap(mailerHandlers);
-    const queueNameMap = buildQueueNameMap(fifoQueueHandlers, input.project, stage);
+    const queueNameMap = buildQueueNameMap(queueHandlers, input.project, stage);
     const workerNameMap = buildWorkerNameMap(workerHandlers, input.project, stage);
 
     // Validate deps references
@@ -1147,7 +1147,7 @@ const buildManifest = (discovered: DiscoveredHandlers, noSites?: boolean): Handl
     ["tableHandlers", "table"],
     ["appHandlers", "app"],
     ...(!noSites ? [["staticSiteHandlers", "site"] as [keyof DiscoveredHandlers, string]] : []),
-    ["fifoQueueHandlers", "queue"],
+    ["queueHandlers", "queue"],
     ["bucketHandlers", "bucket"],
     ["mailerHandlers", "mailer"],
     ["apiHandlers", "api"],
@@ -1173,13 +1173,13 @@ const deployResources = (input: {
 }) =>
   Effect.gen(function* () {
     const { ctx, discovered, counts } = input;
-    const { tableHandlers, appHandlers, staticSiteHandlers, fifoQueueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
+    const { tableHandlers, appHandlers, staticSiteHandlers, queueHandlers, bucketHandlers, mailerHandlers, apiHandlers, cronHandlers, workerHandlers, mcpHandlers } = discovered;
     const noSites = ctx.input.noSites;
 
     const tableResults: DeployTableResult[] = [];
     const appResults: DeployAppResult[] = [];
     const staticSiteResults: DeployStaticSiteResult[] = [];
-    const fifoQueueResults: DeployFifoQueueResult[] = [];
+    const queueResults: DeployQueueResult[] = [];
     const bucketResults: DeployBucketResult[] = [];
     const mailerResults: DeployMailerResult[] = [];
     const cronResults: DeployCronResult[] = [];
@@ -1203,7 +1203,7 @@ const deployResources = (input: {
       const phase1Tasks = [
         ...buildApiTasks(ctx, apiHandlers, apiResults),
         ...buildTableTasks(ctx, tableHandlers, tableResults),
-        ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+        ...buildQueueTasks(ctx, queueHandlers, queueResults),
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
         ...buildCronTasks(ctx, cronHandlers, cronResults),
@@ -1235,7 +1235,7 @@ const deployResources = (input: {
         ...buildTableTasks(ctx, tableHandlers, tableResults),
         ...buildAppTasks(ctx, appHandlers, appResults),
         ...(noSites ? [] : buildStaticSiteTasks(ctx, staticSiteHandlers, staticSiteResults)),
-        ...buildFifoQueueTasks(ctx, fifoQueueHandlers, fifoQueueResults),
+        ...buildQueueTasks(ctx, queueHandlers, queueResults),
         ...buildBucketTasks(ctx, bucketHandlers, bucketResults),
         ...buildMailerTasks(ctx, mailerHandlers, mailerResults),
         ...buildCronTasks(ctx, cronHandlers, cronResults),
@@ -1264,7 +1264,7 @@ const deployResources = (input: {
       yield* Effect.logWarning(warning);
     }
 
-    return { tableResults, appResults, staticSiteResults, fifoQueueResults, bucketResults, mailerResults, cronResults, apiResults, mcpResults };
+    return { tableResults, appResults, staticSiteResults, queueResults, bucketResults, mailerResults, cronResults, apiResults, mcpResults };
   });
 
 // ---- Orchestrator ----
@@ -1288,7 +1288,7 @@ const dryRunProject = (input: DeployProjectInput) =>
     // Map flattenHandlers type names to HandlerType (handlerRegistry keys)
     const bundleTypeMap: Record<string, HandlerType> = {
       table: "table", api: "api", cron: "cron", bucket: "bucket",
-      mcp: "mcp", site: "staticSite", queue: "fifoQueue", worker: "worker",
+      mcp: "mcp", site: "staticSite", queue: "queue", worker: "worker",
     };
     // These handler types have no Lambda bundle
     const skipBundle = new Set(["app", "mailer"]);
@@ -1337,7 +1337,7 @@ const dryRunProject = (input: DeployProjectInput) =>
       projectDir: input.projectDir,
       results: {
         tableResults: [], appResults: [], staticSiteResults: [],
-        fifoQueueResults: [], bucketResults: [], mailerResults: [],
+        queueResults: [], bucketResults: [], mailerResults: [],
         cronResults: [], apiResults: [], mcpResults: [],
       },
       logLines: flushDeployLog(),
@@ -1346,7 +1346,7 @@ const dryRunProject = (input: DeployProjectInput) =>
 
     return {
       tableResults: [], appResults: [], staticSiteResults: [],
-      fifoQueueResults: [], bucketResults: [], mailerResults: [],
+      queueResults: [], bucketResults: [], mailerResults: [],
       cronResults: [], apiResults: [], mcpResults: [],
     } satisfies DeployProjectResult;
   });

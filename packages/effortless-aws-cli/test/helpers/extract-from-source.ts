@@ -13,5 +13,5 @@ const extractFromSource = (source: string, type: HandlerType): ExtractedConfig<a
 export const extractTableConfigs = (source: string) => extractFromSource(source, "table");
 export const extractApiConfigs = (source: string) => extractFromSource(source, "api");
 export const extractAppConfigs = (source: string) => extractFromSource(source, "app");
-export const extractFifoQueueConfigs = (source: string) => extractFromSource(source, "fifoQueue");
+export const extractQueueConfigs = (source: string) => extractFromSource(source, "queue");
 export const extractStaticSiteConfigs = (source: string) => extractFromSource(source, "staticSite");

@@ -112,7 +112,7 @@ AWS has the deepest serverless ecosystem, which is why Effortless builds on it. 
 
 ### SQS FIFO
 
-[SQS FIFO queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues.html) power `defineFifoQueue` — fully managed message queues with exactly-once processing and strict ordering.
+[SQS FIFO queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues.html) power `defineQueue` (with `{ fifo: true }`) — fully managed message queues with exactly-once processing and strict ordering.
 
 - Guaranteed message delivery with configurable retention
 - No servers to manage, no Kafka clusters to tune

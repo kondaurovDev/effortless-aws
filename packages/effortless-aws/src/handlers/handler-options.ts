@@ -72,7 +72,7 @@ export type LambdaConfig = {
 
 /**
  * Lambda configuration with additional IAM permissions.
- * Used by handler types that support custom permissions (http, table, fifo-queue).
+ * Used by handler types that support custom permissions (http, table, queue).
  */
 export type LambdaWithPermissions = LambdaConfig & {
   /** Additional IAM permissions for the Lambda */

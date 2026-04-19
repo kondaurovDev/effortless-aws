@@ -19,7 +19,7 @@ export { ensureLayer, listLayerVersions, deleteAllLayerVersions, deleteLayerVers
 export type { LayerConfig, LayerResult, LayerStatus, LayerVersionInfo } from "./layer";
 
 // S3
-export { ensureBucket, syncFiles, seedFiles, putObject, putBucketPolicyForOAC, emptyBucket, deleteBucket, ensureBucketNotification, addS3LambdaPermission } from "./s3";
+export { ensureBucket, syncFiles, seedFiles, putObject, putBucketPolicyForOAC, emptyBucket, deleteBucket, ensureBucketNotification, clearBucketNotification, addS3LambdaPermission } from "./s3";
 export type { EnsureBucketInput, SyncFilesInput, SyncFilesResult, SeedFilesResult, EnsureBucketNotificationInput } from "./s3";
 
 // ACM
@@ -38,8 +38,8 @@ export { ensureCluster, ensureTaskDefinition, ensureService, ensureLogGroup, del
 export type { EnsureTaskDefinitionInput, EnsureServiceInput } from "./ecs";
 
 // SQS
-export { ensureFifoQueue, ensureSqsEventSourceMapping, deleteFifoQueue, deleteStandardQueue } from "./sqs";
-export type { EnsureFifoQueueInput, EnsureFifoQueueResult, EnsureSqsEventSourceMappingInput } from "./sqs";
+export { ensureFifoQueue, ensureStandardQueue, ensureSqsEventSourceMapping, deleteFifoQueue, deleteStandardQueue, getQueueMessageCount } from "./sqs";
+export type { EnsureFifoQueueInput, EnsureFifoQueueResult, EnsureStandardQueueInput, EnsureSqsEventSourceMappingInput } from "./sqs";
 
 // Scheduler
 export { ensureSchedule, deleteSchedule, listSchedulesByPrefix } from "./scheduler";

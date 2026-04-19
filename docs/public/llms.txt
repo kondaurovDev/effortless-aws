@@ -181,21 +181,21 @@ await table.update({ pk: "USER#1", sk: "ORDER#1" }, {
 
 **SK conditions:** `string` (exact match), `{ begins_with }`, `{ gt }`, `{ gte }`, `{ lt }`, `{ lte }`, `{ between: [a, b] }`.
 
-### defineFifoQueue — SQS FIFO queue
+### defineQueue — SQS queue (FIFO or standard)
 
-Creates SQS FIFO queue + Lambda consumer. Builder chain: `.deps()` → `.config()` → `.include()` → `.setup()` → `.onError()` → `.onCleanup()` → `.onMessage()` / `.onMessageBatch()`.
+Creates SQS queue + Lambda consumer. Builder chain: `.poller()` → `.deps()` → `.config()` → `.include()` → `.setup()` → `.onError()` → `.onCleanup()` → `.onMessage()` / `.onMessageBatch()`.
 
 ```typescript
-import { defineFifoQueue } from "effortless-aws";
+import { defineQueue } from "effortless-aws";
 
 type OrderEvent = { orderId: string; action: "created" | "shipped" };
 
-export const orderQueue = defineFifoQueue<OrderEvent>({
-  batchSize: 10,
-  batchWindow: 10,
+export const orderQueue = defineQueue<OrderEvent>({
+  fifo: true,
   visibilityTimeout: 120,
   contentBasedDeduplication: true,
 })
+  .poller({ batchSize: 10, batchWindow: 10 })
   .onMessage(async ({ message }) => {
     // message.body — typed as OrderEvent
     // message.messageId, message.messageGroupId
@@ -203,7 +203,9 @@ export const orderQueue = defineFifoQueue<OrderEvent>({
 // OR: .onMessageBatch (return { failures: string[] } for partial batch failure)
 ```
 
-**Queue options:** `batchSize` (1-10), `batchWindow` (seconds), `visibilityTimeout`, `retentionPeriod`, `delay`, `contentBasedDeduplication`, `maxReceiveCount`.
+**Queue options:** `fifo` (enable FIFO semantics), `visibilityTimeout`, `retentionPeriod`, `delay`, `contentBasedDeduplication`, `maxReceiveCount`.
+
+**Poller options** (via `.poller({ ... })`): `batchSize` (1-10), `batchWindow` (seconds).
 
 **Sending** (via `deps`):
 

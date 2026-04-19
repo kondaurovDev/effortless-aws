@@ -149,13 +149,11 @@ export const frontend = defineApp({
 
 ```typescript
 // src/api.ts
-import { defineApi, defineTable, unsafeAs } from "effortless-aws";
+import { defineApi, defineTable } from "effortless-aws";
 
 type Item = { id: string; name: string };
 
-export const items = defineTable({
-  schema: unsafeAs<Item>(),
-});
+export const items = defineTable<Item>();
 
 export const api = defineApi({
   basePath: "/api/items",

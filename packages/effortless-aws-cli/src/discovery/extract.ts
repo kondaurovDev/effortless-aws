@@ -391,6 +391,24 @@ const processChain = (
         break;
       }
 
+      case "stream": {
+        if (type !== "table") break;
+        const streamOpts = extractStaticConfig(step.args[0]);
+        if (Object.keys(streamOpts).length > 0) {
+          config = { ...config, stream: { ...(config.stream as Record<string, unknown> ?? {}), ...streamOpts } };
+        }
+        break;
+      }
+
+      case "poller": {
+        if (type !== "queue") break;
+        const pollerOpts = extractStaticConfig(step.args[0]);
+        if (Object.keys(pollerOpts).length > 0) {
+          config = { ...config, poller: { ...(config.poller as Record<string, unknown> ?? {}), ...pollerOpts } };
+        }
+        break;
+      }
+
       case "route": {
         const route = extractStaticSiteRoute(step.args);
         if (route) {

@@ -190,6 +190,7 @@ export const deployCommand = Command.make(
         lambda: { region },
         iam: { region },
         dynamodb: { region },
+        sqs: { region },
         resource_groups_tagging_api: { region },
         s3: { region },
         cloudfront: { region: "us-east-1" },

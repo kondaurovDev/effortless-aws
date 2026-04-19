@@ -31,10 +31,12 @@ describe("defineTable", () => {
       const source = `
         import { defineTable } from "effortless-aws";
 
-        export const orders = defineTable({
-          streamView: "NEW_AND_OLD_IMAGES",
-          batchSize: 50,
-        })
+        export const orders = defineTable({ billingMode: "PAY_PER_REQUEST" })
+          .stream({
+            streamView: "NEW_AND_OLD_IMAGES",
+            batchSize: 50,
+            maxRetries: 5,
+          })
           .setup({ memory: 512 })
           .onRecord(async ({ record }) => {
             console.log(record);
@@ -46,8 +48,10 @@ describe("defineTable", () => {
       expect(configs).toHaveLength(1);
       const first = configs[0]!;
       expect(first.exportName).toBe("orders");
-      expect(first.config.streamView).toBe("NEW_AND_OLD_IMAGES");
-      expect(first.config.batchSize).toBe(50);
+      expect(first.config.billingMode).toBe("PAY_PER_REQUEST");
+      expect(first.config.stream?.streamView).toBe("NEW_AND_OLD_IMAGES");
+      expect(first.config.stream?.batchSize).toBe(50);
+      expect(first.config.stream?.maxRetries).toBe(5);
       expect(first.config.lambda?.memory).toBe(512);
       expect(first.hasHandler).toBe(true);
       // pk/sk should not be in config

@@ -21,8 +21,15 @@ type DeployMcpFunctionInput = {
 /** @internal */
 export const deployMcpFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployMcpFunctionInput) =>
   Effect.gen(function* () {
-    const { exportName, config } = fn;
+    const { exportName, config, hasHandler } = fn;
     const handlerName = exportName;
+
+    if (!hasHandler) {
+      yield* Effect.logWarning(
+        `MCP handler "${handlerName}" has no tools, resources, or prompts registered. ` +
+        `The server will respond to protocol messages but expose nothing.`
+      );
+    }
 
     const { functionArn, status, bundleSize } = yield* deployCoreLambda({
       input,

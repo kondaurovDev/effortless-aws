@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractFifoQueueConfigs } from "./helpers/extract-from-source";
+import { extractQueueConfigs } from "./helpers/extract-from-source";
 import { importBundle } from "./helpers/bundle-code";
 import * as path from "path";
 
@@ -31,49 +31,53 @@ const makeSQSEvent = (records: Record<string, unknown>[] = [makeSQSRecord()]) =>
 
 // ============ Config extraction tests ============
 
-describe("extractFifoQueueConfigs", () => {
+describe("extractQueueConfigs", () => {
   it("extracts config from named export", async () => {
     const source = `
-      import { defineFifoQueue } from "effortless-aws";
-      export const orderQueue = defineFifoQueue({ batchSize: 5 })
+      import { defineQueue } from "effortless-aws";
+      export const orderQueue = defineQueue({ fifo: true })
+        .poller({ batchSize: 5 })
         .onMessage(async ({ message }) => {})
 ;
     `;
-    const configs = await extractFifoQueueConfigs(source);
+    const configs = await extractQueueConfigs(source);
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("orderQueue");
-    expect(configs[0]!.config.batchSize).toBe(5);
+    expect(configs[0]!.config.fifo).toBe(true);
+    expect((configs[0]!.config.poller as { batchSize?: number }).batchSize).toBe(5);
     expect(configs[0]!.hasHandler).toBe(true);
   });
 
   it("extracts config from default export", async () => {
     const source = `
-      import { defineFifoQueue } from "effortless-aws";
-      export default defineFifoQueue({ batchSize: 3 })
+      import { defineQueue } from "effortless-aws";
+      export default defineQueue({ fifo: true })
+        .poller({ batchSize: 3 })
         .onMessageBatch(async ({ messages }) => {})
 ;
     `;
-    const configs = await extractFifoQueueConfigs(source);
+    const configs = await extractQueueConfigs(source);
     expect(configs).toHaveLength(1);
     expect(configs[0]!.exportName).toBe("default");
-    expect(configs[0]!.config.batchSize).toBe(3);
+    expect((configs[0]!.config.poller as { batchSize?: number }).batchSize).toBe(3);
     expect(configs[0]!.hasHandler).toBe(true);
   });
 
   it("strips runtime props from config", async () => {
     const source = `
-      import { defineFifoQueue } from "effortless-aws";
-      export const q = defineFifoQueue({
-        batchSize: 10,
+      import { defineQueue } from "effortless-aws";
+      export const q = defineQueue({
+        fifo: true,
         maxReceiveCount: 5,
         schema: (input) => input,
       })
+        .poller({ batchSize: 10 })
         .setup(() => ({ db: "pool" }))
         .onMessage(async ({ message }) => {})
 ;
     `;
-    const configs = await extractFifoQueueConfigs(source);
-    expect(configs[0]!.config.batchSize).toBe(10);
+    const configs = await extractQueueConfigs(source);
+    expect((configs[0]!.config.poller as { batchSize?: number }).batchSize).toBe(10);
     expect(configs[0]!.config.maxReceiveCount).toBe(5);
     expect(configs[0]!.config).not.toHaveProperty("onMessage");
     expect(configs[0]!.config).not.toHaveProperty("schema");
@@ -82,59 +86,88 @@ describe("extractFifoQueueConfigs", () => {
 
   it("extracts deps keys", async () => {
     const source = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
       const orders = {} as any;
-      export const q = defineFifoQueue()
+      export const q = defineQueue({ fifo: true })
         .deps(() => ({ orders }))
         .onMessage(async ({ message, deps }) => {})
 ;
     `;
-    const configs = await extractFifoQueueConfigs(source);
+    const configs = await extractQueueConfigs(source);
     expect(configs[0]!.depsKeys).toEqual(["orders"]);
   });
 
   it("extracts param entries", async () => {
     const source = `
-      import { defineFifoQueue } from "effortless-aws";
-      export const q = defineFifoQueue()
+      import { defineQueue } from "effortless-aws";
+      export const q = defineQueue({ fifo: true })
         .config(({ defineSecret }) => ({ apiKey: defineSecret({ key: "api-key" }) }))
         .onMessage(async ({ message, config }) => {})
 ;
     `;
-    const configs = await extractFifoQueueConfigs(source);
+    const configs = await extractQueueConfigs(source);
     expect(configs[0]!.secretEntries).toEqual([{ propName: "apiKey", ssmKey: "api-key" }]);
   });
 
   it("extracts static globs", async () => {
     const source = `
-      import { defineFifoQueue } from "effortless-aws";
-      export const q = defineFifoQueue()
+      import { defineQueue } from "effortless-aws";
+      export const q = defineQueue({ fifo: true })
         .include("src/templates/*.ejs")
         .onMessage(async ({ message }) => {})
 ;
     `;
-    const configs = await extractFifoQueueConfigs(source);
+    const configs = await extractQueueConfigs(source);
     expect(configs[0]!.staticGlobs).toEqual(["src/templates/*.ejs"]);
+  });
+
+  it("extracts poller batchSize and batchWindow together", async () => {
+    const source = `
+      import { defineQueue } from "effortless-aws";
+      export const q = defineQueue({ fifo: true })
+        .poller({ batchSize: 3, batchWindow: "5s" })
+        .onMessage(async ({ message }) => {})
+;
+    `;
+    const configs = await extractQueueConfigs(source);
+    const poller = configs[0]!.config.poller as { batchSize?: number; batchWindow?: string };
+    expect(poller.batchSize).toBe(3);
+    expect(poller.batchWindow).toBe("5s");
+  });
+
+  it("merges multiple poller() calls", async () => {
+    const source = `
+      import { defineQueue } from "effortless-aws";
+      export const q = defineQueue({ fifo: true })
+        .poller({ batchSize: 3 })
+        .poller({ batchWindow: "2s" })
+        .onMessage(async ({ message }) => {})
+;
+    `;
+    const configs = await extractQueueConfigs(source);
+    const poller = configs[0]!.config.poller as { batchSize?: number; batchWindow?: string };
+    expect(poller.batchSize).toBe(3);
+    expect(poller.batchWindow).toBe("2s");
   });
 });
 
 // ============ Runtime wrapper tests ============
 
-describe("wrapFifoQueue", () => {
+describe("wrapQueue", () => {
   it("processes messages with onMessage", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
       globalThis.__test_messages = [];
 
-      export default defineFifoQueue()
+      export default defineQueue({ fifo: true })
         .onMessage(async ({ message }) => {
           globalThis.__test_messages.push(message.body);
         })
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     const response = await mod.handler(makeSQSEvent([
       makeSQSRecord({ messageId: "msg-1", body: JSON.stringify({ id: 1 }) }),
       makeSQSRecord({ messageId: "msg-2", body: JSON.stringify({ id: 2 }) }),
@@ -146,18 +179,18 @@ describe("wrapFifoQueue", () => {
 
   it("processes messages with onMessageBatch", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
       globalThis.__test_batch = null;
 
-      export default defineFifoQueue()
+      export default defineQueue({ fifo: true })
         .onMessageBatch(async ({ messages }) => {
           globalThis.__test_batch = messages.map(m => m.body);
         })
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     const response = await mod.handler(makeSQSEvent([
       makeSQSRecord({ messageId: "msg-1", body: JSON.stringify({ x: 1 }) }),
       makeSQSRecord({ messageId: "msg-2", body: JSON.stringify({ x: 2 }) }),
@@ -169,16 +202,16 @@ describe("wrapFifoQueue", () => {
 
   it("reports partial batch failures for onMessage", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
-      export default defineFifoQueue()
+      export default defineQueue({ fifo: true })
         .onMessage(async ({ message }) => {
           if (message.body.fail) throw new Error("boom");
         })
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     const response = await mod.handler(makeSQSEvent([
       makeSQSRecord({ messageId: "ok-1", body: JSON.stringify({ fail: false }) }),
       makeSQSRecord({ messageId: "fail-1", body: JSON.stringify({ fail: true }) }),
@@ -190,16 +223,16 @@ describe("wrapFifoQueue", () => {
 
   it("fails all messages on onMessageBatch error", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
-      export default defineFifoQueue()
+      export default defineQueue({ fifo: true })
         .onMessageBatch(async ({ messages }) => {
           throw new Error("batch failed");
         })
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     const response = await mod.handler(makeSQSEvent([
       makeSQSRecord({ messageId: "msg-1" }),
       makeSQSRecord({ messageId: "msg-2" }),
@@ -211,11 +244,12 @@ describe("wrapFifoQueue", () => {
 
   it("applies schema to message body", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
       globalThis.__test_decoded = [];
 
-      export default defineFifoQueue({
+      export default defineQueue({
+        fifo: true,
         schema: (input) => {
           const obj = input;
           return { orderId: String(obj.orderId).toUpperCase() };
@@ -227,7 +261,7 @@ describe("wrapFifoQueue", () => {
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     const response = await mod.handler(makeSQSEvent([
       makeSQSRecord({ messageId: "msg-1", body: JSON.stringify({ orderId: "abc" }) }),
     ]));
@@ -238,11 +272,11 @@ describe("wrapFifoQueue", () => {
 
   it("exposes FIFO message metadata", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
       globalThis.__test_meta = null;
 
-      export default defineFifoQueue()
+      export default defineQueue({ fifo: true })
         .onMessage(async ({ message }) => {
           globalThis.__test_meta = {
             messageId: message.messageId,
@@ -254,7 +288,7 @@ describe("wrapFifoQueue", () => {
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     await mod.handler(makeSQSEvent([
       makeSQSRecord({
         messageId: "test-id",
@@ -278,14 +312,14 @@ describe("wrapFifoQueue", () => {
 
   it("handles empty event gracefully", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
-      export default defineFifoQueue()
+      export default defineQueue({ fifo: true })
         .onMessage(async ({ message }) => {})
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     const response = await mod.handler({ Records: [] });
 
     expect(response.batchItemFailures).toEqual([]);
@@ -293,18 +327,18 @@ describe("wrapFifoQueue", () => {
 
   it("handles non-JSON body as raw string", async () => {
     const handlerCode = `
-      import { defineFifoQueue } from "effortless-aws";
+      import { defineQueue } from "effortless-aws";
 
       globalThis.__test_raw = null;
 
-      export default defineFifoQueue()
+      export default defineQueue({ fifo: true })
         .onMessage(async ({ message }) => {
           globalThis.__test_raw = message.body;
         })
 ;
     `;
 
-    const mod = await importBundle({ code: handlerCode, projectDir, type: "fifoQueue" });
+    const mod = await importBundle({ code: handlerCode, projectDir, type: "queue" });
     await mod.handler(makeSQSEvent([
       makeSQSRecord({ body: "plain text message" }),
     ]));

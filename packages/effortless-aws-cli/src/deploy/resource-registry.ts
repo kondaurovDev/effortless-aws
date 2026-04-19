@@ -52,6 +52,9 @@ export type ResourceSpec = {
   cleanup: CleanupFn;
   /** If true, skip when deleting individual handlers (only delete on full teardown) */
   shared?: boolean;
+  /** If true, this resource only exists when the handler function is present.
+   *  Removed by `cleanupStaleHandlerResources` when the user switches to resource-only mode (`.build()`). */
+  requiresHandler?: boolean;
 };
 
 // ============ Cleanup order constants ============
@@ -114,11 +117,13 @@ export const HANDLER_RESOURCES: Record<HandlerType, ResourceSpec[]> = {
   // ── defineTable ─────────────────────────────────────────
   // deployCoreLambda → Lambda + IAM Role
   // ensureTable → DynamoDB Table
+  // ensureStandardQueue → SQS DLQ for stream failures
   // ensureEventSourceMapping → managed by Lambda, no separate cleanup
   table: [
-    { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)) },
+    { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)), requiresHandler: true },
+    { type: "sqs", label: "Stream DLQ", cleanupOrder: ORDER.SQS, deriveName: (c) => `${std(c)}-dlq`, cleanup: (c) => deleteStandardQueue(`${std(c)}-dlq`), requiresHandler: true },
     { type: "dynamodb", label: "DynamoDB Table", cleanupOrder: ORDER.DYNAMODB, deriveName: std, cleanup: (c) => deleteTable(std(c)) },
-    { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`) },
+    { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`), requiresHandler: true },
   ],
 
   // ── defineApi ───────────────────────────────────────────
@@ -140,22 +145,22 @@ export const HANDLER_RESOURCES: Record<HandlerType, ResourceSpec[]> = {
     { type: "iam-role", label: "Scheduler IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-scheduler-role`, cleanup: (c) => deleteRole(`${std(c)}-scheduler-role`) },
   ],
 
-  // ── defineFifoQueue ────────────────────────────────────
+  // ── defineQueue ────────────────────────────────────────
   // deployCoreLambda → Lambda + IAM Role
   // ensureFifoQueue → SQS FIFO Queue + DLQ
-  fifoQueue: [
-    { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)) },
+  queue: [
+    { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)), requiresHandler: true },
     { type: "sqs", label: "SQS FIFO Queue + DLQ", cleanupOrder: ORDER.SQS, deriveName: std, cleanup: (c) => deleteFifoQueue(std(c)) },
-    { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`) },
+    { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`), requiresHandler: true },
   ],
 
   // ── defineBucket ───────────────────────────────────────
   // ensureBucket → S3 Bucket
   // deployCoreLambda → Lambda + IAM Role (only if handler exists)
   bucket: [
-    { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)) },
+    { type: "lambda", label: "Lambda", cleanupOrder: ORDER.LAMBDA, deriveName: std, cleanup: (c) => deleteLambda(std(c)), requiresHandler: true },
     { type: "s3-bucket", label: "S3 Bucket", cleanupOrder: ORDER.S3, deriveName: (c) => std(c).toLowerCase(), cleanup: (c) => deleteBucket(std(c).toLowerCase()) },
-    { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`) },
+    { type: "iam-role", label: "IAM Role", cleanupOrder: ORDER.IAM_ROLE, deriveName: (c) => `${std(c)}-role`, cleanup: (c) => deleteRole(`${std(c)}-role`), requiresHandler: true },
   ],
 
   // ── defineMailer ───────────────────────────────────────
@@ -232,6 +237,29 @@ export const deleteHandlerResources = (
 
       const name = spec.deriveName(ctx);
       yield* Effect.logDebug(`Deleting ${spec.label}: ${name}`);
+      yield* spec.cleanup(ctx).pipe(
+        Effect.catchAll(error =>
+          Effect.logDebug(`${spec.label} "${name}" not found or already deleted: ${error}`)
+        )
+      );
+    }
+  });
+
+/**
+ * Delete resources that require a handler function, when the handler was removed
+ * (switched to resource-only `.build()` mode). Primary resource is preserved.
+ * Idempotent — NotFound errors are swallowed.
+ */
+export const cleanupStaleHandlerResources = (
+  handlerType: HandlerType,
+  ctx: NameCtx,
+) =>
+  Effect.gen(function* () {
+    const specs = HANDLER_RESOURCES[handlerType].filter(s => s.requiresHandler);
+    const sorted = [...specs].sort((a, b) => a.cleanupOrder - b.cleanupOrder);
+    for (const spec of sorted) {
+      const name = spec.deriveName(ctx);
+      yield* Effect.logDebug(`Cleaning up stale ${spec.label}: ${name}`);
       yield* spec.cleanup(ctx).pipe(
         Effect.catchAll(error =>
           Effect.logDebug(`${spec.label} "${name}" not found or already deleted: ${error}`)

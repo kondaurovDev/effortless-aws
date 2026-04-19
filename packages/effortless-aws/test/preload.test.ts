@@ -188,11 +188,11 @@ describe("__preload on wrapper functions", () => {
     await (fn as any).__preload();
   });
 
-  it("wrapFifoQueue returns a handler with __preload", async () => {
-    const { wrapFifoQueue } = await import("~aws/runtime/wrap-fifo-queue");
+  it("wrapQueue returns a handler with __preload", async () => {
+    const { wrapQueue } = await import("~aws/runtime/wrap-queue");
 
-    const fn = wrapFifoQueue({
-      __brand: "effortless-fifo-queue",
+    const fn = wrapQueue({
+      __brand: "effortless-queue",
       __spec: { lambda: {} },
       onMessage: vi.fn(),
     } as any);

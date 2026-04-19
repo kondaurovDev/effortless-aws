@@ -5,7 +5,7 @@ export type {
   ExtractedTableFunction,
   ExtractedAppFunction,
   ExtractedStaticSiteFunction,
-  ExtractedFifoQueueFunction,
+  ExtractedQueueFunction,
   ExtractedBucketFunction,
   ExtractedMailerFunction,
   ExtractedApiFunction,

@@ -15,7 +15,7 @@ Some definitions include a Lambda handler (a callback like `onRecord`, `onMessag
 | [defineTable](#definetable) | DynamoDB table with optional stream processing |
 | [defineApp](#defineapp) | SSR app with CloudFront |
 | [defineStaticSite](#definestaticsite) | Static site with CloudFront |
-| [defineFifoQueue](#definefifoqueue) | SQS FIFO queue with message processing |
+| [defineQueue](#definequeue) | SQS FIFO queue with message processing |
 | [defineCron](#definecron) | Scheduled Lambda (cron / rate) |
 | [defineBucket](#definebucket) | S3 bucket with optional event handlers |
 | [defineMailer](#definemailer) | SES email identity for sending emails |
@@ -25,9 +25,7 @@ Resource-only definitions are useful when you need the infrastructure but handle
 
 ```typescript
 // Just a table — no Lambda, no stream
-export const users = defineTable({
-  schema: unsafeAs<User>(),
-});
+export const users = defineTable<User>();
 
 // Just a bucket — no Lambda, no event notifications
 export const uploads = defineBucket({});
@@ -52,7 +50,7 @@ export const api = defineApi({
 
 ## Type inference
 
-Every handler function (`defineApi`, `defineTable`, `defineFifoQueue`) uses TypeScript generics internally to connect types across `schema`, `setup`, `deps`, `config`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
+Every handler function (`defineApi`, `defineTable`, `defineQueue`) uses TypeScript generics internally to connect types across `schema`, `setup`, `deps`, `config`, and callbacks. You don't need to specify these generics yourself — TypeScript infers them automatically from the options you pass.
 
 Always use `schema` to provide the data type. Data in DynamoDB streams, SQS messages, and HTTP request bodies is external input — even if you wrote the producer yourself. Schemas evolve, fields get renamed, old records linger in streams after a migration, and a queue may contain messages sent before your latest deploy. A `schema` function is the single place that catches these mismatches at runtime instead of letting bad data silently flow through your logic.
 
@@ -85,28 +83,23 @@ export const orders = defineTable({
 });
 ```
 
-For **prototyping** or when you trust the data shape, use `unsafeAs<T>()` — it provides type inference without runtime validation:
+For **typing without runtime validation** (prototyping or when you trust the data shape), pass the type as a generic — `defineTable<Order>({...})`:
 
 ```typescript
 type Order = { tag: string; amount: number; status: string };
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),  // T = Order, no runtime check
+export const orders = defineTable<Order>({
   onRecord: async ({ record }) => {
     // record.new?.data is Order | undefined
   },
 });
 ```
 
-:::caution[Avoid explicit generics]
-Don't write `defineTable<Order>(...)` or `defineFifoQueue<Event>(...)`. When you specify even one generic parameter explicitly, TypeScript stops inferring the rest — `setup`, `deps`, and `config` lose their types. Always use `schema` instead.
-:::
-
 ---
 
 ## Shared options
 
-These options are available on all Lambda-backed handlers (`defineApi`, `defineTable`, `defineFifoQueue`, `defineBucket`).
+These options are available on all Lambda-backed handlers (`defineApi`, `defineTable`, `defineQueue`, `defineBucket`).
 
 ### `schema`
 
@@ -124,12 +117,6 @@ schema: (input: unknown) => {
   if (!obj?.name) throw new Error("name required");
   return { name: obj.name as string };
 },
-```
-
-For prototyping (no runtime validation), use `unsafeAs<T>()`:
-
-```typescript
-schema: unsafeAs<Order>(),
 ```
 
 ### `setup`
@@ -315,7 +302,7 @@ Auth is configured via the `enableAuth` helper injected into `setup` args. The H
 ```typescript
 import { defineApi, defineTable, secret } from "effortless-aws";
 
-export const apiKeys = defineTable({ schema: unsafeAs<ApiKey>() });
+export const apiKeys = defineTable<ApiKey>();
 
 export const api = defineApi({
   basePath: "/api",
@@ -405,7 +392,7 @@ Your domain type `T` is what goes inside `data`. The envelope (`pk`, `sk`, `tag`
 ```typescript
 export const orders = defineTable({
   // Optional — type inference
-  schema?: (input: unknown) => T,     // infers record type T (or use unsafeAs<T>())
+  schema?: (input: unknown) => T,     // infers record type T (or pass T as a generic)
 
   // Optional — table
   billingMode?: "PAY_PER_REQUEST" | "PROVISIONED",  // default: PAY_PER_REQUEST
@@ -433,17 +420,15 @@ export const orders = defineTable({
 });
 ```
 
-Use `schema` or `unsafeAs<T>()` to provide the data type. `T` is the domain data stored inside the `data` attribute — not the full DynamoDB item. TypeScript infers all generic parameters from the options object.
+Use `schema` for runtime validation, or pass the type as a generic for typing without validation. `T` is the domain data stored inside the `data` attribute — not the full DynamoDB item.
 
 ```typescript
-import { defineTable, unsafeAs } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 
 type Order = { tag: string; amount: number; status: string };
 
-// Option 1: unsafeAs<T>() — type-only, no runtime validation
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
-});
+// Option 1: type-only via generic — no runtime validation
+export const orders = defineTable<Order>();
 
 // Option 2: schema function — with runtime validation
 export const orders = defineTable({
@@ -462,9 +447,8 @@ Every item has a top-level `tag` attribute in DynamoDB (useful for GSIs and filt
 ```typescript
 type Order = { type: "order"; amount: number };
 
-export const orders = defineTable({
+export const orders = defineTable<Order>({
   tagField: "type",  // → extracts data.type as the DynamoDB tag attribute
-  schema: unsafeAs<Order>(),
 });
 ```
 
@@ -495,8 +479,7 @@ record.keys           // { pk: string; sk: string }
 ### Per-record processing
 
 ```typescript
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   onRecord: async ({ record, table }) => {
     if (record.eventName === "INSERT" && record.new) {
       console.log(`New order: $${record.new.data.amount}`);
@@ -510,8 +493,7 @@ Each record is processed individually. If one fails, only that record is retried
 ### Batch processing
 
 ```typescript
-export const events = defineTable({
-  schema: unsafeAs<ClickEvent>(),
+export const events = defineTable<ClickEvent>({
   batchSize: 100,
   onRecordBatch: async ({ records }) => {
     const inserts = records
@@ -606,8 +588,7 @@ const recent = await table.query({
 ```typescript
 import { users } from "./users.js";
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   deps: () => ({ users }),
   setup: ({ deps }) => ({ users: deps.users }),
   onRecord: async ({ record, users }) => {
@@ -624,15 +605,13 @@ export const orders = defineTable({
 
 ```typescript
 // Just creates the DynamoDB table — no stream, no Lambda
-export const users = defineTable({
-  schema: unsafeAs<User>(),
-});
+export const users = defineTable<User>();
 ```
 
 **Built-in best practices**:
 - **Single-table design** — fixed `pk`/`sk`/`tag`/`data`/`ttl` structure. Flexible access patterns via composite keys, no schema migrations needed.
 - **Partial batch failures** — each record is processed individually. If one fails, only that record is retried via `PartialBatchResponse`. The rest of the batch succeeds.
-- **Typed records** — use `schema: unsafeAs<Order>()` for type inference, or a validation function for runtime checks. `schema` validates the `data` portion of stream records.
+- **Typed records** — pass the type as a generic (`defineTable<Order>(...)`) for type inference, or use a `schema` validation function for runtime checks. `schema` validates the `data` portion of stream records.
 - **Table self-client** — `table` arg provides a typed `TableClient<T>` for the handler's own table, auto-injected with no config.
 - **Smart updates** — `update()` auto-prefixes `data.` for domain fields, so you can do partial updates without reading the full item.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for other tables with auto-wired IAM and env vars.
@@ -919,37 +898,42 @@ Google allows up to 200 URL notifications per day. If your site has more than 20
 
 ---
 
-## defineFifoQueue
+## defineQueue
 
-Creates: SQS FIFO Queue + Lambda + Event Source Mapping + IAM permissions
+Creates: SQS Queue (FIFO or standard) + Lambda + Event Source Mapping + IAM permissions
 
 ```typescript
-export const orderQueue = defineFifoQueue({
+export const orderQueue = defineQueue({
   // Optional — queue
-  batchSize?: number,                   // 1-10, default: 10
-  batchWindow?: number,                 // seconds (0-300), default: 0
+  fifo?: boolean,                       // enable FIFO semantics (default: false)
   visibilityTimeout?: number,           // seconds (default: max of timeout or 30)
   retentionPeriod?: number,             // seconds (60-1209600, default: 345600 = 4 days)
-  contentBasedDeduplication?: boolean,  // default: true
+  contentBasedDeduplication?: boolean,  // default: true (FIFO only)
 
   // Optional — lambda
   memory?: number,
   timeout?: number,
   permissions?: Permission[],           // additional IAM permissions
   schema?: (input: unknown) => T,       // validate & parse message body
-  setup?: ({ deps, config }) => C,      // deps/config only in setup
-  deps?: () => { [key]: Handler },
-  config?: { [key]: secret() | param(...) },
-  onCleanup?: ({ ctx }) => void | Promise<void>,
+})
+  // Optional — poller tuning
+  .poller({
+    batchSize?: number,                 // 1-10, default: 10
+    batchWindow?: number,               // seconds (0-300), default: 0
+  })
+  // Optional — wiring (builder methods)
+  .deps(() => ({ ... }))
+  .config({ ... })
+  .setup(({ deps, config }) => C)
+  .onCleanup(async ({ ctx }) => { ... })
 
-  // Handler — choose one mode:
+  // Terminal — choose one mode:
 
   // Mode 1: per-message processing
-  onMessage: async ({ message, ...ctx }) => { ... },
+  .onMessage(async ({ message, ...ctx }) => { ... });
 
   // Mode 2: batch processing (return { failures } for partial batch failure)
-  onMessageBatch: async ({ messages, ...ctx }) => { ... },
-});
+  // .onMessageBatch(async ({ messages, ...ctx }) => { ... });
 ```
 
 ### Callback arguments
@@ -958,12 +942,12 @@ All queue callbacks (`onMessage`, `onMessageBatch`) receive:
 
 | Arg | Type | Description |
 |-----|------|-------------|
-| `message` / `messages` | `FifoQueueMessage<T>` / `FifoQueueMessage<T>[]` | Parsed messages with typed `body` |
+| `message` / `messages` | `QueueMessage<T>` / `QueueMessage<T>[]` | Parsed messages with typed `body` |
 | `...ctx` | spread | All properties from setup return, spread directly |
 
 `deps` and `config` are available in `setup` only — wire them into the setup return to use in callbacks.
 
-The `FifoQueueMessage<T>` object:
+The `QueueMessage<T>` object:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -980,13 +964,11 @@ The `FifoQueueMessage<T>` object:
 ```typescript
 type OrderEvent = { orderId: string; action: string };
 
-export const orderQueue = defineFifoQueue({
-  schema: unsafeAs<OrderEvent>(),
-  onMessage: async ({ message }) => {
+export const orderQueue = defineQueue<OrderEvent>({ fifo: true })
+  .onMessage(async ({ message }) => {
     console.log(`Order ${message.body.orderId}: ${message.body.action}`);
     await processOrder(message.body);
-  },
-});
+  });
 ```
 
 Each message is processed individually. If one fails, only that message is retried via `batchItemFailures`. The rest of the batch succeeds.
@@ -994,13 +976,11 @@ Each message is processed individually. If one fails, only that message is retri
 ### Batch processing
 
 ```typescript
-export const notifications = defineFifoQueue({
-  schema: unsafeAs<Notification>(),
-  batchSize: 5,
-  onMessageBatch: async ({ messages }) => {
+export const notifications = defineQueue<Notification>({ fifo: true })
+  .poller({ batchSize: 5 })
+  .onMessageBatch(async ({ messages }) => {
     await sendAll(messages.map(m => m.body));
-  },
-});
+  });
 ```
 
 All messages in a batch are processed together. If the handler throws, all messages are reported as failed. Return `{ failures: string[] }` with messageIds for partial batch failure reporting.
@@ -1008,16 +988,17 @@ All messages in a batch are processed together. If the handler throws, all messa
 ### Schema validation
 
 ```typescript
-export const events = defineFifoQueue({
+export const events = defineQueue({
+  fifo: true,
   schema: (input) => {
     const obj = input as any;
     if (!obj?.eventType) throw new Error("eventType is required");
     return { eventType: obj.eventType as string, payload: obj.payload };
   },
-  onMessage: async ({ message }) => {
+})
+  .onMessage(async ({ message }) => {
     // message.body is typed: { eventType: string; payload: unknown }
-  },
-});
+  });
 ```
 
 When `schema` throws, the message is reported as a batch item failure automatically.
@@ -1027,18 +1008,16 @@ When `schema` throws, the message is reported as a batch item failure automatica
 ```typescript
 import { orders } from "./orders.js";
 
-export const orderProcessor = defineFifoQueue({
-  schema: unsafeAs<OrderEvent>(),
-  deps: () => ({ orders }),
-  setup: ({ deps }) => ({ orders: deps.orders }),
-  onMessage: async ({ message, orders }) => {
+export const orderProcessor = defineQueue<OrderEvent>({ fifo: true })
+  .deps(() => ({ orders }))
+  .setup(({ deps }) => ({ orders: deps.orders }))
+  .onMessage(async ({ message, orders }) => {
     // orders is TableClient<Order>
     await orders.put({
       pk: `ORDER#${message.body.orderId}`, sk: "STATUS",
       data: { tag: "order", status: "processing" },
     });
-  },
-});
+  });
 ```
 
 Dependencies are auto-wired: the framework sets environment variables, IAM permissions, and provides typed `TableClient` instances at runtime.
@@ -1047,7 +1026,7 @@ Dependencies are auto-wired: the framework sets environment variables, IAM permi
 - **Partial batch failures** — each message is processed individually (`onMessage` mode). If one fails, only that message is retried via `batchItemFailures`. The rest of the batch succeeds.
 - **FIFO ordering** — messages within the same `messageGroupId` are delivered in order. Use message groups to partition work while maintaining ordering guarantees.
 - **Content-based deduplication** — enabled by default. SQS uses the message body hash to prevent duplicates within the 5-minute deduplication interval.
-- **Typed messages** — use `schema: unsafeAs<OrderEvent>()` or a validation function for typed `message.body` with automatic JSON parsing.
+- **Typed messages** — pass the type as a generic (`defineQueue<OrderEvent>({ fifo: true })`) or use a `schema` validation function for typed `message.body` with automatic JSON parsing.
 - **Schema validation** — when `schema` is set, each message body is validated before your handler runs. Invalid messages are automatically reported as failures.
 - **Typed dependencies** — `deps` provides typed `TableClient<T>` instances for DynamoDB tables with auto-wired IAM and env vars.
 - **Cold start optimization** — the `setup` factory runs once and is cached across invocations.

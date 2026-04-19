@@ -36,7 +36,7 @@ const CODE_TYPE_MAP: Record<string, HandlerType> = {
   table: "table",
   api: "api",
   cron: "cron",
-  fifoQueue: "fifoQueue",
+  queue: "queue",
   bucket: "bucket",
   mailer: "mailer",
   staticSite: "staticSite",
@@ -51,7 +51,7 @@ const inferHandlerType = (arns: string[]): HandlerType | undefined => {
   if (types.has("scheduler")) return "cron";
   if (types.has("cloudfront-distribution") && arns.some(a => a.includes("-site"))) return "staticSite";
   if (types.has("cloudfront-distribution")) return "app";
-  if (types.has("sqs")) return "fifoQueue";
+  if (types.has("sqs")) return "queue";
   if (types.has("ses")) return "mailer";
   if (types.has("s3-bucket")) return "bucket";
   if (types.has("lambda")) return "api";
@@ -77,7 +77,7 @@ const PRIMARY_RESOURCE: Record<HandlerType, ResourceType> = {
   table: "lambda",
   api: "lambda",
   cron: "lambda",
-  fifoQueue: "lambda",
+  queue: "lambda",
   bucket: "lambda",
   mailer: "ses",
   staticSite: "cloudfront-distribution",

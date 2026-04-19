@@ -27,13 +27,11 @@ You have users and you want to store them in DynamoDB. Define the table with a t
 
 ```typescript
 // src/users.ts
-import { defineTable, unsafeAs } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 
 type User = { tag: string; email: string; name: string; createdAt: string };
 
-export const users = defineTable({
-  schema: unsafeAs<User>(),
-});
+export const users = defineTable<User>();
 ```
 
 After deploy, you get a DynamoDB table named `{project}-{stage}-users`. Other handlers can reference this table via `deps` and get a typed client for `.put()`, `.get()`, `.delete()`, `.update()`, and `.query()`.
@@ -64,9 +62,8 @@ The top-level `tag` attribute in DynamoDB is auto-extracted from your data — b
 ```typescript
 type Order = { type: "order"; amount: number; status: string };
 
-export const orders = defineTable({
+export const orders = defineTable<Order>({
   tagField: "type",  // → extracts data.type as the DynamoDB tag attribute
-  schema: unsafeAs<Order>(),
 });
 ```
 
@@ -117,12 +114,11 @@ Add `onRecord` and your function runs for every change.
 
 ```typescript
 // src/orders.ts
-import { defineTable, unsafeAs } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 
 type Order = { tag: string; product: string; amount: number; status: string };
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   onRecord: async ({ record }) => {
     if (record.eventName === "INSERT" && record.new) {
       console.log(`New order: ${record.new.data.product} — $${record.new.data.amount}`);
@@ -154,12 +150,11 @@ Use `onRecordBatch` to receive all records at once.
 
 ```typescript
 // src/analytics.ts
-import { defineTable, unsafeAs } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 
 type ClickEvent = { tag: string; page: string; userId: string; timestamp: string };
 
-export const clickEvents = defineTable({
-  schema: unsafeAs<ClickEvent>(),
+export const clickEvents = defineTable<ClickEvent>({
   batchSize: 100,
   onRecordBatch: async ({ records }) => {
     const inserts = records
@@ -176,8 +171,7 @@ export const clickEvents = defineTable({
 If the handler throws, all records in the batch are reported as failed. For partial failure support, return `{ failures: string[] }` with the sequence numbers of failed records:
 
 ```typescript
-export const payments = defineTable({
-  schema: unsafeAs<Payment>(),
+export const payments = defineTable<Payment>({
   batchSize: 50,
   onRecordBatch: async ({ records }) => {
     const failures: string[] = [];
@@ -293,9 +287,7 @@ export const getUser = defineApi({
 Sometimes you need a table but don't need stream processing — it's just a data store. Skip the `onRecord`/`onRecordBatch` handler and you get a table without a stream Lambda.
 
 ```typescript
-export const cache = defineTable({
-  schema: unsafeAs<CacheEntry>(),
-});
+export const cache = defineTable<CacheEntry>();
 // No onRecord — just a table. Reference it with deps from other handlers.
 ```
 

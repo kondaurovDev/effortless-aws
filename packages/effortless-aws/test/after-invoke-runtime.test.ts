@@ -11,10 +11,10 @@ vi.mock("@aws-sdk/client-dynamodb", () => ({
 
 import { wrapApi } from "~aws/runtime/wrap-api"
 import { wrapTableStream } from "~aws/runtime/wrap-table-stream"
-import { wrapFifoQueue } from "~aws/runtime/wrap-fifo-queue"
+import { wrapQueue } from "~aws/runtime/wrap-queue"
 import type { ApiHandler } from "~aws/handlers/define-api"
 import type { TableHandler } from "~aws/handlers/define-table"
-import type { FifoQueueHandler } from "~aws/handlers/define-fifo-queue"
+import type { QueueHandler } from "~aws/handlers/define-queue"
 
 const makeApiEvent = (overrides: Record<string, unknown> = {}) => ({
   requestContext: { http: { method: "POST", path: "/test/run" } },
@@ -181,19 +181,19 @@ describe("onCleanup lifecycle hook", () => {
 
   });
 
-  describe("FIFO queue handler (wrapFifoQueue)", () => {
+  describe("Queue handler (wrapQueue)", () => {
 
     it("should call onCleanup after processing messages", async () => {
       const afterInvoke = vi.fn();
 
       const handler = {
-        __brand: "effortless-fifo-queue",
+        __brand: "effortless-queue",
         __spec: {},
         onCleanup: afterInvoke,
         onMessage: async () => {},
-      } as unknown as FifoQueueHandler;
+      } as unknown as QueueHandler;
 
-      const wrapped = wrapFifoQueue(handler);
+      const wrapped = wrapQueue(handler);
       await wrapped(makeSqsEvent([{ body: '{"test":true}' }]));
 
       expect(afterInvoke).toHaveBeenCalledOnce();
@@ -203,13 +203,13 @@ describe("onCleanup lifecycle hook", () => {
       const afterInvoke = vi.fn();
 
       const handler = {
-        __brand: "effortless-fifo-queue",
+        __brand: "effortless-queue",
         __spec: {},
         onCleanup: afterInvoke,
         onMessage: async () => { throw new Error("message error"); },
-      } as unknown as FifoQueueHandler;
+      } as unknown as QueueHandler;
 
-      const wrapped = wrapFifoQueue(handler);
+      const wrapped = wrapQueue(handler);
       const result = await wrapped(makeSqsEvent([{ body: '{"test":true}' }]));
 
       expect(result.batchItemFailures).toHaveLength(1);

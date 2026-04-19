@@ -1,6 +1,6 @@
 import { defineMcp } from "effortless-aws";
 import { z } from "zod/v4";
-import { db } from "./table";
+import { db as table } from "./table";
 
 // ── MCP server ───────────────────────────────────────────────
 
@@ -9,7 +9,7 @@ export const mcp = defineMcp({
   version: "1.0.0",
   instructions: "Contacts CRM server. Use tools to create, read, and list contacts. Use the summarize_contact prompt to generate personalized outreach messages.",
 })
-  .deps(() => ({ db }))
+  .deps(() => ({ db: table }))
   .config(({ defineSecret }) => ({
     mcpToken: defineSecret({ key: "mcp-token", generate: "hex:32" }),
   }))

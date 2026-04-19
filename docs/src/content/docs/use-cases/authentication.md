@@ -25,7 +25,7 @@ import { defineApi, defineTable, secret } from "effortless-aws";
 type ApiKey = { pk: string; sk: string; role: "admin" | "user" };
 type Session = { userId: string; role: "admin" | "user" };
 
-export const apiKeys = defineTable({ schema: unsafeAs<ApiKey>() });
+export const apiKeys = defineTable<ApiKey>();
 
 export const api = defineApi({
   basePath: "/api",

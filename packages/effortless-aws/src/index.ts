@@ -6,7 +6,7 @@ export { defineConfig } from "./config"
 export { defineTable } from "./handlers/define-table"
 export { defineApp } from "./handlers/define-app"
 export { defineStaticSite } from "./handlers/define-static-site"
-export { defineFifoQueue } from "./handlers/define-fifo-queue"
+export { defineQueue } from "./handlers/define-queue"
 export { defineBucket } from "./handlers/define-bucket"
 export { defineMailer } from "./handlers/define-mailer"
 export { defineApi } from "./handlers/define-api"
@@ -21,7 +21,7 @@ export type { HttpRequest, HttpResponse, HttpMethod, ContentType } from "./handl
 export type { TableConfig, TableRecord, StreamView } from "./handlers/define-table"
 export type { AppConfig, AppHandler } from "./handlers/define-app"
 export type { StaticSiteConfig, StaticSiteHandler, StaticSiteSeo, MiddlewareRequest, MiddlewareResult, MiddlewareRedirect, MiddlewareDeny, MiddlewareHandler } from "./handlers/define-static-site"
-export type { FifoQueueConfig, FifoQueueMessage } from "./handlers/define-fifo-queue"
+export type { QueueConfig, QueueMessage, QueuePollerConfig } from "./handlers/define-queue"
 export type { BucketConfig, BucketEvent, BucketEntityConfig } from "./handlers/define-bucket"
 export type { MailerConfig, MailerHandler } from "./handlers/define-mailer"
 export type { AuthOptions, ApiConfig, ApiHandler, ApiRoutes, CacheOptions } from "./handlers/define-api"
@@ -39,13 +39,13 @@ export type McpPromptDef = _McpPromptDef
 
 // Handler types — re-exported without internal generic C
 import type { TableHandler as _TableHandler } from "./handlers/define-table"
-import type { FifoQueueHandler as _FifoQueueHandler } from "./handlers/define-fifo-queue"
+import type { QueueHandler as _QueueHandler } from "./handlers/define-queue"
 import type { BucketHandler as _BucketHandler } from "./handlers/define-bucket"
 import type { CronHandler as _CronHandler } from "./handlers/define-cron"
 import type { WorkerHandler as _WorkerHandler } from "./handlers/define-worker"
 import type { McpHandler as _McpHandler } from "./handlers/define-mcp"
 export type TableHandler<T = Record<string, unknown>> = _TableHandler<T, any>
-export type FifoQueueHandler<T = unknown> = _FifoQueueHandler<T, any>
+export type QueueHandler<T = unknown> = _QueueHandler<T, any>
 export type BucketHandler<Entities extends Record<string, any> = {}> = _BucketHandler<any, Entities>
 export type CronHandler = _CronHandler<any>
 export type WorkerHandler<T = any> = _WorkerHandler<T, any>

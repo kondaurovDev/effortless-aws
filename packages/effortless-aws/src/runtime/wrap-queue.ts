@@ -1,4 +1,4 @@
-import type { FifoQueueHandler, FifoQueueMessage } from "../handlers/define-fifo-queue";
+import type { QueueHandler, QueueMessage } from "../handlers/define-queue";
 import { createHandlerRuntime } from "./handler-utils";
 
 type SQSRecord = {
@@ -29,8 +29,8 @@ type BatchItemFailure = {
 const parseMessages = <T>(
   rawRecords: SQSRecord[],
   schema?: (input: unknown) => T
-): FifoQueueMessage<T>[] => {
-  const messages: FifoQueueMessage<T>[] = [];
+): QueueMessage<T>[] => {
+  const messages: QueueMessage<T>[] = [];
   const decode = schema ?? ((x: unknown) => x as T);
 
   for (const record of rawRecords) {
@@ -58,12 +58,12 @@ const parseMessages = <T>(
   return messages;
 };
 
-export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
+export const wrapQueue = <T, C>(handler: QueueHandler<T, C>) => {
   if (!handler.onMessage && !handler.onMessageBatch) {
-    throw new Error("wrapFifoQueue requires a handler with onMessage or onMessageBatch defined");
+    throw new Error("wrapQueue requires a handler with onMessage or onMessageBatch defined");
   }
 
-  const rt = createHandlerRuntime(handler, "fifo-queue", handler.__spec.lambda?.logLevel ?? "info");
+  const rt = createHandlerRuntime(handler, "queue", handler.__spec.lambda?.logLevel ?? "info");
   const handleError = handler.onError ?? (({ error }: { error: unknown }) => console.error(`[effortless:${rt.handlerName}]`, error));
 
   const fn = async (event: SQSEvent) => {
@@ -80,7 +80,7 @@ export const wrapFifoQueue = <T, C>(handler: FifoQueueHandler<T, C>) => {
       ctxProps = ctx && typeof ctx === "object" ? { ...ctx as Record<string, unknown> } : {};
       const shared = { ...ctxProps };
 
-      let messages: FifoQueueMessage<T>[];
+      let messages: QueueMessage<T>[];
       try {
         messages = parseMessages<T>(rawRecords, handler.schema);
       } catch (error) {

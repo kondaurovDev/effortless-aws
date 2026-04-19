@@ -15,7 +15,7 @@ export default defineConfig([
   {
     entry: {
       "runtime/wrap-table-stream": "src/runtime/wrap-table-stream.ts",
-      "runtime/wrap-fifo-queue": "src/runtime/wrap-fifo-queue.ts",
+      "runtime/wrap-queue": "src/runtime/wrap-queue.ts",
       "runtime/wrap-bucket": "src/runtime/wrap-bucket.ts",
       "runtime/wrap-middleware": "src/runtime/wrap-middleware.ts",
       "runtime/wrap-api": "src/runtime/wrap-api.ts",

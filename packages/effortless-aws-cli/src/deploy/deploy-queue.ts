@@ -1,17 +1,18 @@
 import { Effect } from "effect";
-import type { ExtractedFifoQueueFunction } from "~/discovery";
+import type { ExtractedQueueFunction } from "~/discovery";
 import { toSeconds } from "effortless-aws";
 import { ensureFifoQueue, ensureSqsEventSourceMapping } from "../aws";
 import { makeTags, resolveStage, type TagContext } from "../core";
+import { cleanupStaleHandlerResources } from "./resource-registry";
 import {
   type DeployInput,
   deployCoreLambda,
 } from "./shared";
 
-export type DeployFifoQueueResult = {
+export type DeployQueueResult = {
   exportName: string;
-  functionArn: string;
-  status: import("~/aws/lambda").LambdaStatus;
+  functionArn?: string;
+  status: import("~/aws/lambda").LambdaStatus | "unchanged";
   bundleSize?: number;
   queueUrl: string;
   queueArn: string;
@@ -19,9 +20,9 @@ export type DeployFifoQueueResult = {
   dlqArn: string;
 };
 
-type DeployFifoQueueFunctionInput = {
+type DeployQueueFunctionInput = {
   input: DeployInput;
-  fn: ExtractedFifoQueueFunction;
+  fn: ExtractedQueueFunction;
   layerArn?: string;
   external?: string[];
   depsEnv?: Record<string, string>;
@@ -29,12 +30,12 @@ type DeployFifoQueueFunctionInput = {
   staticGlobs?: string[];
 };
 
-const FIFO_QUEUE_DEFAULT_PERMISSIONS = ["sqs:*", "logs:*"] as const;
+const QUEUE_DEFAULT_PERMISSIONS = ["sqs:*", "logs:*"] as const;
 
 /** @internal */
-export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployFifoQueueFunctionInput) =>
+export const deployQueueFunction = ({ input, fn, layerArn, external, depsEnv, depsPermissions, staticGlobs }: DeployQueueFunctionInput) =>
   Effect.gen(function* () {
-    const { exportName, config } = fn;
+    const { exportName, config, hasHandler } = fn;
     const handlerName = exportName;
 
     const tagCtx: TagContext = {
@@ -57,6 +58,25 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       tags: makeTags(tagCtx),
     });
 
+    // Resource-only mode: queue is consumed by an external system, no Lambda
+    if (!hasHandler) {
+      yield* cleanupStaleHandlerResources("queue", {
+        project: input.project,
+        stage: tagCtx.stage,
+        handler: handlerName,
+        region: input.region,
+      });
+      yield* Effect.logDebug(`Queue deployment complete (resource-only)! Queue: ${queueUrl}`);
+      return {
+        exportName,
+        status: "unchanged" as const,
+        queueUrl,
+        queueArn,
+        dlqUrl,
+        dlqArn,
+      };
+    }
+
     // Inject queue URL/ARN into Lambda env vars
     const queueEnv: Record<string, string> = {
       EFF_QUEUE_URL: queueUrl,
@@ -69,8 +89,8 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
       input,
       exportName,
       handlerName,
-      defaultPermissions: FIFO_QUEUE_DEFAULT_PERMISSIONS,
-      bundleType: "fifoQueue",
+      defaultPermissions: QUEUE_DEFAULT_PERMISSIONS,
+      bundleType: "queue",
       ...(config.lambda?.permissions ? { permissions: config.lambda.permissions } : {}),
       ...(config.lambda?.memory ? { memory: config.lambda.memory } : {}),
       ...(config.lambda?.timeout ? { timeout: toSeconds(config.lambda.timeout) } : {}),
@@ -86,11 +106,11 @@ export const deployFifoQueueFunction = ({ input, fn, layerArn, external, depsEnv
     yield* ensureSqsEventSourceMapping({
       functionArn,
       queueArn,
-      batchSize: config.batchSize ?? 10,
-      batchWindow: config.batchWindow ? toSeconds(config.batchWindow) : undefined,
+      batchSize: config.poller?.batchSize ?? 10,
+      batchWindow: config.poller?.batchWindow ? toSeconds(config.poller.batchWindow) : undefined,
     });
 
-    yield* Effect.logDebug(`FIFO queue deployment complete! Queue: ${queueUrl}`);
+    yield* Effect.logDebug(`Queue deployment complete! Queue: ${queueUrl}`);
 
     return {
       exportName,

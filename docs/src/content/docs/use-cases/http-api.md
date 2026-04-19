@@ -41,13 +41,11 @@ Use `.setup()` to initialize shared resources once at cold start. Whatever `.set
 
 ```typescript
 // src/tasks.ts
-import { defineTable, defineApi, unsafeAs } from "effortless-aws";
+import { defineTable, defineApi } from "effortless-aws";
 
 type Task = { tag: string; title: string; done: boolean; createdAt: string };
 
-export const tasks = defineTable({
-  schema: unsafeAs<Task>(),
-});
+export const tasks = defineTable<Task>();
 
 export default defineApi({
   basePath: "/tasks",

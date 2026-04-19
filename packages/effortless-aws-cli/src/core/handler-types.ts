@@ -27,12 +27,12 @@ export const handlers = {
     wrapperFn: "wrapMiddleware",
     wrapperPath: "~/runtime/wrap-middleware",
   },
-  fifoQueue: {
-    brand: "effortless-fifo-queue",
-    defineFn: "defineFifoQueue",
+  queue: {
+    brand: "effortless-queue",
+    defineFn: "defineQueue",
     handlerProps: ["onMessage", "onMessageBatch"] as const,
-    wrapperFn: "wrapFifoQueue",
-    wrapperPath: "~/runtime/wrap-fifo-queue",
+    wrapperFn: "wrapQueue",
+    wrapperPath: "~/runtime/wrap-queue",
   },
   bucket: {
     brand: "effortless-bucket",

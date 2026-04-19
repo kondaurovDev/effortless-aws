@@ -25,7 +25,7 @@ describe("generateEntryPoint", () => {
       ["api", "wrapApi"],
       ["cron", "wrapCron"],
       ["bucket", "wrapBucket"],
-      ["fifoQueue", "wrapFifoQueue"],
+      ["queue", "wrapQueue"],
       ["table", "wrapTableStream"],
       ["mcp", "wrapMcp"],
     ];
@@ -42,7 +42,7 @@ describe("generateEntryPoint", () => {
   });
 
   it("always includes __preload call after handler export", () => {
-    const types: HandlerType[] = ["api", "cron", "bucket", "fifoQueue", "table", "mcp"];
+    const types: HandlerType[] = ["api", "cron", "bucket", "queue", "table", "mcp"];
 
     for (const type of types) {
       const result = generateEntryPoint("./handler.ts", "handler", type);

@@ -18,13 +18,15 @@ const streamViewToSpec = (view: StreamView) => ({
 export type EnsureTableInput = {
   name: string;
   billingMode?: BillingMode;
+  /** When `undefined`, reconciles stream to disabled. When set, ensures stream is enabled with this view. */
   streamView?: StreamView;
   tags?: Record<string, string>;
 };
 
 export type EnsureTableResult = {
   tableArn: string;
-  streamArn: string;
+  /** Present only when the stream is enabled on the table. */
+  streamArn?: string;
 };
 
 const waitForTableActive = (tableName: string) =>
@@ -76,7 +78,7 @@ const ensureTimeToLive = (tableName: string, attributeName: string) =>
 
 export const ensureTable = (input: EnsureTableInput) =>
   Effect.gen(function* () {
-    const { name, billingMode = "PAY_PER_REQUEST", streamView = "NEW_AND_OLD_IMAGES", tags } = input;
+    const { name, billingMode = "PAY_PER_REQUEST", streamView, tags } = input;
 
     const existingTable = yield* dynamodb.make("describe_table", { TableName: name }).pipe(
       Effect.map(result => result.Table),
@@ -112,14 +114,14 @@ export const ensureTable = (input: EnsureTableInput) =>
           Projection: { ProjectionType: "ALL" },
         }],
         BillingMode: billingMode,
-        StreamSpecification: streamViewToSpec(streamView),
+        ...(streamView !== undefined ? { StreamSpecification: streamViewToSpec(streamView) } : {}),
         Tags: tags ? toAwsTagList(tags) : undefined
       });
 
       const table = yield* waitForTableActive(name);
       result = {
         tableArn: table!.TableArn!,
-        streamArn: table!.LatestStreamArn!
+        ...(table!.LatestStreamArn ? { streamArn: table!.LatestStreamArn } : {})
       };
     } else {
       yield* Effect.logInfo(`Table ${name} already exists`);
@@ -132,11 +134,36 @@ export const ensureTable = (input: EnsureTableInput) =>
         });
       }
 
-      if (!existingTable.StreamSpecification?.StreamEnabled) {
+      // Reconcile stream state: enable / disable / change view
+      const desiredEnabled = streamView !== undefined;
+      const currentEnabled = existingTable.StreamSpecification?.StreamEnabled ?? false;
+      const currentView = existingTable.StreamSpecification?.StreamViewType;
+
+      if (desiredEnabled && !currentEnabled) {
         yield* Effect.logInfo(`Enabling stream on table ${name}...`);
         yield* dynamodb.make("update_table", {
           TableName: name,
-          StreamSpecification: streamViewToSpec(streamView)
+          StreamSpecification: streamViewToSpec(streamView!)
+        });
+        yield* waitForTableActive(name);
+      } else if (!desiredEnabled && currentEnabled) {
+        yield* Effect.logInfo(`Disabling stream on table ${name}...`);
+        yield* dynamodb.make("update_table", {
+          TableName: name,
+          StreamSpecification: { StreamEnabled: false }
+        });
+        yield* waitForTableActive(name);
+      } else if (desiredEnabled && currentEnabled && currentView !== streamView) {
+        // AWS requires two steps to change StreamViewType: disable, then re-enable with new view.
+        yield* Effect.logInfo(`Changing stream view on table ${name}: ${currentView} → ${streamView}...`);
+        yield* dynamodb.make("update_table", {
+          TableName: name,
+          StreamSpecification: { StreamEnabled: false }
+        });
+        yield* waitForTableActive(name);
+        yield* dynamodb.make("update_table", {
+          TableName: name,
+          StreamSpecification: streamViewToSpec(streamView!)
         });
         yield* waitForTableActive(name);
       }
@@ -172,7 +199,7 @@ export const ensureTable = (input: EnsureTableInput) =>
       const updated = yield* dynamodb.make("describe_table", { TableName: name });
       result = {
         tableArn: updated.Table!.TableArn!,
-        streamArn: updated.Table!.LatestStreamArn!
+        ...(updated.Table!.LatestStreamArn ? { streamArn: updated.Table!.LatestStreamArn } : {})
       };
     }
 
@@ -188,11 +215,31 @@ export type EnsureEventSourceMappingInput = {
   batchSize?: number;
   batchWindow?: number;
   startingPosition?: "LATEST" | "TRIM_HORIZON";
+  onFailureArn: string;
+  maximumRetryAttempts?: number;
 };
 
 export const ensureEventSourceMapping = (input: EnsureEventSourceMappingInput) =>
   Effect.gen(function* () {
-    const { functionArn, streamArn, batchSize = 100, batchWindow, startingPosition = "LATEST" } = input;
+    const { functionArn, streamArn, batchSize = 100, batchWindow, startingPosition = "LATEST", onFailureArn, maximumRetryAttempts = 1 } = input;
+
+    const destinationConfig = { OnFailure: { Destination: onFailureArn } };
+
+    // Remove stale mappings that point at a previous stream of the same table
+    // (left over when the stream was disabled then re-enabled — AWS assigns a new stream ARN).
+    const tableArnPrefix = streamArn.split("/stream/")[0];
+    const allMappings = yield* lambda.make("list_event_source_mappings", {
+      FunctionName: functionArn,
+    });
+    for (const m of allMappings.EventSourceMappings ?? []) {
+      const arn = m.EventSourceArn;
+      if (arn && tableArnPrefix && arn.startsWith(`${tableArnPrefix}/stream/`) && arn !== streamArn) {
+        yield* Effect.logInfo(`Removing stale event source mapping ${m.UUID} (previous stream of same table)`);
+        yield* lambda.make("delete_event_source_mapping", { UUID: m.UUID! }).pipe(
+          Effect.catchAll(() => Effect.void)
+        );
+      }
+    }
 
     const existingMappings = yield* lambda.make("list_event_source_mappings", {
       FunctionName: functionArn,
@@ -208,6 +255,10 @@ export const ensureEventSourceMapping = (input: EnsureEventSourceMappingInput) =
         FunctionName: functionArn,
         BatchSize: batchSize,
         ...(batchWindow !== undefined ? { MaximumBatchingWindowInSeconds: batchWindow } : {}),
+        FunctionResponseTypes: ["ReportBatchItemFailures"],
+        BisectBatchOnFunctionError: true,
+        MaximumRetryAttempts: maximumRetryAttempts,
+        DestinationConfig: destinationConfig,
         Enabled: true
       });
       return existing.UUID!;
@@ -220,6 +271,10 @@ export const ensureEventSourceMapping = (input: EnsureEventSourceMappingInput) =
       BatchSize: batchSize,
       ...(batchWindow !== undefined ? { MaximumBatchingWindowInSeconds: batchWindow } : {}),
       StartingPosition: startingPosition,
+      FunctionResponseTypes: ["ReportBatchItemFailures"],
+      BisectBatchOnFunctionError: true,
+      MaximumRetryAttempts: maximumRetryAttempts,
+      DestinationConfig: destinationConfig,
       Enabled: true
     });
 

@@ -7,14 +7,14 @@ import { Effect } from "effect";
 import { FileSystem } from "@effect/platform";
 import type { HandlerType, ExtractedConfig } from "../core";
 import { extractAll, extractConfigs, resolveStaticSiteRoutes } from "./extract";
-import type { TableConfig, AppConfig, StaticSiteConfig, FifoQueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig, McpConfig } from "effortless-aws";
+import type { TableConfig, AppConfig, StaticSiteConfig, QueueConfig, BucketConfig, MailerConfig, ApiConfig, CronConfig, WorkerConfig, McpConfig } from "effortless-aws";
 
 // ============ Types ============
 
 export type ExtractedTableFunction = ExtractedConfig<TableConfig>;
 export type ExtractedAppFunction = ExtractedConfig<AppConfig>;
 export type ExtractedStaticSiteFunction = ExtractedConfig<StaticSiteConfig>;
-export type ExtractedFifoQueueFunction = ExtractedConfig<FifoQueueConfig>;
+export type ExtractedQueueFunction = ExtractedConfig<QueueConfig>;
 export type ExtractedBucketFunction = ExtractedConfig<BucketConfig>;
 export type ExtractedMailerFunction = ExtractedConfig<MailerConfig>;
 export type ExtractedApiFunction = ExtractedConfig<ApiConfig>;
@@ -26,7 +26,7 @@ export type DiscoveredHandlers = {
   tableHandlers: { file: string; exports: ExtractedTableFunction[] }[];
   appHandlers: { file: string; exports: ExtractedAppFunction[] }[];
   staticSiteHandlers: { file: string; exports: ExtractedStaticSiteFunction[] }[];
-  fifoQueueHandlers: { file: string; exports: ExtractedFifoQueueFunction[] }[];
+  queueHandlers: { file: string; exports: ExtractedQueueFunction[] }[];
   bucketHandlers: { file: string; exports: ExtractedBucketFunction[] }[];
   mailerHandlers: { file: string; exports: ExtractedMailerFunction[] }[];
   apiHandlers: { file: string; exports: ExtractedApiFunction[] }[];
@@ -43,14 +43,14 @@ export const discoverHandlers = (files: string[]) =>
     const fileSystem = yield* FileSystem.FileSystem;
 
     const result: DiscoveredHandlers = {
-      tableHandlers: [], appHandlers: [], staticSiteHandlers: [], fifoQueueHandlers: [],
+      tableHandlers: [], appHandlers: [], staticSiteHandlers: [], queueHandlers: [],
       bucketHandlers: [], mailerHandlers: [], apiHandlers: [], cronHandlers: [],
       workerHandlers: [], mcpHandlers: [],
     };
 
     const typeToKey: Record<HandlerType, keyof DiscoveredHandlers> = {
       table: "tableHandlers", app: "appHandlers", staticSite: "staticSiteHandlers",
-      fifoQueue: "fifoQueueHandlers", bucket: "bucketHandlers", mailer: "mailerHandlers",
+      queue: "queueHandlers", bucket: "bucketHandlers", mailer: "mailerHandlers",
       api: "apiHandlers", cron: "cronHandlers", worker: "workerHandlers", mcp: "mcpHandlers",
     };
 
@@ -102,7 +102,7 @@ export const flattenHandlers = (discovered: DiscoveredHandlers) => {
     ...entries("table", discovered.tableHandlers),
     ...entries("app", discovered.appHandlers),
     ...entries("site", discovered.staticSiteHandlers),
-    ...entries("queue", discovered.fifoQueueHandlers),
+    ...entries("queue", discovered.queueHandlers),
     ...entries("bucket", discovered.bucketHandlers),
     ...entries("mailer", discovered.mailerHandlers),
     ...entries("api", discovered.apiHandlers),

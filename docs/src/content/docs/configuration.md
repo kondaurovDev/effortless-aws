@@ -20,7 +20,7 @@ export default defineConfig({
 });
 ```
 
-That's the minimum — a name, a region, and a pattern to find handlers. The `defineConfig` helper gives you full autocompletion and type checking. Effortless will discover all `defineApi`, `defineTable`, `defineFifoQueue`, and other handler exports in matching files.
+That's the minimum — a name, a region, and a pattern to find handlers. The `defineConfig` helper gives you full autocompletion and type checking. Effortless will discover all `defineApi`, `defineTable`, `defineQueue`, and other handler exports in matching files.
 
 ## Project Config
 
@@ -145,7 +145,7 @@ Effortless auto-manages permissions for built-in features. You only need `permis
 
 ### `logLevel`
 
-Controls the verbosity of structured logs emitted to CloudWatch. Defaults to `"info"` for `defineApi`, `defineTable`, and `defineFifoQueue`.
+Controls the verbosity of structured logs emitted to CloudWatch. Defaults to `"info"` for `defineApi`, `defineTable`, and `defineQueue`.
 
 | Level | What gets logged |
 |-------|-----------------|

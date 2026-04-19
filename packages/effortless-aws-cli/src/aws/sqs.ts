@@ -18,7 +18,12 @@ export type EnsureFifoQueueResult = {
   dlqArn: string;
 };
 
-const ensureSingleFifoQueue = (opts: {
+export type EnsureStandardQueueInput = {
+  name: string;
+  tags?: Record<string, string>;
+};
+
+const ensureSingleQueue = (opts: {
   queueName: string;
   attributes: Record<string, string>;
   tags?: Record<string, string>;
@@ -47,13 +52,15 @@ const ensureSingleFifoQueue = (opts: {
       });
       queueUrl = result.QueueUrl!;
     } else {
-      yield* Effect.logDebug(`FIFO queue ${queueName} already exists`);
+      yield* Effect.logDebug(`Queue ${queueName} already exists`);
       queueUrl = existingUrl;
 
-      yield* sqs.make("set_queue_attributes", {
-        QueueUrl: queueUrl,
-        Attributes: attributes,
-      });
+      if (Object.keys(attributes).length > 0) {
+        yield* sqs.make("set_queue_attributes", {
+          QueueUrl: queueUrl,
+          Attributes: attributes,
+        });
+      }
 
       if (tags) {
         yield* sqs.make("tag_queue", {
@@ -90,7 +97,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
 
     // 1. Create DLQ first (needed for RedrivePolicy)
     const dlqName = `${name}-dlq.fifo`;
-    const { queueUrl: dlqUrl, queueArn: dlqArn } = yield* ensureSingleFifoQueue({
+    const { queueUrl: dlqUrl, queueArn: dlqArn } = yield* ensureSingleQueue({
       queueName: dlqName,
       attributes: {
         FifoQueue: "true",
@@ -102,7 +109,7 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
 
     // 2. Create main queue with RedrivePolicy pointing to DLQ
     const queueName = `${name}.fifo`;
-    const { queueUrl, queueArn } = yield* ensureSingleFifoQueue({
+    const { queueUrl, queueArn } = yield* ensureSingleQueue({
       queueName,
       attributes: {
         FifoQueue: "true",
@@ -119,6 +126,33 @@ export const ensureFifoQueue = (input: EnsureFifoQueueInput) =>
     });
 
     return { queueUrl, queueArn, dlqUrl, dlqArn } satisfies EnsureFifoQueueResult;
+  });
+
+export const ensureStandardQueue = (input: EnsureStandardQueueInput) =>
+  ensureSingleQueue({ queueName: input.name, attributes: {}, ...(input.tags ? { tags: input.tags } : {}) });
+
+/**
+ * Get approximate message count for a queue by name. Returns `undefined` if the queue
+ * does not exist (e.g. cleanup ran, never deployed).
+ */
+export const getQueueMessageCount = (queueName: string) =>
+  Effect.gen(function* () {
+    const urlResult = yield* sqs.make("get_queue_url", { QueueName: queueName }).pipe(
+      Effect.catchIf(
+        (error) => error instanceof sqs.SQSError && error.cause.name === "QueueDoesNotExist",
+        () => Effect.succeed(undefined)
+      )
+    );
+
+    if (!urlResult?.QueueUrl) return undefined;
+
+    const attrs = yield* sqs.make("get_queue_attributes", {
+      QueueUrl: urlResult.QueueUrl,
+      AttributeNames: ["ApproximateNumberOfMessages"],
+    });
+
+    const raw = attrs.Attributes?.ApproximateNumberOfMessages;
+    return raw !== undefined ? Number(raw) : 0;
   });
 
 export type EnsureSqsEventSourceMappingInput = {

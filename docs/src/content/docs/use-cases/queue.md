@@ -1,11 +1,11 @@
 ---
 title: Queue
-description: Process messages with defineFifoQueue — ordered delivery, typed messages, partial failures, and database integration.
+description: Process messages with defineQueue — ordered delivery, typed messages, partial failures, and database integration.
 ---
 
 You need to process tasks asynchronously — order fulfillment, email sending, webhook delivery, data imports. You want guaranteed delivery, ordering, and the ability to retry individual failures without reprocessing the entire batch.
 
-With `defineFifoQueue` you write a message handler, export it, and get a production queue backed by [SQS FIFO + Lambda](/why-serverless/#sqs-fifo).
+With `defineQueue` you write a message handler, export it, and get a production queue backed by [SQS FIFO + Lambda](/why-serverless/#sqs-fifo).
 
 ## A simple queue
 
@@ -13,17 +13,15 @@ You want to process order events asynchronously. Each message contains an order 
 
 ```typescript
 // src/order-queue.ts
-import { defineFifoQueue, unsafeAs } from "effortless-aws";
+import { defineQueue } from "effortless-aws";
 
 type OrderEvent = { orderId: string; action: "created" | "shipped" | "cancelled" };
 
-export const orderQueue = defineFifoQueue({
-  schema: unsafeAs<OrderEvent>(),
-  onMessage: async ({ message }) => {
+export const orderQueue = defineQueue<OrderEvent>({ fifo: true })
+  .onMessage(async ({ message }) => {
     console.log(`Order ${message.body.orderId}: ${message.body.action}`);
     // Process the order event...
-  },
-});
+  });
 ```
 
 After `eff deploy`, you get an SQS FIFO queue named `{project}-{stage}-orderQueue.fifo` and a Lambda that processes each message. If your handler throws, only that specific message is retried — the rest of the batch succeeds.
@@ -42,7 +40,7 @@ Not every message will be well-formed. You want the framework to reject invalid 
 Pass a `schema` function and Effortless validates every message body automatically. Invalid messages are reported as batch item failures — your handler never sees bad data.
 
 ```typescript
-import { defineFifoQueue } from "effortless-aws";
+import { defineQueue } from "effortless-aws";
 import { z } from "zod";
 
 const PaymentEvent = z.object({
@@ -51,13 +49,14 @@ const PaymentEvent = z.object({
   currency: z.string(),
 });
 
-export const paymentQueue = defineFifoQueue({
+export const paymentQueue = defineQueue({
+  fifo: true,
   schema: (input) => PaymentEvent.parse(input),
-  onMessage: async ({ message }) => {
+})
+  .onMessage(async ({ message }) => {
     // message.body is typed: { paymentId: string, amount: number, currency: string }
     await chargeCustomer(message.body.paymentId, message.body.amount);
-  },
-});
+  });
 ```
 
 ## Processing with a database
@@ -66,21 +65,18 @@ Most queue processors need to read or write data. Define a table and reference i
 
 ```typescript
 // src/fulfillment.ts
-import { defineTable, defineFifoQueue, unsafeAs } from "effortless-aws";
+import { defineTable, defineQueue } from "effortless-aws";
 
 type Order = { id: string; product: string; amount: number; status: string };
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
-});
+export const orders = defineTable<Order>();
 
 type FulfillmentEvent = { orderId: string; warehouse: string };
 
-export const fulfillment = defineFifoQueue({
-  schema: unsafeAs<FulfillmentEvent>(),
-  deps: () => ({ orders }),
-  setup: ({ deps }) => ({ orders: deps.orders }),
-  onMessage: async ({ message, orders }) => {
+export const fulfillment = defineQueue<FulfillmentEvent>({ fifo: true })
+  .deps(() => ({ orders }))
+  .setup(({ deps }) => ({ orders: deps.orders }))
+  .onMessage(async ({ message, orders }) => {
     // orders is TableClient<Order> — typed from the table's generic
     const order = await orders.get({ id: message.body.orderId });
     if (!order) return;
@@ -88,8 +84,7 @@ export const fulfillment = defineFifoQueue({
     await orders.put({ ...order, status: "fulfilling" });
     await shipFromWarehouse(message.body.warehouse, order);
     await orders.put({ ...order, status: "shipped" });
-  },
-});
+  });
 ```
 
 Each Lambda gets only the DynamoDB permissions it needs. No manual IAM policies.
@@ -102,18 +97,16 @@ Use `onMessageBatch` instead of `onMessage`:
 
 ```typescript
 // src/analytics.ts
-import { defineFifoQueue, unsafeAs } from "effortless-aws";
+import { defineQueue } from "effortless-aws";
 
 type ClickEvent = { page: string; userId: string; timestamp: string };
 
-export const clickEvents = defineFifoQueue({
-  schema: unsafeAs<ClickEvent>(),
-  batchSize: 10,
-  onMessageBatch: async ({ messages }) => {
+export const clickEvents = defineQueue<ClickEvent>({ fifo: true })
+  .poller({ batchSize: 10 })
+  .onMessageBatch(async ({ messages }) => {
     const events = messages.map(m => m.body);
     await bulkInsertToAnalytics(events);
-  },
-});
+  });
 ```
 
 With `onMessageBatch`, if the handler throws, all messages in the batch are reported as failed. For partial failure support, return `{ failures: string[] }` with the messageIds of failed messages. Use this when individual message processing doesn't make sense — bulk inserts, batch API calls, or all-or-nothing operations.
@@ -123,38 +116,36 @@ With `onMessageBatch`, if the handler throws, all messages in the batch are repo
 Your queue processor calls an external API that requires authentication. Use `param()` to reference an SSM Parameter Store key — Effortless fetches the value once on cold start, caches it, and injects it as a typed argument.
 
 ```typescript
-import { defineFifoQueue, unsafeAs, param } from "effortless-aws";
+import { defineQueue, param } from "effortless-aws";
 
 type WebhookEvent = { url: string; payload: Record<string, unknown> };
 
-export const webhookQueue = defineFifoQueue({
-  schema: unsafeAs<WebhookEvent>(),
-  config: {
+export const webhookQueue = defineQueue<WebhookEvent>({ fifo: true })
+  .config({
     apiKey: param("webhook/api-key"),
-  },
-  setup: ({ config }) => ({ apiKey: config.apiKey }),
-  onMessage: async ({ message, apiKey }) => {
+  })
+  .setup(({ config }) => ({ apiKey: config.apiKey }))
+  .onMessage(async ({ message, apiKey }) => {
     await fetch(message.body.url, {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(message.body.payload),
     });
-  },
-});
+  });
 ```
 
 Store the secret in SSM with `aws ssm put-parameter --name /my-service/dev/webhook/api-key --value sk_... --type SecureString`.
 
 ## When to use queues vs streams
 
-Both `defineFifoQueue` and `defineTable` (with stream handlers) process events asynchronously. Here's when to choose each:
+Both `defineQueue` and `defineTable` (with stream handlers) process events asynchronously. Here's when to choose each:
 
 **Use `defineTable` streams when**:
 - Events are triggered by database writes (insert, update, delete)
 - You want a reactive, event-driven architecture tied to your data model
 - You need the old and new values of a record for change detection
 
-**Use `defineFifoQueue` when**:
+**Use `defineQueue` when**:
 - You need to decouple producers from consumers — the sender doesn't write to a table
 - External systems push events (webhooks, third-party integrations)
 - You need ordering guarantees across producers via message groups
@@ -166,25 +157,27 @@ Both `defineFifoQueue` and `defineTable` (with stream handlers) process events a
 FIFO queues have several knobs you can adjust:
 
 ```typescript
-export const importQueue = defineFifoQueue({
-  schema: unsafeAs<ImportEvent>(),
-  batchSize: 5,           // messages per Lambda invocation (1-10, default: 10)
-  batchWindow: 10,        // seconds to wait gathering messages (0-300, default: 0)
+export const importQueue = defineQueue<ImportEvent>({
+  fifo: true,
   visibilityTimeout: 120, // seconds before retry (default: max of timeout or 30)
   retentionPeriod: 86400, // message retention in seconds (default: 345600 = 4 days)
   timeout: 60,            // Lambda timeout in seconds (default: 30)
   memory: 512,            // Lambda memory in MB (default: 256)
   contentBasedDeduplication: true, // default: true
-  onMessage: async ({ message }) => {
+})
+  .poller({
+    batchSize: 5,    // messages per Lambda invocation (1-10, default: 10)
+    batchWindow: 10, // seconds to wait gathering messages (0-300, default: 0)
+  })
+  .onMessage(async ({ message }) => {
     await processImport(message.body);
-  },
-});
+  });
 ```
 
 The `visibilityTimeout` is automatically set to at least your Lambda timeout — this prevents messages from being retried while still being processed.
 
 ## See also
 
-- [Definitions reference — defineFifoQueue](/definitions/#definefifoqueue) — all configuration options
+- [Definitions reference — defineQueue](/definitions/#definequeue) — all configuration options
 - [Database guide](/use-cases/database/) — how to define tables and use them as deps
 - [HTTP API guide](/use-cases/http-api/) — how to use deps and params in HTTP handlers

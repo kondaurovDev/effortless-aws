@@ -41,16 +41,17 @@ export const payments = defineApi({
     return { status: 200, body: { ok: true } };
   });
 
-export const processOrders = defineFifoQueue({
+export const processOrders = defineQueue({
+  fifo: true,
   schema: (input) => OrderSchema.parse(input),
   idempotency: {
     key: (msg) => msg.orderId,
     ttl: "24 hours",
   },
-  onMessage: async ({ message }) => {
+})
+  .onMessage(async ({ message }) => {
     // each message is deduplicated by orderId
-  },
-});
+  });
 ```
 
 **What effortless auto-creates on deploy**:
@@ -233,12 +234,13 @@ export const api = defineApi({
 ```typescript
 const OrderEvent = z.object({ orderId: z.string(), amount: z.number() });
 
-export const processOrder = defineFifoQueue({
+export const processOrder = defineQueue({
+  fifo: true,
   schema: (input) => OrderEvent.parse(input),
-  onMessage: async ({ message }) => {
+})
+  .onMessage(async ({ message }) => {
     await fulfillOrder(message.body.orderId, message.body.amount);
-  },
-});
+  });
 
 export const orders = defineApi({ basePath: "/orders" })
   .post("/", async ({ req }) => {
@@ -266,37 +268,37 @@ The same pattern applies to all resource types:
 
 **Problem**: When queue messages fail processing, they either retry infinitely or disappear. Setting up a Dead Letter Queue manually requires creating a second SQS queue, configuring redrive policy, and wiring a separate Lambda to process failures.
 
-**Approach**: `defineFifoQueue` already supports `onMessage` (per-message, with partial batch failures) and `onMessageBatch` (entire batch, with optional partial failures via return value). DLQ adds declarative dead-letter configuration on top.
+**Approach**: `defineQueue` already supports `onMessage` (per-message, with partial batch failures) and `onMessageBatch` (entire batch, with optional partial failures via return value). DLQ adds declarative dead-letter configuration on top.
 
 Per-message processing:
 
 ```typescript
-export const processOrder = defineFifoQueue({
+export const processOrder = defineQueue({
+  fifo: true,
   schema: (input) => OrderSchema.parse(input),
-  batchSize: 10,
-  batchWindow: 30,
   dlq: { maxRetries: 3 },
-  onMessage: async ({ message }) => {
+})
+  .poller({ batchSize: 10, batchWindow: 30 })
+  .onMessage(async ({ message }) => {
     await fulfillOrder(message.body);
-  },
-  onFailed: async ({ failures }) => {
+  })
+  .onFailed(async ({ failures }) => {
     await alertOpsTeam(failures);
-  },
-});
+  });
 ```
 
 Batch processing:
 
 ```typescript
-export const importProducts = defineFifoQueue({
+export const importProducts = defineQueue({
+  fifo: true,
   schema: (input) => ProductSchema.parse(input),
-  batchSize: 10,
-  batchWindow: 60,
   dlq: { maxRetries: 3 },
-  onMessageBatch: async ({ messages }) => {
+})
+  .poller({ batchSize: 10, batchWindow: 60 })
+  .onMessageBatch(async ({ messages }) => {
     await db.bulkInsert(messages.map(m => m.body));
-  },
-});
+  });
 ```
 
 **What effortless auto-creates on deploy**:

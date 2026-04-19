@@ -396,6 +396,16 @@ export const ensureBucketNotification = (input: EnsureBucketNotificationInput) =
     yield* Effect.logDebug(`S3 bucket notification configured for ${bucketName}`);
   });
 
+/** Remove all event notifications from a bucket (e.g. when switching to resource-only mode). */
+export const clearBucketNotification = (bucketName: string) =>
+  Effect.gen(function* () {
+    yield* s3.make("put_bucket_notification_configuration", {
+      Bucket: bucketName,
+      NotificationConfiguration: {},
+    });
+    yield* Effect.logDebug(`S3 bucket notification cleared for ${bucketName}`);
+  });
+
 export const addS3LambdaPermission = (
   functionArn: string,
   bucketName: string,

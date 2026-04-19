@@ -10,9 +10,7 @@ description: Common questions about Effortless AWS — deployment, pricing, cold
 A TypeScript framework for AWS Lambda. You export handler functions — Effortless creates Lambda functions, DynamoDB tables, API Gateway routes, IAM roles, and everything else automatically. No YAML, no CloudFormation, no state files.
 
 ```typescript
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
-});
+export const orders = defineTable<Order>();
 ```
 
 This single export creates: a DynamoDB table, a typed client for `.put()` / `.get()`, and IAM permissions when used as a dependency. See [Why Effortless?](/why-effortless/) for the full story.
@@ -161,13 +159,11 @@ Yes. Effortless automatically bundles your code and `node_modules` with esbuild.
 Export a `defineTable` call. That's it.
 
 ```typescript
-import { defineTable, unsafeAs } from "effortless-aws";
+import { defineTable } from "effortless-aws";
 
 type User = { id: string; email: string; name: string };
 
-export const users = defineTable({
-  schema: unsafeAs<User>(),
-});
+export const users = defineTable<User>();
 ```
 
 This creates the table, a typed client (`.put()`, `.get()`, `.delete()`), and wires IAM permissions when used as `deps`. See [Database guide](/use-cases/database/).
@@ -177,9 +173,7 @@ This creates the table, a typed client (`.put()`, `.get()`, `.delete()`), and wi
 Yes:
 
 ```typescript
-export const messages = defineTable({
-  schema: unsafeAs<Message>(),
-});
+export const messages = defineTable<Message>();
 ```
 
 ### How do I react to data changes?
@@ -187,8 +181,7 @@ export const messages = defineTable({
 Add `onRecord` to process each change, or `onRecordBatch` for batch processing:
 
 ```typescript
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   onRecord: async ({ record }) => {
     if (record.eventName === "INSERT") {
       console.log("New order:", record.new!.id);
@@ -345,7 +338,7 @@ See [Website guide](/use-cases/web-app/) for the full comparison.
 
 Use **DynamoDB streams** (`onRecord`) when reacting to data changes — a new order triggers an email, a user update syncs to analytics.
 
-Use **SQS FIFO queues** (`defineFifoQueue`) for task processing — sending emails, processing payments, generating reports. Queues give you retry logic, dead-letter queues, and backpressure handling.
+Use **SQS FIFO queues** (`defineQueue` with `{ fifo: true }`) for task processing — sending emails, processing payments, generating reports. Queues give you retry logic, dead-letter queues, and backpressure handling.
 
 See [Queue — When to use queues vs streams](/use-cases/queue/#when-to-use-queues-vs-streams).
 

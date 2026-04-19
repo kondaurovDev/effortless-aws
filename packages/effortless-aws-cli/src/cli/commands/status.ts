@@ -1,7 +1,7 @@
 import { Command } from "@effect/cli";
 import { Effect, Console } from "effect";
 
-import { Aws, type ResourceTagMapping } from "../../aws";
+import { Aws, getQueueMessageCount, type ResourceTagMapping } from "../../aws";
 import { checkDependencyWarnings, findDepsDir } from "~/build";
 import { getAllResourcesByTags, groupResourcesByHandler } from "~/aws/resource-lookup";
 import { resourceTypeFromArn } from "~/core";
@@ -33,11 +33,20 @@ export type StatusEntry = {
   lambda?: LambdaDetails;
   distributionDomain?: string;
   customDomain?: string;
+  dlqCount?: number;
 };
 
 // ============ Helpers ============
 
 const INTERNAL_HANDLERS = new Set(["api", "platform"]);
+
+/** Handler types that auto-provision a DLQ and the DLQ name derivation. */
+const deriveDlqName = (handlerType: string, project: string, stage: string, name: string): string | undefined => {
+  const std = `${project}-${stage}-${name}`;
+  if (handlerType === "table" || handlerType === "dynamodb") return `${std}-dlq`;
+  if (handlerType === "queue" || handlerType === "sqs") return `${std}-dlq.fifo`;
+  return undefined;
+};
 
 export const extractFunctionName = (arn: string): string | undefined => {
   const match = arn.match(/:function:([^:]+)$/);
@@ -209,6 +218,10 @@ const formatEntry = (entry: StatusEntry): string => {
     parts.push(details);
   }
 
+  if (entry.dlqCount !== undefined && entry.dlqCount > 0) {
+    parts.push(c.red(`⚠ ${entry.dlqCount} in DLQ`));
+  }
+
   return `  ${parts.join("  ")}`;
 };
 
@@ -222,6 +235,13 @@ export type StatusResult = {
   summary: { new: number; deployed: number; stale: number };
   depWarnings: string[];
 };
+
+const fetchDlqCount = (handlerType: string, project: string, stage: string, name: string) =>
+  Effect.gen(function* () {
+    const dlqName = deriveDlqName(handlerType, project, stage, name);
+    if (!dlqName) return undefined;
+    return yield* getQueueMessageCount(dlqName).pipe(Effect.catchAll(() => Effect.succeed(undefined)));
+  });
 
 /** Collect status data: compare code handlers with AWS resources. No Console output. */
 export const getStatus = Effect.gen(function* () {
@@ -256,6 +276,8 @@ export const getStatus = Effect.gen(function* () {
         customDomain = info.customDomain;
       }
 
+      const dlqCount = yield* fetchDlqCount(handler.type, project, stage, handler.name);
+
       entries.push({
         status: "deployed",
         name: handler.name,
@@ -263,6 +285,7 @@ export const getStatus = Effect.gen(function* () {
         lambda: lambdaDetails,
         distributionDomain,
         customDomain,
+        ...(dlqCount !== undefined ? { dlqCount } : {}),
       });
     } else {
       entries.push({
@@ -284,11 +307,14 @@ export const getStatus = Effect.gen(function* () {
         }
       }
 
+      const dlqCount = yield* fetchDlqCount(handler.type, project, stage, handler.name);
+
       entries.push({
         status: "stale",
         name: handler.name,
         type: handler.type,
         lambda: lambdaDetails,
+        ...(dlqCount !== undefined ? { dlqCount } : {}),
       });
     }
   }
@@ -349,6 +375,7 @@ export const statusCommand = Command.make(
         lambda: { region },
         cloudfront: { region: "us-east-1" },
         resource_groups_tagging_api: { region },
+        sqs: { region },
       })),
     )
 ).pipe(Command.withDescription("Compare local handlers with deployed AWS resources. Shows new, deployed, and stale handlers."));

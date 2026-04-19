@@ -94,7 +94,7 @@ it("should route requests", async () => {
 | `defineTable` | table-client ops, stream wrapping | deps/config inference | config extraction |
 | `defineApi` | routing, body parsing, auth | route handler args | basePath, routes |
 | `defineBucket` | event wrapping | deps inference | prefix/suffix config |
-| `defineFifoQueue` | message parsing, batching | message type inference | batch config |
+| `defineQueue` | message parsing, batching | message type inference | batch config |
 | `defineWorker` | message handling | message type inference | size/timeout config |
 | `defineCron` | tick wrapping | setup inference | schedule extraction |
 | `defineMailer` | email client | — | — |

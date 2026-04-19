@@ -5,11 +5,13 @@ import type { ExtractedBucketFunction } from "~/discovery";
 import {
   ensureBucket,
   ensureBucketNotification,
+  clearBucketNotification,
   addS3LambdaPermission,
   syncFiles,
   seedFiles,
 } from "../aws";
 import { makeTags, resolveStage, type TagContext } from "../core";
+import { cleanupStaleHandlerResources } from "./resource-registry";
 import {
   type DeployInput,
   deployCoreLambda,
@@ -71,6 +73,13 @@ export const deployBucketFunction = ({ input, fn, layerArn, external, depsEnv, d
 
     // Resource-only mode: no Lambda, just the bucket
     if (!hasHandler) {
+      yield* clearBucketNotification(bucketName);
+      yield* cleanupStaleHandlerResources("bucket", {
+        project: input.project,
+        stage: tagCtx.stage,
+        handler: handlerName,
+        region: input.region,
+      });
       yield* Effect.logDebug(`Bucket deployment complete (resource-only)! Bucket: ${bucketName}`);
       return {
         exportName,

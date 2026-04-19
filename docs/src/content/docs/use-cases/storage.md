@@ -139,13 +139,11 @@ Most file processors need to read or write data. Define a table and reference it
 
 ```typescript
 // src/invoices.ts
-import { defineTable, defineBucket, unsafeAs } from "effortless-aws";
+import { defineTable, defineBucket } from "effortless-aws";
 
 type Invoice = { tag: string; key: string; size: number; uploadedAt: string };
 
-export const invoiceRecords = defineTable({
-  schema: unsafeAs<Invoice>(),
-});
+export const invoiceRecords = defineTable<Invoice>();
 
 export const invoices = defineBucket({
   prefix: "invoices/",
@@ -172,14 +170,13 @@ Each Lambda gets only the IAM permissions it needs — S3 for its own bucket, Dy
 Buckets compose with any handler type, not just HTTP. A table stream handler can write to a bucket via `deps`:
 
 ```typescript
-import { defineTable, defineBucket, unsafeAs } from "effortless-aws";
+import { defineTable, defineBucket } from "effortless-aws";
 
 export const reports = defineBucket({});
 
 type Order = { tag: string; amount: number; status: string };
 
-export const orders = defineTable({
-  schema: unsafeAs<Order>(),
+export const orders = defineTable<Order>({
   deps: () => ({ reports }),
   onRecord: async ({ record, deps }) => {
     if (record.eventName === "INSERT" && record.new) {

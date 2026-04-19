@@ -69,7 +69,7 @@ export const wrapTableStream = <T, C>(handler: TableHandler<T, C>) => {
   }
 
   const tagField = handler.__spec.tagField ?? "tag";
-  const concurrency = handler.__spec.concurrency ?? 1;
+  const concurrency = handler.__spec.stream?.concurrency ?? 1;
 
   let selfClient: Awaited<ReturnType<typeof createTableClient>> | null = null;
   const getSelfClient = async () => {

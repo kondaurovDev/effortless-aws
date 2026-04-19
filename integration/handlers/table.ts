@@ -8,9 +8,8 @@ type ContactData = { tag: "contact"; name: string; email: string; company?: stri
 
 type Data = NoteData | AuditData | ContactData;
 
-export const db = defineTable<Data>({
-  streamView: "NEW_AND_OLD_IMAGES",
-})
+export const db = defineTable<Data>()
+  .stream({ streamView: "NEW_AND_OLD_IMAGES" })
   .setup(({ table }) => ({ table }))
   .onRecord(async ({ record, table }) => {
     // Only audit note events (skip audit + contact to prevent loops / noise)

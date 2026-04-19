@@ -44,7 +44,7 @@ export const collectRequiredSecrets = (
   };
 
   collect(handlers.tableHandlers);
-  collect(handlers.fifoQueueHandlers);
+  collect(handlers.queueHandlers);
   collect(handlers.bucketHandlers);
   collect(handlers.apiHandlers);
   collect(handlers.cronHandlers);
