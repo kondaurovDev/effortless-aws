@@ -35,5 +35,5 @@ catalog:
   vitest: ^4.0.18
   '@modelcontextprotocol/sdk': ^1.29.0
   '@standard-schema/spec': ^1.1.0
-  effect: 4.0.0-beta.43
+  effect: 4.0.0-beta.57
   zod: ^4.3.0
