@@ -1,9 +1,9 @@
 ---
 const phrases = [
-  { text: "Deploy in seconds", color: "#f97316" },
+  { text: "Deploys in ~6 seconds", color: "#f97316" },
   { text: "API, database, queues — one deploy", color: "#a78bfa" },
-  { text: "Zero infrastructure code", color: "#f472b6" },
-  { text: "Just TypeScript", color: "#38bdf8" },
+  { text: "No YAML. No state files. No bootstrapping.", color: "#f472b6" },
+  { text: "Export. Deploy. Done.", color: "#38bdf8" },
 ];
 ---
 
@@ -18,16 +18,17 @@ const phrases = [
       ))}
     </span>
   </h1>
-  <p class="tagline">Export handlers, deploy to AWS. No infrastructure files needed.</p>
+  <p class="tagline">The fastest way to ship a TypeScript app onto AWS.</p>
   <div class="hero-actions">
     <a class="cta" href="/installation/">Getting Started →</a>
+    <a class="cta-ghost" href="https://github.com/kondaurovDev/effortless-aws" target="_blank" rel="noopener">GitHub →</a>
   </div>
 </div>
 
 <style>
   .animated-hero {
     text-align: center;
-    padding: 3rem 1rem 2rem;
+    padding: 2rem 1rem 1.25rem;
     max-width: 48rem;
     margin: 0 auto;
   }
@@ -69,30 +70,49 @@ const phrases = [
   .tagline {
     font-size: clamp(0.95rem, 1.8vw, 1.1rem);
     color: var(--sl-color-gray-3);
-    margin: 1rem 0 1.5rem;
+    margin: 0.85rem 0 1.25rem;
   }
 
   .hero-actions {
     display: flex;
-    gap: 0.75rem;
+    gap: 0.6rem;
     align-items: center;
     justify-content: center;
+    flex-wrap: wrap;
   }
 
   .cta {
     display: inline-block;
-    padding: 0.7rem 1.4rem;
+    padding: 0.65rem 1.3rem;
     background: var(--sl-color-accent);
     color: white !important;
     font-weight: 600;
-    font-size: 1rem;
+    font-size: 0.95rem;
     border-radius: 0.5rem;
     text-decoration: none;
-    transition: opacity 0.2s;
+    transition: opacity 0.2s, transform 0.2s;
   }
 
   .cta:hover {
     opacity: 0.9;
+    transform: translateY(-1px);
+  }
+
+  .cta-ghost {
+    display: inline-block;
+    padding: 0.65rem 1.1rem;
+    color: var(--sl-color-white) !important;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .cta-ghost:hover {
+    border-color: var(--sl-color-gray-3);
+    transform: translateY(-1px);
   }
 
   @keyframes rotate-text {

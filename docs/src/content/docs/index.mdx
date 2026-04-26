@@ -40,34 +40,128 @@ All in the same project, all deployed with one command, all with automatic IAM w
 
 <LinkButton href="/definitions/" variant="secondary" icon="right-arrow">All definitions</LinkButton>
 
-## Build a todo app
+## What it replaces
 
-Each tab adds a layer — every export creates real AWS infrastructure.
+A typical AWS app splits this into two layers: an infrastructure description (CDK, Terraform, Pulumi…) and a separate handler using the raw AWS SDK. Effortless collapses both into one file.
 
 <Tabs>
-  <TabItem label="todo.ts">
-    Type and schema — shared across handlers.
+  <TabItem label="With Effortless">
+    One file. Table and API live together. IAM, table name, and Function URL are derived from `.deps()` automatically.
 
     ```typescript
-    // src/todo.ts
-    import { z } from "zod";
+    // src/api.ts
+    import { defineTable, defineApi } from "effortless-aws";
 
-    export type Todo = { id: string; title: string; done: boolean };
+    export const todos = defineTable<{ tag: "todo"; title: string }>().build();
 
-    export const Command = z.discriminatedUnion("action", [
-      z.object({ action: z.literal("create"), title: z.string() }),
-      z.object({ action: z.literal("done"), id: z.string(), done: z.boolean() }),
-    ]);
+    export const api = defineApi({ basePath: "/todos" })
+      .deps(() => ({ todos }))
+      .setup(({ deps }) => ({ todos: deps.todos }))
+      .get({ path: "/" }, async ({ todos }) => ({
+        status: 200,
+        body: await todos.query({ pk: "TODO" }),
+      }));
+    ```
+
+    ```bash
+    $ eff deploy   # ~6s, direct AWS API calls
     ```
   </TabItem>
-  <TabItem label="HTTP API">
-    One export — one API. Chained `.get()` routes handle queries, `.post()` handles commands.
+  <TabItem label="Typical AWS setup">
+    An IaC layer that describes the table, Lambda, IAM, and Function URL — plus a separate handler using the raw DynamoDB SDK. IAM, env vars, and runtime wiring are all manual. (Example shown in AWS CDK; the shape is similar with Terraform or Pulumi.)
+
+    ```typescript
+    // lib/stack.ts
+    import * as cdk from "aws-cdk-lib";
+    import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
+    import * as lambda from "aws-cdk-lib/aws-lambda";
+    import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
+
+    export class TodoStack extends cdk.Stack {
+      constructor(scope: cdk.App, id: string) {
+        super(scope, id);
+
+        const table = new dynamodb.Table(this, "Todos", {
+          partitionKey: { name: "pk", type: dynamodb.AttributeType.STRING },
+          sortKey: { name: "sk", type: dynamodb.AttributeType.STRING },
+          billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        });
+
+        const fn = new nodejs.NodejsFunction(this, "Api", {
+          entry: "src/handler.ts",
+          runtime: lambda.Runtime.NODEJS_20_X,
+          environment: { TABLE_NAME: table.tableName },
+        });
+
+        table.grantReadData(fn);
+        fn.addFunctionUrl({ authType: lambda.FunctionUrlAuthType.NONE });
+      }
+    }
+    ```
+
+    ```typescript
+    // src/handler.ts
+    import { DynamoDBClient, QueryCommand } from "@aws-sdk/client-dynamodb";
+    import { unmarshall } from "@aws-sdk/util-dynamodb";
+
+    const client = new DynamoDBClient({});
+    const TABLE = process.env.TABLE_NAME!;
+
+    export const handler = async () => {
+      const res = await client.send(new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": { S: "TODO" } },
+      }));
+      return {
+        statusCode: 200,
+        body: JSON.stringify((res.Items ?? []).map(unmarshall)),
+      };
+    };
+    ```
+
+    ```bash
+    $ cdk bootstrap   # one-time
+    $ cdk deploy      # 2–5 min via CloudFormation
+    ```
+  </TabItem>
+</Tabs>
+
+Same logical operations. Effortless gives you a typed table client, derives IAM from code, and skips the IaC layer entirely.
+
+## Build a todo app
+
+Two files, two handlers. `db.ts` becomes a DynamoDB table with a stream Lambda; `api.ts` becomes one Lambda behind a Function URL serving all the routes.
+
+<Tabs>
+  <TabItem label="db.ts">
+    This 9-line file becomes a DynamoDB table, a stream Lambda that runs on every change, and the IAM role linking them. The typed client (`todos.query`, `todos.put`, `todos.update`) is derived from `Todo`.
+
+    ```typescript
+    // src/db.ts
+    import { defineTable } from "effortless-aws";
+
+    export type Todo = { tag: "todo"; id: string; title: string; done: boolean };
+
+    export const todos = defineTable<Todo>()
+      .onRecord(async ({ record }) => {
+        if (record.eventName === "MODIFY" && record.new?.data.done) {
+          console.log(`Todo completed: ${record.new.data.title}`);
+        }
+      });
+    ```
+  </TabItem>
+  <TabItem label="api.ts">
+    All routes run in one Lambda behind a single Function URL. `.deps()` lists handlers this API uses — Effortless wires IAM and injects a typed `todos` client through `.setup()`.
 
     ```typescript
     // src/api.ts
     import { defineApi } from "effortless-aws";
+    import { z } from "zod";
     import { todos } from "./db";
-    import { Command } from "./todo";
+
+    const CreateTodo = z.object({ title: z.string() });
+    const UpdateTodo = z.object({ done: z.boolean() });
 
     export const todoApi = defineApi({ basePath: "/todos" })
       .deps(() => ({ todos }))
@@ -81,43 +175,20 @@ Each tab adds a layer — every export creates real AWS infrastructure.
         if (!todo) return { status: 404, body: { error: "Not found" } };
         return { status: 200, body: todo.data };
       })
-      .post({ path: "/", input: Command }, async ({ input, todos }) => {
-        if (input.action === "create") {
-          const id = crypto.randomUUID();
-          await todos.put({
-            pk: "TODO", sk: id,
-            data: { tag: "todo", id, title: input.title, done: false },
-          });
-          return { status: 201, body: { id } };
-        }
+      .post({ path: "/", input: CreateTodo }, async ({ input, todos }) => {
+        const id = crypto.randomUUID();
+        await todos.put({
+          pk: "TODO", sk: id,
+          data: { tag: "todo", id, title: input.title, done: false },
+        });
+        return { status: 201, body: { id } };
+      })
+      .patch({ path: "/{id}", input: UpdateTodo }, async ({ req, input, todos }) => {
         await todos.update(
-          { pk: "TODO", sk: input.id },
+          { pk: "TODO", sk: req.params.id },
           { set: { done: input.done } },
         );
-        return { status: 200, body: { id: input.id, done: input.done } };
-      });
-    ```
-  </TabItem>
-  <TabItem label="Database + stream">
-    Define a table — get a typed client. `onRecord` fires a stream Lambda on every change. `config` reads secrets from SSM at cold start.
-
-    ```typescript
-    // src/db.ts
-    import { defineTable } from "effortless-aws";
-    import type { Todo } from "./todo";
-
-    export const todos = defineTable<Todo & { tag: "todo" }>()
-      .config(({ defineSecret }) => ({
-        slackUrl: defineSecret({ key: "slack/webhook" }),
-      }))
-      .setup(({ config }) => ({ slackUrl: config.slackUrl }))
-      .onRecord(async ({ record, slackUrl }) => {
-        if (record.eventName === "MODIFY" && record.new?.data.done) {
-          await fetch(slackUrl, {
-            method: "POST",
-            body: JSON.stringify({ text: `Done: ${record.new.data.title}` }),
-          });
-        }
+        return { status: 200, body: { id: req.params.id, done: input.done } };
       });
     ```
   </TabItem>
