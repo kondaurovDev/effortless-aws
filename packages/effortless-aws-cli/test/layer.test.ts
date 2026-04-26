@@ -282,6 +282,78 @@ describe("layer", () => {
 
       await fs.rm(nestedDir, { recursive: true });
     });
+
+    it("should exclude type declarations, sourcemaps, src/, tests, and docs", async () => {
+      const bloatedDir = path.join(tempDir, ".bloated-pkg");
+      await fs.mkdir(path.join(bloatedDir, "dist"), { recursive: true });
+      await fs.mkdir(path.join(bloatedDir, "src"), { recursive: true });
+      await fs.mkdir(path.join(bloatedDir, "test"), { recursive: true });
+      await fs.mkdir(path.join(bloatedDir, "__tests__"), { recursive: true });
+      await fs.mkdir(path.join(bloatedDir, "examples"), { recursive: true });
+      await fs.mkdir(path.join(bloatedDir, ".github"), { recursive: true });
+
+      await fs.writeFile(
+        path.join(bloatedDir, "package.json"),
+        JSON.stringify({ name: "bloated-pkg", version: "1.0.0", main: "dist/index.js" })
+      );
+      // Runtime files — must be kept
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.js"), "module.exports = {};");
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.cjs"), "module.exports = {};");
+      // Bloat — must be filtered
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.d.ts"), "export {};");
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.d.ts.map"), "{}");
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.d.cts"), "export {};");
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.d.mts"), "export {};");
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.js.map"), "{}");
+      await fs.writeFile(path.join(bloatedDir, "dist", "index.cjs.map"), "{}");
+      await fs.writeFile(path.join(bloatedDir, "src", "index.ts"), "export {};");
+      await fs.writeFile(path.join(bloatedDir, "test", "foo.test.js"), "");
+      await fs.writeFile(path.join(bloatedDir, "__tests__", "bar.js"), "");
+      await fs.writeFile(path.join(bloatedDir, "examples", "demo.js"), "");
+      await fs.writeFile(path.join(bloatedDir, ".github", "workflows.yml"), "");
+      await fs.writeFile(path.join(bloatedDir, "README.md"), "");
+      await fs.writeFile(path.join(bloatedDir, "CHANGELOG.md"), "");
+      await fs.writeFile(path.join(bloatedDir, "LICENSE"), "");
+      await fs.writeFile(path.join(bloatedDir, "LICENSE.txt"), "");
+      await fs.writeFile(path.join(bloatedDir, ".npmignore"), "");
+      await fs.writeFile(path.join(bloatedDir, ".gitignore"), "");
+      await fs.writeFile(path.join(bloatedDir, "tsconfig.json"), "{}");
+      await fs.writeFile(path.join(bloatedDir, "tsconfig.build.json"), "{}");
+
+      const resolvedPaths = new Map([["bloated-pkg", bloatedDir]]);
+      const result = await Effect.runPromise(
+        createLayerZip(tempDir, ["bloated-pkg"], resolvedPaths)
+      );
+
+      const zip = new AdmZip(result.buffer);
+      const entries = zip.getEntries().map((e: AdmZip.IZipEntry) => e.entryName);
+
+      // Runtime files retained
+      expect(entries).toContain("nodejs/node_modules/bloated-pkg/package.json");
+      expect(entries).toContain("nodejs/node_modules/bloated-pkg/dist/index.js");
+      expect(entries).toContain("nodejs/node_modules/bloated-pkg/dist/index.cjs");
+
+      // Bloat removed
+      const hasMatch = (substr: string) => entries.some(e => e.includes(substr));
+      expect(hasMatch(".d.ts")).toBe(false);
+      expect(hasMatch(".d.cts")).toBe(false);
+      expect(hasMatch(".d.mts")).toBe(false);
+      expect(hasMatch(".js.map")).toBe(false);
+      expect(hasMatch(".cjs.map")).toBe(false);
+      expect(hasMatch("/src/")).toBe(false);
+      expect(hasMatch("/test/")).toBe(false);
+      expect(hasMatch("/__tests__/")).toBe(false);
+      expect(hasMatch("/examples/")).toBe(false);
+      expect(hasMatch("/.github/")).toBe(false);
+      expect(hasMatch("README")).toBe(false);
+      expect(hasMatch("CHANGELOG")).toBe(false);
+      expect(hasMatch("LICENSE")).toBe(false);
+      expect(hasMatch(".npmignore")).toBe(false);
+      expect(hasMatch(".gitignore")).toBe(false);
+      expect(hasMatch("tsconfig")).toBe(false);
+
+      await fs.rm(bloatedDir, { recursive: true });
+    });
   });
 
   describe("collectLayerPackages", () => {

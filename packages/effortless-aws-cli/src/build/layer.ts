@@ -8,6 +8,47 @@ import archiver from "archiver";
 // Fixed date for deterministic zip (same content = same hash)
 const FIXED_DATE = new Date(0);
 
+// Files inside published packages that Lambda runtime never loads.
+// Packages whose main entry is raw TypeScript are filtered out earlier
+// (see isRawTypeScript), so any package reaching this point ships JS at
+// runtime — its src/ and stray .ts files are dead weight.
+const LAYER_IGNORE_PATTERNS: readonly RegExp[] = [
+  /\.d\.[cm]?ts$/,
+  /\.d\.[cm]?ts\.map$/,
+  /\.[cm]?js\.map$/,
+  /(?:^|\/)src(?:\/|$)/,
+  /(?:^|\/)tests?(?:\/|$)/,
+  /(?:^|\/)__tests?__(?:\/|$)/,
+  /(?:^|\/)examples?(?:\/|$)/,
+  /(?:^|\/)\.github(?:\/|$)/,
+  /(?:^|\/)README(?:\.[^/]+)?$/i,
+  /(?:^|\/)CHANGELOG(?:\.[^/]+)?$/i,
+  /(?:^|\/)LICENSE(?:\.[^/]+)?$/i,
+  /(?:^|\/)\.npmignore$/,
+  /(?:^|\/)\.gitignore$/,
+  /(?:^|\/)tsconfig.*\.json$/,
+];
+
+const shouldIgnoreLayerEntry = (relativePath: string): boolean => {
+  const normalized = relativePath.replace(/\\/g, "/");
+  return LAYER_IGNORE_PATTERNS.some(re => re.test(normalized));
+};
+
+// Stable fingerprint of the ignore patterns. Mixed into the layer hash so
+// changes to packing logic invalidate cached layer versions for users on
+// unchanged dependencies — otherwise a CLI upgrade with smaller layers
+// would never roll out.
+const LAYER_PACKING_FINGERPRINT = crypto
+  .createHash("sha256")
+  .update(
+    [...LAYER_IGNORE_PATTERNS]
+      .map(re => `${re.source}|${re.flags}`)
+      .sort()
+      .join("\n")
+  )
+  .digest("hex")
+  .substring(0, 8);
+
 /**
  * Find the nearest directory (at or above `startDir`, up to `rootDir`) that
  * contains a `package.json` with non-empty `dependencies`.
@@ -85,8 +126,10 @@ export const computeLockfileHash = (projectDir: string) =>
       return yield* Effect.fail(new Error("No package versions found"));
     }
 
-    // Hash the sorted package versions
-    const content = packageVersions.join("\n");
+    // Mix the packing fingerprint into the hash so layer-packing logic changes
+    // (e.g. ignore patterns) invalidate cached layer versions even when deps
+    // are unchanged.
+    const content = [`packing:${LAYER_PACKING_FINGERPRINT}`, ...packageVersions].join("\n");
     return crypto.createHash("sha256").update(content).digest("hex").substring(0, 8);
   });
 
@@ -561,7 +604,10 @@ export const createLayerZip = (projectDir: string, packages: string[], resolvedP
       if (typeof realPath === "string" && realPath.length > 0 && !addedPaths.has(realPath)) {
         addedPaths.add(realPath);
         includedPackages.push(pkgName);
-        archive.directory(realPath, `nodejs/node_modules/${pkgName}`, { date: FIXED_DATE });
+        archive.directory(realPath, `nodejs/node_modules/${pkgName}`, (entry) => {
+          if (shouldIgnoreLayerEntry(entry.name)) return false;
+          return { ...entry, date: FIXED_DATE };
+        });
       } else {
         skippedPackages.push(pkgName);
       }
