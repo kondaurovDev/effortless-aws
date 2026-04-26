@@ -1,5 +1,11 @@
 # @effortless-aws/cli
 
+## 0.22.1
+
+### Patch Changes
+
+- [`d22eab2`](https://github.com/kondaurovDev/effortless-aws/commit/d22eab27e6c52283f7bf2f86cb1205efa4c5920d) Thanks [@kondaurovDev](https://github.com/kondaurovDev)! - Strip non-runtime files from the dependency layer zip (type declarations, sourcemaps, `src/`, tests, examples, docs, `tsconfig*.json`). Mix the packing-logic fingerprint into the layer hash so existing deployments pick up the smaller layer on the next deploy without a manual cache bust. On a typical Effect + Zod project this drops the published layer from ~10 MB to ~3.5 MB and avoids the S3 fallback for direct upload.
+
 ## 0.22.0
 
 ### Minor Changes
