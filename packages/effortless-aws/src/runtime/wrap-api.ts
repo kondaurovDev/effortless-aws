@@ -37,10 +37,42 @@ type LambdaEvent = {
 
 // ============ Response helpers ============
 
-const toResult = (r: { status: number; body?: unknown; contentType?: ContentType; headers?: Record<string, string>; cookies?: string[]; binary?: boolean }) => {
+/** Build RFC 6266 / 5987 Content-Disposition value. Provides ASCII fallback + UTF-8 form for non-ASCII filenames. */
+const formatDisposition = (filename: string): string => {
+  const ascii = filename.replace(/[^\x20-\x7E]/g, "_").replace(/["\\]/g, "");
+  return ascii === filename
+    ? `attachment; filename="${filename}"`
+    : `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+};
+
+const toResult = async (r: HttpResponse) => {
   const resolved = r.contentType ? CONTENT_TYPE_MAP[r.contentType] : undefined;
-  const customContentType = resolved ?? r.headers?.["content-type"] ?? r.headers?.["Content-Type"];
-  const isJson = !r.binary && (!customContentType || customContentType === "application/json");
+  const explicitContentType = resolved ?? r.headers?.["content-type"] ?? r.headers?.["Content-Type"];
+
+  // Detect binary body: Uint8Array (incl. Buffer) or Blob (incl. File)
+  let bodyStr: string;
+  let isBase64Encoded = false;
+  let inferredContentType: string | undefined;
+
+  if (r.body instanceof Uint8Array) {
+    bodyStr = Buffer.from(r.body.buffer, r.body.byteOffset, r.body.byteLength).toString("base64");
+    isBase64Encoded = true;
+    inferredContentType = "application/octet-stream";
+  } else if (r.body instanceof Blob) {
+    bodyStr = Buffer.from(await r.body.arrayBuffer()).toString("base64");
+    isBase64Encoded = true;
+    inferredContentType = r.body.type || "application/octet-stream";
+  } else if (r.binary) {
+    // Legacy: body is already a base64 string
+    bodyStr = String(r.body ?? "");
+    isBase64Encoded = true;
+  } else {
+    const customContentType = explicitContentType;
+    const isJson = !customContentType || customContentType === "application/json";
+    bodyStr = isJson ? JSON.stringify(r.body) : String(r.body ?? "");
+  }
+
+  const finalContentType = explicitContentType ?? inferredContentType ?? "application/json";
 
   // Collect cookies: explicit cookies array takes precedence, fall back to set-cookie header
   const cookies = r.cookies?.length
@@ -52,16 +84,23 @@ const toResult = (r: { status: number; body?: unknown; contentType?: ContentType
   // Remove set-cookie from headers when using cookies array (Lambda Function URL handles it separately)
   const { "set-cookie": _sc, ...headersWithoutSetCookie } = r.headers ?? {};
 
+  // downloadAs → Content-Disposition (skipped if user already set one explicitly)
+  const explicitDisposition =
+    r.headers?.["content-disposition"] ?? r.headers?.["Content-Disposition"];
+  const disposition =
+    explicitDisposition ?? (r.downloadAs ? formatDisposition(r.downloadAs) : undefined);
+
   return {
     statusCode: r.status,
     headers: {
-      "Content-Type": customContentType ?? "application/json",
+      "Content-Type": finalContentType,
       ...headersWithoutSetCookie,
       ...(resolved ? { "Content-Type": resolved } : {}),
+      ...(disposition ? { "Content-Disposition": disposition } : {}),
     },
     ...(cookies ? { cookies } : {}),
-    body: r.binary ? String(r.body ?? "") : isJson ? JSON.stringify(r.body) : String(r.body ?? ""),
-    ...(r.binary ? { isBase64Encoded: true } : {}),
+    body: bodyStr,
+    ...(isBase64Encoded ? { isBase64Encoded: true } : {}),
   };
 };
 
@@ -133,7 +172,7 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
   const ok: OkHelper = (body?: unknown, status: number = 200): HttpResponse => ({ status, body });
   const fail: FailHelper = (message: string, status: number = 400): HttpResponse => ({ status, body: { error: message } });
 
-  const defaultError = (error: unknown, status: number) => {
+  const defaultError = async (error: unknown, status: number) => {
     console.error(`[effortless:${rt.handlerName}]`, error);
     return toResult({
       status,
@@ -252,15 +291,15 @@ export const wrapApi = <C>(handler: ApiHandler<C>) => {
             response.headers = { ...response.headers, "Cache-Control": buildCacheControl(entry.cache) };
           }
           rt.logExecution(startTime, logInput, response.body);
-          return toResult(response);
+          return await toResult(response);
         }
         rt.logExecution(startTime, logInput, "[stream]");
         return undefined;
       } catch (error) {
         rt.logError(startTime, logInput, error);
         return handler.onError
-          ? toResult(await handler.onError({ error, req, ok, fail, ...ctxProps }))
-          : defaultError(error, 500);
+          ? await toResult(await handler.onError({ error, req, ok, fail, ...ctxProps }))
+          : await defaultError(error, 500);
       }
     } finally {
       if (handler.onCleanup && sharedArgs) {
