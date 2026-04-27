@@ -164,13 +164,64 @@ describe("wrapApi", () => {
       expect(result.headers["Content-Type"]).toBe("text/csv; charset=utf-8");
     });
 
-    it("returns binary response with isBase64Encoded", async () => {
+    it("returns binary response with isBase64Encoded (legacy binary flag)", async () => {
       const fn = wrapApi(makeHandler({
         routes: [{ method: "GET", path: "/img", onRequest: () => ({ status: 200, body: "base64data", binary: true }) }],
       }));
       const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/img" } } }));
       expect(result.isBase64Encoded).toBe(true);
       expect(result.body).toBe("base64data");
+    });
+
+    it("auto-encodes Uint8Array body as base64", async () => {
+      const bytes = new Uint8Array([1, 2, 3, 4, 5]);
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/bin", onRequest: () => ({ status: 200, body: bytes }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/bin" } } }));
+      expect(result.isBase64Encoded).toBe(true);
+      expect(result.body).toBe(Buffer.from(bytes).toString("base64"));
+      expect(result.headers["Content-Type"]).toBe("application/octet-stream");
+    });
+
+    it("auto-encodes Buffer body as base64", async () => {
+      const buf = Buffer.from("hello world");
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/bin", onRequest: () => ({ status: 200, body: buf }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/bin" } } }));
+      expect(result.isBase64Encoded).toBe(true);
+      expect(result.body).toBe(buf.toString("base64"));
+      expect(result.headers["Content-Type"]).toBe("application/octet-stream");
+    });
+
+    it("auto-encodes Blob body and uses Blob.type as Content-Type", async () => {
+      const blob = new Blob(["hello"], { type: "image/png" });
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/img", onRequest: () => ({ status: 200, body: blob }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/img" } } }));
+      expect(result.isBase64Encoded).toBe(true);
+      expect(result.body).toBe(Buffer.from("hello").toString("base64"));
+      expect(result.headers["Content-Type"]).toBe("image/png");
+    });
+
+    it("Blob without type defaults to octet-stream", async () => {
+      const blob = new Blob(["hi"]);
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/bin", onRequest: () => ({ status: 200, body: blob }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/bin" } } }));
+      expect(result.headers["Content-Type"]).toBe("application/octet-stream");
+    });
+
+    it("explicit contentType overrides Blob.type", async () => {
+      const blob = new Blob(["hi"], { type: "text/plain" });
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/bin", onRequest: () => ({ status: 200, body: blob, contentType: "html" as any }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/bin" } } }));
+      expect(result.headers["Content-Type"]).toBe("text/html; charset=utf-8");
     });
 
     it("uses custom content-type header", async () => {
@@ -183,6 +234,67 @@ describe("wrapApi", () => {
       }));
       const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/custom" } } }));
       expect(result.headers["Content-Type"]).toBe("application/octet-stream");
+    });
+  });
+
+  // ============ downloadAs ============
+
+  describe("downloadAs", () => {
+    it("sets Content-Disposition with filename for JSON body", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/data", onRequest: () => ({ status: 200, body: { a: 1 }, downloadAs: "data.json" }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/data" } } }));
+      expect(result.headers["Content-Disposition"]).toBe('attachment; filename="data.json"');
+      expect(result.body).toBe(JSON.stringify({ a: 1 }));
+    });
+
+    it("sets Content-Disposition for text body", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/log", onRequest: () => ({ status: 200, body: "line", contentType: "text" as any, downloadAs: "log.txt" }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/log" } } }));
+      expect(result.headers["Content-Disposition"]).toBe('attachment; filename="log.txt"');
+    });
+
+    it("sets Content-Disposition for binary body", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/file", onRequest: () => ({ status: 200, body: Buffer.from("xy"), downloadAs: "file.bin" }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/file" } } }));
+      expect(result.headers["Content-Disposition"]).toBe('attachment; filename="file.bin"');
+      expect(result.isBase64Encoded).toBe(true);
+    });
+
+    it("encodes non-ASCII filenames per RFC 5987", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/data", onRequest: () => ({ status: 200, body: "x", downloadAs: "отчёт.csv" }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/data" } } }));
+      expect(result.headers["Content-Disposition"]).toBe(
+        `attachment; filename="_____.csv"; filename*=UTF-8''${encodeURIComponent("отчёт.csv")}`
+      );
+    });
+
+    it("explicit Content-Disposition header wins over downloadAs", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/data", onRequest: () => ({
+          status: 200,
+          body: "x",
+          downloadAs: "ignored.txt",
+          headers: { "Content-Disposition": "inline" },
+        }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/data" } } }));
+      expect(result.headers["Content-Disposition"]).toBe("inline");
+    });
+
+    it("does not set Content-Disposition when downloadAs is absent", async () => {
+      const fn = wrapApi(makeHandler({
+        routes: [{ method: "GET", path: "/data", onRequest: () => ({ status: 200, body: { a: 1 } }) }],
+      }));
+      const result = await fn(makeEvent({ requestContext: { http: { method: "GET", path: "/api/data" } } }));
+      expect(result.headers["Content-Disposition"]).toBeUndefined();
     });
   });
 

@@ -30,7 +30,12 @@ export type HttpRequest = {
 export type HttpResponse = {
   /** HTTP status code (e.g., 200, 404, 500) */
   status: number;
-  /** Response body — JSON-serialized by default, or sent as string when contentType is set */
+  /**
+   * Response body. Type determines serialization:
+   * - `Uint8Array` (incl. `Buffer`) — sent as binary, base64-encoded
+   * - `Blob` — sent as binary, base64-encoded; `Blob.type` is used as Content-Type when not set explicitly
+   * - other values — JSON-serialized by default, or sent as string when `contentType` is set
+   */
   body?: unknown;
   /**
    * Short content-type alias. Resolves to full MIME type automatically:
@@ -53,10 +58,14 @@ export type HttpResponse = {
    */
   cookies?: string[];
   /**
-   * Set to `true` to return binary data.
-   * When enabled, `body` must be a base64-encoded string and the response
-   * will include `isBase64Encoded: true` so Lambda Function URLs / API Gateway
-   * decode it back to binary for the client.
+   * Force the client to download the response as a file with the given filename.
+   * Sets `Content-Disposition: attachment; filename="<value>"`. Works with any body type
+   * (JSON, text, binary). An explicit `Content-Disposition` header overrides this.
+   */
+  downloadAs?: string;
+  /**
+   * Set to `true` to return binary data when `body` is already a base64-encoded string.
+   * Prefer returning `Uint8Array` / `Buffer` / `Blob` directly — the runtime detects them automatically.
    */
   binary?: boolean;
 };
@@ -78,8 +87,8 @@ export type ResponseStream = {
 export type StaticFiles = {
   /** Read file as UTF-8 string */
   read(path: string): string;
-  /** Read file as Buffer (for binary content) */
-  readBuffer(path: string): Buffer;
+  /** Read file as raw bytes (for binary content) */
+  readBytes(path: string): Uint8Array;
   /** Resolve absolute path to the bundled file */
   path(path: string): string;
 };

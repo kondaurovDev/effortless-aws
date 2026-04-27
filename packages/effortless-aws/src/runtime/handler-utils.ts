@@ -187,7 +187,7 @@ const resolvePath = (filePath: string): string => join(process.cwd(), filePath);
 /** Singleton files service — stateless, safe to reuse */
 const staticFiles = {
   read: (filePath: string): string => readFileSync(resolvePath(filePath), "utf-8"),
-  readBuffer: (filePath: string): Buffer => readFileSync(resolvePath(filePath)),
+  readBytes: (filePath: string): Uint8Array => readFileSync(resolvePath(filePath)),
   path: resolvePath,
 };
 
